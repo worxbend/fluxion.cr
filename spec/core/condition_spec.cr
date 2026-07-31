@@ -50,13 +50,13 @@ describe Fluxion::Condition do
 
   it "requires every command in `commands`" do
     condition = Fluxion::Condition.new(required_commands: %w[git curl])
-    condition.matches?(fedora) { |c| c == "git" }.should be_false
+    condition.matches?(fedora) { |command| command == "git" }.should be_false
     condition.matches?(fedora) { true }.should be_true
   end
 
   it "requires only one command in `commandExists`" do
     condition = Fluxion::Condition.new(any_commands: %w[apt dnf])
-    condition.matches?(fedora) { |c| c == "dnf" }.should be_true
+    condition.matches?(fedora) { |command| command == "dnf" }.should be_true
     condition.matches?(fedora) { false }.should be_false
   end
 
@@ -87,7 +87,7 @@ describe Fluxion::Condition do
 
     it "names the first missing required command" do
       condition = Fluxion::Condition.new(required_commands: %w[git curl])
-      condition.unmet_reason(fedora) { |c| c == "git" }.should eq("curl is not on PATH")
+      condition.unmet_reason(fedora) { |command| command == "git" }.should eq("curl is not on PATH")
     end
 
     it "reports the whole set when no optional command is present" do

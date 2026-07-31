@@ -114,7 +114,7 @@ module Fluxion
         return "none of [#{@any_commands.join(", ")}] is on PATH"
       end
 
-      unless @branches.empty? || @branches.any? { |branch| branch.matches?(facts, command_exists) }
+      unless @branches.empty? || @branches.any?(&.matches?(facts, command_exists))
         return "no oneOf branch matched"
       end
 

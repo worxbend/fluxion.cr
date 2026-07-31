@@ -1,0 +1,309 @@
+profile: fedora-workstation
+os:
+  type: fedora
+  release: "44"
+
+jobs:
+  - name: system-foundation
+    description: "Enable Fedora repositories and install base runtime packages"
+    restartPolicy:
+      type: none
+    continueOnModuleError: false
+    steps:
+      - type: packages
+        name: repository-trust-prerequisites
+        packageManager: dnf
+        continueOnError: false
+        packages:
+          - ca-certificates
+          - gnupg2
+
+      - type: rpm-repository
+        name: rpmfusion-free
+        id: rpmfusion-free
+        baseUrl: https://download1.rpmfusion.org/free/fedora/releases/$releasever/Everything/$basearch/os/
+        repoFile: /etc/yum.repos.d/rpmfusion-free.repo
+        gpgKeyUrl: https://rpmfusion.org/keys?action=AttachFile&do=get&target=RPM-GPG-KEY-rpmfusion-free-fedora
+        gpgCheck: true
+        checksum:
+          algorithm: sha256
+          value: a409544c0eb39b55b1f44c19bcc7ff7844af4533e4aca831d8bac185e35a4961
+
+      - type: rpm-repository
+        name: rpmfusion-nonfree
+        id: rpmfusion-nonfree
+        baseUrl: https://download1.rpmfusion.org/nonfree/fedora/releases/$releasever/Everything/$basearch/os/
+        repoFile: /etc/yum.repos.d/rpmfusion-nonfree.repo
+        gpgKeyUrl: https://rpmfusion.org/keys?action=AttachFile&do=get&target=RPM-GPG-KEY-rpmfusion-nonfree-fedora
+        gpgCheck: true
+        checksum:
+          algorithm: sha256
+          value: ea8cc48702438119dde96cca9f094fb4807db63e2fbad2e80091121556ab853f
+
+      - type: rpm-repository
+        name: vscode
+        id: code
+        baseUrl: https://packages.microsoft.com/yumrepos/vscode
+        repoFile: /etc/yum.repos.d/vscode.repo
+        gpgKeyUrl: https://packages.microsoft.com/keys/microsoft.asc
+        gpgCheck: true
+        checksum:
+          algorithm: sha256
+          value: 2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6
+
+      - type: system-update
+        name: fedora-system-update
+        packageManager: dnf
+        distUpgrade: false
+        refreshOnly: false
+        continueOnError: false
+
+      - type: packages
+        name: base-dependencies
+        packageManager: dnf
+        continueOnError: true
+        packages:
+          - curl
+          - wget
+          - util-linux-user
+          - fuse3
+          - fedora-workstation-repositories
+          - pipewire
+          - pipewire-alsa
+          - pipewire-pulseaudio
+          - pipewire-jack-audio-connection-kit
+          - wireplumber
+
+  - name: dotfiles
+    description: "Fetch dotbot-go and apply dotfiles"
+    dependsOn:
+      - system-foundation
+    restartPolicy:
+      type: none
+    continueOnModuleError: false
+    steps:
+      - type: dotbot
+        name: dotfiles-core
+        installerVersion: "v0.4.2"
+        config: "~/.system-bootstrap/.files/install.conf.yaml"
+        dotbotBinary: dotbot
+        probeCommand: "test -f ~/.zshrc && test -f ~/.tmux.conf"
+
+  - name: shell-foundation
+    description: "Install zsh, set it as login shell, and install Oh My Zsh"
+    dependsOn:
+      - system-foundation
+    restartPolicy:
+      type: prompt-logout
+      message: "Default shell changed to zsh. Log out and back in, then re-run fluxion."
+    continueOnModuleError: false
+    steps:
+      - type: packages
+        name: shell-packages
+        packageManager: dnf
+        continueOnError: false
+        packages:
+          - zsh
+          - fzf
+          - git
+
+      - type: default-shell
+        name: zsh-default
+        shellPath: /bin/zsh
+        probeCommand: "getent passwd $USER | cut -d: -f7 | grep -q zsh"
+
+      - type: oh-my-zsh
+        name: oh-my-zsh
+        installDir: "~/.oh-my-zsh"
+        revision: c5ba74cf02cce4c342153f79089100194f30940f
+        sha256: 95118b50d062198597e2b73d3a57b609fd95ca68cdc86faf4460d955f0172b61
+        probeCommand: "test -d ~/.oh-my-zsh"
+
+  - name: development
+    description: "Install package-managed CLI and development tools"
+    dependsOn:
+      - shell-foundation
+    restartPolicy:
+      type: none
+    continueOnModuleError: true
+    steps:
+      - type: packages
+        name: cli-and-dev-tools
+        packageManager: dnf
+        continueOnError: true
+        packages:
+          - alacritty
+          - kitty
+          - bat
+          - btop
+          - fd
+          - htop
+          - wl-clipboard
+          - yq
+          - jq
+          - net-tools
+          - hyperfine
+          - asciinema
+          - gdu
+          - fastfetch
+          - tig
+          - mtr
+          - nmap
+          - httpie
+          - ripgrep
+          - gcc
+          - gcc-c++
+          - clang
+          - clangd
+          - make
+          - cmake
+          - meson
+          - ninja-build
+          - podman
+          - podman-docker
+          - buildah
+          - skopeo
+          - code
+
+  - name: shell-tools
+    description: "Apply Git defaults and clone shell plugins"
+    dependsOn:
+      - development
+      - dotfiles
+    restartPolicy:
+      type: requires-new-shell
+      shell: zsh
+    continueOnModuleError: true
+    steps:
+      - type: git-config
+        name: git-defaults
+        scope: global
+        entries:
+          user.email: you@example.com
+          user.name: Your Name
+          pull.rebase: "true"
+          init.defaultBranch: main
+        continueOnError: true
+
+      - type: git-repo
+        name: zsh-plugin-repositories
+        repos:
+          - url: https://github.com/zsh-users/zsh-syntax-highlighting.git
+            dest: "${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting"
+            ref: 1d85c692615a25fe2293bdd44b34c217d5d2bf04
+            depth: 1
+          - url: https://github.com/zsh-users/zsh-autosuggestions.git
+            dest: "${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
+            ref: 85919cd1ffa7d2d5412f6d3fe437ebdbeeec4fc5
+            depth: 1
+          - url: https://github.com/zsh-users/zsh-history-substring-search.git
+            dest: "${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-history-substring-search"
+            ref: 14c8d2e0ffaee98f2df9850b19944f32546fdea5
+            depth: 1
+
+  - name: toolchains
+    description: "Install language toolchains and user-level packages"
+    dependsOn:
+      - shell-tools
+    restartPolicy:
+      type: requires-new-shell
+      shell: zsh
+    continueOnModuleError: true
+    steps:
+      - type: toolchain
+        name: rustup
+        kind: RUSTUP
+        installScriptUrl: "https://sh.rustup.rs"
+        sha256: 6c30b75a75b28a96fd913a037c8581b580080b6ee9b8169a3c0feb1af7fe8caf
+        installArgs:
+          - "-y"
+          - "--no-modify-path"
+        probeCommand: "test -f ~/.cargo/bin/rustup"
+
+      - type: toolchain
+        name: sdkman
+        kind: SDKMAN
+        installScriptUrl: "https://get.sdkman.io"
+        sha256: b7bda3ce24f631d54d6b6b24f9ca32bc0a0e12dde12b2c3c73b1e28c5c36a364
+        installArgs: []
+        probeCommand: "test -d ~/.sdkman && test -f ~/.sdkman/bin/sdkman-init.sh"
+
+      - type: toolchain
+        name: cargo-binstall
+        kind: GENERIC
+        installScriptUrl: "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/e00d2c94cc0067b77737821097a62d91c0301baa/install-from-binstall-release.sh"
+        sha256: d3a93702160e0ec03e2a4e996855db1f01adee801fb84a43add24e0877ef8eae
+        installArgs: []
+        probeCommand: "test -f ~/.cargo/bin/cargo-binstall"
+
+      - type: shell-command
+        name: sdkman-packages
+        commands:
+          - "source \"$HOME/.sdkman/bin/sdkman-init.sh\" && sdk install java"
+          - "source \"$HOME/.sdkman/bin/sdkman-init.sh\" && sdk install gradle"
+          - "source \"$HOME/.sdkman/bin/sdkman-init.sh\" && sdk install maven"
+        continueOnError: true
+
+      - type: tool-packages
+        name: cargo-packages
+        backend: cargo-binstall
+        packages:
+          - eza
+          - lsd
+          - fd-find
+          - ripgrep
+          - bottom
+          - broot
+        continueOnError: true
+
+  - name: fonts
+    description: "Install Nerd Fonts with the pinned Fluxion installer"
+    dependsOn:
+      - development
+    restartPolicy:
+      type: none
+    continueOnModuleError: true
+    steps:
+      - type: nerd-fonts
+        name: nerd-fonts-install
+        installerVersion: "v1.0.7"
+        nerdfontBinary: "nerd-fonts-installer"
+        config:
+          release: "v3.4.0"
+          destination: "~/.fonts"
+          refreshFontCache: true
+          families:
+            - JetBrainsMono
+            - Hack
+            - FiraCode
+            - CascadiaCode
+        probeCommand: "fc-list | grep -qi 'JetBrainsMono Nerd'"
+
+  - name: desktop-apps
+    description: "Install desktop applications from Flathub"
+    dependsOn:
+      - development
+    restartPolicy:
+      type: none
+    continueOnModuleError: true
+    steps:
+      - type: flatpak-remote
+        name: flathub-remote
+        remote: flathub
+        url: https://flathub.org/repo/flathub.flatpakrepo
+        checksum:
+          algorithm: sha256
+          value: 3371dd250e61d9e1633630073fefda153cd4426f72f4afa0c3373ae2e8fea03a
+
+      - type: flatpak
+        name: desktop-flatpaks
+        remote: flathub
+        appIds:
+          - io.gitlab.librewolf-community
+          - com.google.Chrome
+          - com.brave.Browser
+          - dev.zed.Zed
+          - org.telegram.desktop
+          - com.discordapp.Discord
+          - com.spotify.Client
+          - com.github.tchx84.Flatseal

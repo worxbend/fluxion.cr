@@ -54,7 +54,14 @@ module Fluxion
 
     # Manifest-level `when` guard. Nil for the stable jobs/steps schema, which
     # has no per-step conditions.
-    getter condition : Condition?
+    #
+    # Settable because a manifest plan entry carries its `when` and
+    # `execution.continueOnError` alongside the spec the step is built from,
+    # and threading both through every kind's constructor would add two
+    # parameters to twenty-seven signatures for no gain.
+    property condition : Condition?
+
+    setter continue_on_error : Bool
 
     def initialize(
       @name : String,

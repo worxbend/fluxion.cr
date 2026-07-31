@@ -1,0 +1,109 @@
+profile: arch-workstation
+os:
+  type: arch
+
+jobs:
+  - name: system-foundation
+    description: "Install base Arch packages from official repositories"
+    restartPolicy:
+      type: none
+    continueOnModuleError: true
+    steps:
+      - type: packages
+        name: core-cli-tools
+        packageManager: pacman
+        continueOnError: true
+        packages:
+          - git
+          - curl
+          - wget
+          - htop
+          - ripgrep
+          - fd
+          - bat
+          - zsh
+          - tmux
+          - neovim
+          - just
+          - zellij
+          - fzf
+          - jq
+          - tree
+
+      - type: packages
+        name: dev-tools
+        packageManager: pacman
+        continueOnError: true
+        packages:
+          - gcc
+          - clang
+          - cmake
+          - make
+          - jdk21-openjdk
+          - nodejs
+          - go
+          - python
+          - python-pip
+          - rust
+
+  - name: aur-packages
+    description: "Install user-facing packages from AUR"
+    dependsOn:
+      - system-foundation
+    restartPolicy:
+      type: none
+    continueOnModuleError: true
+    steps:
+      - type: packages
+        name: aur-extras
+        packageManager: paru
+        continueOnError: true
+        packages:
+          - jetbrains-toolbox
+          - google-chrome
+          - visual-studio-code-bin
+
+  - name: desktop-apps
+    description: "Install desktop applications from Flathub"
+    dependsOn:
+      - system-foundation
+    restartPolicy:
+      type: none
+    continueOnModuleError: true
+    steps:
+      - type: flatpak-remote
+        name: flathub-remote
+        remote: flathub
+        url: https://flathub.org/repo/flathub.flatpakrepo
+        checksum:
+          algorithm: sha256
+          value: 3371dd250e61d9e1633630073fefda153cd4426f72f4afa0c3373ae2e8fea03a
+
+      - type: flatpak
+        name: desktop-flatpaks
+        remote: flathub
+        appIds:
+          - com.spotify.Client
+          - org.telegram.desktop
+          - com.obsproject.Studio
+
+  - name: shell
+    description: "Switch to zsh and install Oh My Zsh"
+    dependsOn:
+      - system-foundation
+    restartPolicy:
+      type: prompt-logout
+      message: "Default shell changed to zsh. Log out and back in, then re-run fluxion."
+    continueOnModuleError: false
+    steps:
+      - type: default-shell
+        name: zsh-default
+        shellPath: /bin/zsh
+        probeCommand: "getent passwd $USER | cut -d: -f7 | grep -q zsh"
+
+      - type: oh-my-zsh
+        name: oh-my-zsh
+        installDir: "~/.oh-my-zsh"
+        revision: c5ba74cf02cce4c342153f79089100194f30940f
+        sha256: 95118b50d062198597e2b73d3a57b609fd95ca68cdc86faf4460d955f0172b61
+        probeCommand: "test -d ~/.oh-my-zsh"

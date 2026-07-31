@@ -194,7 +194,7 @@ module Fluxion
     getter server : String?
     getter config : String
     getter sig_level : String?
-    getter include : String?
+    getter include_path : String?
     getter? enabled : Bool
 
     def initialize(
@@ -203,7 +203,7 @@ module Fluxion
       @server : String? = nil,
       @config : String = DEFAULT_CONFIG,
       @sig_level : String? = nil,
-      @include : String? = nil,
+      @include_path : String? = nil,
       @enabled : Bool = true,
       description : String? = nil,
       continue_on_error : Bool = false,

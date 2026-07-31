@@ -62,7 +62,11 @@ module Fluxion::Executor
   end
 
   # What a finished run amounted to.
-  struct RunSummary
+  #
+  # A class rather than a struct: it is threaded through job and step execution
+  # and mutated there, and a struct would be copied at each call so every
+  # increment would be lost.
+  class RunSummary
     property succeeded = 0
     property failed = 0
     property skipped = 0
@@ -75,6 +79,9 @@ module Fluxion::Executor
 
     # Where to resume from, when the run stopped early.
     property next_job : String?
+
+    def initialize
+    end
 
     def record(result : StepResult) : Nil
       case result
@@ -119,10 +126,11 @@ module Fluxion::Executor
             cancellation : CancellationSignal = CancellationSignal.new) : RunSummary
       summary = RunSummary.new
       jobs = select_jobs(profile, options)
+      recorder = Recorder.new(@state, options)
 
       # A source setup configures a repository the packages that follow depend
       # on, so it runs first and a failure there stops the run.
-      unless run_source_setups(profile, options, listener, summary, cancellation)
+      unless run_source_setups(profile, options, listener, summary, cancellation, recorder)
         return summary
       end
 
@@ -142,12 +150,26 @@ module Fluxion::Executor
           next
         end
 
-        outcome = run_job(job, options, listener, summary, cancellation)
+        fingerprint = State::Fingerprint.of(job)
+        if recorder.already_completed?(job, fingerprint)
+          # A completed job is only skipped while its fingerprint still
+          # matches, so editing a package list makes it run again rather than
+          # being silently considered done.
+          listener.on_event(ExecutionEvent.phase_started(job.name))
+          listener.on_event(ExecutionEvent.phase_completed(job.name))
+          completed << job.name
+          next
+        end
+
+        outcome = run_job(job, options, listener, summary, cancellation, recorder)
         completed << job.name
 
         case outcome
-        in JobOutcome::Completed then next
+        in JobOutcome::Completed
+          recorder.job_completed(job, fingerprint)
+          next
         in JobOutcome::Failed
+          recorder.job_failed(job, fingerprint)
           summary.failed_jobs << job.name
           listener.on_event(ExecutionEvent.phase_failed(job.name))
           next
@@ -155,14 +177,103 @@ module Fluxion::Executor
           # A logout checkpoint or an interrupt: state is written and a resume
           # point recorded, then the run stops cleanly.
           summary.next_job = jobs[(jobs.index(job) || 0) + 1]?.try(&.name)
+          recorder.resume_at(summary.next_job)
           break
         in JobOutcome::Cancelled
           summary.next_job = job.name
+          recorder.resume_at(job.name)
           break
         end
       end
 
+      recorder.resume_at(nil) if summary.next_job.nil? && summary.ok?
+      recorder.flush
       summary
+    end
+
+    # Buffers state changes and writes them once.
+    #
+    # Writing per item would multiply a large profile's run by hundreds of
+    # fsyncs; buffering keeps the file consistent with what actually happened
+    # while touching the disk once. Nothing is recorded for a read-only run —
+    # a dry run that claimed work was done would make the next real run skip it.
+    private class Recorder
+      def initialize(@store : State::Store?, @options : RunOptions)
+        @document = nil.as(State::Document?)
+        @dirty = false
+      end
+
+      def already_completed?(job : Job, fingerprint : String) : Bool
+        return false unless @options.mode.trusts_state?
+        document.try(&.job_completed?(job.name, fingerprint)) || false
+      end
+
+      def item_succeeded(item : ModuleItem, result : StepResult::Success) : Nil
+        return unless recording?
+        document.try do |state|
+          state.record(State::ItemRecord.new(
+            profile: @options.profile_name,
+            step: item.step_name,
+            item_key: item.key,
+            item_type: item.item_type.json_name,
+            completed_at: Time.utc,
+            version: result.detected_version,
+            checksum: result.checksum,
+          ))
+          @dirty = true
+        end
+      end
+
+      def job_completed(job : Job, fingerprint : String) : Nil
+        record_job(job, "completed", fingerprint)
+      end
+
+      def job_failed(job : Job, fingerprint : String) : Nil
+        record_job(job, "failed", fingerprint)
+      end
+
+      def resume_at(job : String?) : Nil
+        return unless recording?
+        document.try do |state|
+          state.next_job = job
+          @dirty = true
+        end
+      end
+
+      def flush : Nil
+        return unless @dirty
+        store = @store
+        state = @document
+        return unless store && state
+        store.save(state)
+      rescue ExecutionError
+        # A run that installed everything correctly should not be reported as
+        # failed because the bookkeeping could not be written; the next run
+        # simply re-probes.
+      end
+
+      private def record_job(job : Job, status : String, fingerprint : String) : Nil
+        return unless recording?
+        document.try do |state|
+          state.record(State::JobRecord.new(job.name, status, Time.utc, fingerprint))
+          @dirty = true
+        end
+      end
+
+      private def recording? : Bool
+        !@options.read_only? && !@store.nil?
+      end
+
+      private def document : State::Document?
+        return @document if @document
+        store = @store
+        return unless store
+        @document = store.load(@options.profile_name)
+      rescue ExecutionError
+        # An unreadable state file is not evidence about the host, so the run
+        # continues with live probes and simply records nothing.
+        nil
+      end
     end
 
     private enum JobOutcome
@@ -173,7 +284,8 @@ module Fluxion::Executor
     end
 
     private def run_job(job : Job, options : RunOptions, listener : ExecutionListener,
-                        summary : RunSummary, cancellation : CancellationSignal) : JobOutcome
+                        summary : RunSummary, cancellation : CancellationSignal,
+                        recorder : Recorder) : JobOutcome
       listener.on_event(ExecutionEvent.phase_started(job.name))
       failed = false
 
@@ -187,7 +299,7 @@ module Fluxion::Executor
           return JobOutcome::Halted
         end
 
-        step_failed = run_step(step, options, listener, summary, cancellation)
+        step_failed = run_step(step, options, listener, summary, cancellation, recorder)
         failed ||= step_failed
         return JobOutcome::Failed if step_failed && !job.continue_on_step_error?
       end
@@ -219,7 +331,8 @@ module Fluxion::Executor
 
     # Returns true when the step should be treated as failed.
     private def run_step(step : Step, options : RunOptions, listener : ExecutionListener,
-                         summary : RunSummary, cancellation : CancellationSignal) : Bool
+                         summary : RunSummary, cancellation : CancellationSignal,
+                         recorder : Recorder? = nil) : Bool
       executor = @executors.for(step)
       unless executor
         listener.on_event(ExecutionEvent.step_started(step.name))
@@ -239,6 +352,7 @@ module Fluxion::Executor
 
           result = run_item(step, item, executor, options, listener)
           summary.record(result)
+          recorder.try(&.item_succeeded(item, result)) if result.is_a?(StepResult::Success)
           next unless result.is_a?(StepResult::Failure)
 
           any_failed = true
@@ -337,7 +451,8 @@ module Fluxion::Executor
     end
 
     private def run_source_setups(profile : Profile, options : RunOptions, listener : ExecutionListener,
-                                  summary : RunSummary, cancellation : CancellationSignal) : Bool
+                                  summary : RunSummary, cancellation : CancellationSignal,
+                                  recorder : Recorder? = nil) : Bool
       profile.source_setups.each do |setup|
         return false if cancellation.cancelled?
 
@@ -355,7 +470,7 @@ module Fluxion::Executor
           return options.read_only?
         end
 
-        return false if run_step(setup.step, options, listener, summary, cancellation) && !options.read_only?
+        return false if run_step(setup.step, options, listener, summary, cancellation, recorder) && !options.read_only?
       end
 
       true

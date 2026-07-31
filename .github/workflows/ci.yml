@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: crystallang/crystal:1.21.0-alpine
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache shards
+        uses: actions/cache@v4
+        with:
+          path: lib
+          key: shards-${{ hashFiles('shard.lock') }}
+
+      - name: Install dependencies
+        run: shards install --frozen
+
+      - name: Check formatting
+        run: crystal tool format --check src spec
+
+      - name: Lint
+        run: |
+          shards build ameba
+          ./bin/ameba src spec
+
+      - name: Test
+        run: crystal spec
+
+      - name: Build
+        run: shards build --error-on-warnings
+
+      # The example profiles exercise every step kind against the real schema,
+      # so a regression in any parser shows up here even if a spec missed it.
+      - name: Validate the example profiles
+        run: |
+          for profile in examples/*.yaml; do
+            echo "validating $profile"
+            ./bin/fluxion validate -c "$profile" --no-color
+          done
+
+      - name: Preview the example profiles
+        run: |
+          for profile in examples/*.yaml; do
+            ./bin/fluxion dry-run -c "$profile" --no-color > /dev/null
+          done
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the installer
+        run: shellcheck --shell=sh site/install.sh

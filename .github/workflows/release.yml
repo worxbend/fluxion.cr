@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build a static binary
+        # Alpine and --static so the release runs on any glibc or musl host
+        # without a runtime dependency the user has to think about.
+        run: |
+          docker run --rm -v "$PWD":/work -w /work \
+            crystallang/crystal:1.21.0-alpine \
+            sh -c 'shards install --frozen --production && shards build --release --static --no-debug'
+
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ASSET="fluxion-${VERSION}-linux-${{ matrix.arch }}.tar.gz"
+          tar -czf "$ASSET" -C bin fluxion
+          sha256sum "$ASSET" > "$ASSET.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fluxion-${{ matrix.arch }}
+          path: |
+            *.tar.gz
+            *.sha256
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Collect the checksums
+        # One file covering every asset, because that is what install.sh reads
+        # before it writes anything.
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          cd artifacts
+          cat *.sha256 > "fluxion-${VERSION}-checksums.sha256"
+          rm -f *.tar.gz.sha256
+          ls -la
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.tar.gz
+            artifacts/fluxion-*-checksums.sha256
+            site/install.sh
+          generate_release_notes: true
+
+  pages:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./site
+          destination: ./_site
+      - uses: actions/upload-pages-artifact@v3
+      - id: deploy
+        uses: actions/deploy-pages@v4

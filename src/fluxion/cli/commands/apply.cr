@@ -67,20 +67,36 @@ module Fluxion::CLI
           "Refusing to apply as root: run as your own user and let Fluxion escalate per step")
       end
 
-      header(profile, options)
-
-      reporter = Reporter.new(@output, @stream_output)
-      cancellation = install_interrupt_handler(reporter)
-
+      cancellation = install_interrupt_handler
       orchestrator = Executor::Orchestrator.new(
         Executor::SystemShellRunner.new,
         state: State::Store.new,
       )
 
+      # The TUI needs a real terminal on both ends. In CI, a pipe, or a build
+      # tool it is not available regardless of the flag, so a run never blocks
+      # on a UI nobody can see.
+      if @globals.use_tui? && TUI::App.available?
+        return run_with_tui(profile, options, orchestrator, cancellation)
+      end
+
+      header(profile, options)
+      reporter = Reporter.new(@output, @stream_output)
       summary = orchestrator.run(profile, options, reporter, cancellation)
       reporter.print_summary
 
       exit_code_for(summary, cancellation)
+    end
+
+    private def run_with_tui(profile : Profile, options : Executor::RunOptions,
+                             orchestrator : Executor::Orchestrator,
+                             cancellation : CancellationSignal) : ExitCode
+      outcome = TUI::App.new(profile, options).run(orchestrator, cancellation)
+      # Nil means the user backed out of the selector, which is a decision
+      # rather than a failure.
+      return ExitCode::Success unless outcome
+
+      exit_code_for(outcome.summary, cancellation)
     end
 
     private def header(profile : Profile, options : Executor::RunOptions) : Nil
@@ -100,7 +116,7 @@ module Fluxion::CLI
     # The first interrupt asks for a clean stop at the next item boundary; the
     # second gives up on that and exits, because a user pressing Ctrl-C twice
     # has stopped caring about a tidy shutdown.
-    private def install_interrupt_handler(reporter : Reporter) : CancellationSignal
+    private def install_interrupt_handler : CancellationSignal
       signal = CancellationSignal.new
 
       Process.on_terminate do |_reason|

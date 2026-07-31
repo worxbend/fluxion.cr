@@ -1,5 +1,6 @@
 require "./crytui"
 require "./fluxion/version"
+require "./fluxion/core"
 
 # Fluxion turns a fresh Linux machine into your machine: one YAML profile,
 # one preview, one run.

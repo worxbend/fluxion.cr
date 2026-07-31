@@ -7,8 +7,10 @@ require "./executor"
 require "./cli/style"
 require "./cli/exit_code"
 require "./cli/command"
+require "./cli/reporter"
 require "./cli/commands/validate"
 require "./cli/commands/plan"
+require "./cli/commands/apply"
 require "./cli/app"
 
 # The command-line interface.

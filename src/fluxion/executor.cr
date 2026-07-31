@@ -1,8 +1,12 @@
 require "./core"
 require "./host"
+require "./state"
 require "./executor/redaction"
 require "./executor/command"
 require "./executor/shell_runner"
+require "./executor/probe"
+require "./executor/step_executor"
+require "./executor/orchestrator"
 
 # Runs the work a profile describes.
 #

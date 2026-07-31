@@ -1,4 +1,11 @@
 module Fluxion
+  # Crystal exposes no effective-UID accessor, and the distinction matters:
+  # under `sudo` the real UID is still the user's while the effective one is
+  # root, and it is the effective one that decides what a step can do.
+  lib LibCredentials
+    fun geteuid : UInt32
+  end
+
   # Detects what machine Fluxion is running on.
   #
   # Manifest `when` rules match against this, never against the profile's
@@ -115,7 +122,7 @@ module Fluxion
     def target_user(configured : String? = nil) : String
       return configured if configured && !configured.empty?
 
-      if Process.uid == 0
+      if root?
         sudo_user = ENV["SUDO_USER"]?
         return sudo_user if sudo_user && SAFE_USERNAME.matches?(sudo_user)
       end
@@ -127,6 +134,10 @@ module Fluxion
 
     def home : String
       ENV["HOME"]? || Path.home.to_s
+    end
+
+    def root? : Bool
+      LibCredentials.geteuid == 0
     end
   end
 end

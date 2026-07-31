@@ -13,6 +13,8 @@ module Fluxion::CLI
 
     def commands : Array(Command)
       [
+        ApplyCommand.new(@globals, @output, @error_output),
+        DryRunCommand.new(@globals, @output, @error_output),
         PlanCommand.new(@globals, @output, @error_output),
         ValidateCommand.new(@globals, @output, @error_output),
         ListCommand.new(@globals, @output, @error_output),

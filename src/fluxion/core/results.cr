@@ -145,19 +145,17 @@ module Fluxion
     end
 
     def to_s(io : IO) : Nil
-      case self
-      in InstalledFromState
+      case status = self
+      when InstalledFromState
         io << "installed (state"
-        version = self.version
-        io << ": " << version if version
+        status.version.try { |value| io << ": " << value }
         io << ')'
-      in InstalledByProbe
+      when InstalledByProbe
         io << "installed (probe"
-        version = detected_version
-        io << ": " << version if version
+        status.detected_version.try { |value| io << ": " << value }
         io << ')'
-      in NotInstalled then io << "not installed"
-      in Unknown      then io << "unknown: " << reason
+      when NotInstalled then io << "not installed"
+      when Unknown      then io << "unknown: " << status.reason
       end
     end
   end

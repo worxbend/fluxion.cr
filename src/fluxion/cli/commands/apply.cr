@@ -1,0 +1,153 @@
+module Fluxion::CLI
+  # `fluxion apply` — execute a profile.
+  #
+  # `dry-run` is the same traversal with mutation switched off, which is what
+  # makes the preview trustworthy: it exercises the same ordering, the same
+  # skip decisions, and the same command construction as the real run.
+  class ApplyCommand < Command
+    def name : String
+      "apply"
+    end
+
+    def summary : String
+      "Apply a bootstrap profile"
+    end
+
+    def usage : String
+      "fluxion apply [-c FILE] [--dry-run] [--job NAME] [--yes]"
+    end
+
+    # Runs with mutation disabled regardless of flags.
+    property? forced_dry_run : Bool = false
+
+    @dry_run = false
+    @probe_only = false
+    @skip_installed = false
+    @reprobe = false
+    @approved = false
+    @stream_output = false
+    @only_jobs = [] of String
+    @from_job : String?
+    @profile_name = "default"
+
+    def register(parser : OptionParser) : Nil
+      parser.on("--dry-run", "Show what would happen without changing anything") { @dry_run = true }
+      parser.on("--job=NAME", "Run only these jobs (repeatable, or comma-separated)") do |value|
+        @only_jobs.concat(value.split(',').map(&.strip).reject(&.empty?))
+      end
+      parser.on("--from-job=NAME", "Start from this job, skipping earlier ones") { |value| @from_job = value }
+      parser.on("-y", "--yes", "Approve items that declared confirm") { @approved = true }
+      parser.on("--skip-already-installed", "Skip work state or a probe says is done") { @skip_installed = true }
+      parser.on("--re-probe", "Ignore saved state and trust only live probes") { @reprobe = true }
+      parser.on("--probe-only", "Probe without installing anything") { @probe_only = true }
+      parser.on("--show-output", "Echo each command's own output") { @stream_output = true }
+      parser.on("--profile=NAME", "State profile name [default: default]") { |value| @profile_name = value }
+    end
+
+    def run(arguments : Array(String)) : ExitCode
+      parse(arguments)
+      profile = load_profile
+
+      dry_run = @dry_run || @forced_dry_run || (profile.policy.dry_run == true)
+      options = Executor::RunOptions.new(
+        mode: Executor::RunMode.from_options(@skip_installed, @reprobe),
+        dry_run: dry_run,
+        probe_only: @probe_only,
+        approved: @approved,
+        only_jobs: @only_jobs,
+        from_job: @from_job,
+        profile_name: @profile_name,
+      )
+
+      # A run that mutates the host as root has no way to drop back to the
+      # user's account for the steps that must not be root-owned, so it is
+      # refused rather than producing a half-root home directory.
+      if !options.read_only? && Host.root?
+        raise Failure.external(
+          "Refusing to apply as root: run as your own user and let Fluxion escalate per step")
+      end
+
+      header(profile, options)
+
+      reporter = Reporter.new(@output, @stream_output)
+      cancellation = install_interrupt_handler(reporter)
+
+      orchestrator = Executor::Orchestrator.new(
+        Executor::SystemShellRunner.new,
+        state: State::Store.new,
+      )
+
+      summary = orchestrator.run(profile, options, reporter, cancellation)
+      reporter.print_summary
+
+      exit_code_for(summary, cancellation)
+    end
+
+    private def header(profile : Profile, options : Executor::RunOptions) : Nil
+      mode = if options.probe_only?
+               Style.cyan("probe-only")
+             elsif options.dry_run?
+               Style.cyan("dry-run")
+             else
+               Style.bold_yellow("live")
+             end
+
+      puts "#{Style.bold("Fluxion")} #{Style.dim("·")} #{profile.name} #{Style.dim("·")} #{mode}"
+      puts "#{Style.dim("Target:")} #{profile.target}   #{Style.dim("Host:")} #{Host.facts}"
+      puts
+    end
+
+    # The first interrupt asks for a clean stop at the next item boundary; the
+    # second gives up on that and exits, because a user pressing Ctrl-C twice
+    # has stopped caring about a tidy shutdown.
+    private def install_interrupt_handler(reporter : Reporter) : CancellationSignal
+      signal = CancellationSignal.new
+
+      Process.on_terminate do |_reason|
+        if signal.cancel
+          @error_output.puts
+          @error_output.puts Style.bold_yellow(
+            "Stopping after the current step; press Ctrl-C again to quit now.")
+        else
+          @error_output.puts Style.red("Interrupted.")
+          exit ExitCode::Cancelled.value
+        end
+      end
+
+      signal
+    end
+
+    private def exit_code_for(summary : Executor::RunSummary, cancellation : CancellationSignal) : ExitCode
+      return ExitCode::Cancelled if cancellation.cancelled?
+      return ExitCode::Paused if summary.paused > 0
+      return ExitCode::ExternalDependencyError unless summary.ok?
+      ExitCode::Success
+    end
+  end
+
+  # `fluxion dry-run` — apply with mutation switched off.
+  #
+  # A separate command rather than a flag alias because it is the one people
+  # reach for first, and it should be impossible to turn into a real run by
+  # editing a single character of a shell history entry.
+  class DryRunCommand < ApplyCommand
+    def name : String
+      "dry-run"
+    end
+
+    def summary : String
+      "Show what would be executed without making any changes"
+    end
+
+    def usage : String
+      "fluxion dry-run [-c FILE]"
+    end
+
+    def initialize(globals : GlobalOptions = GlobalOptions.new,
+                   output : IO = STDOUT,
+                   error_output : IO = STDERR)
+      super
+      self.forced_dry_run = true
+    end
+  end
+end

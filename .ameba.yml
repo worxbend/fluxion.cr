@@ -1,0 +1,16 @@
+Documentation:
+  Enabled: false
+
+Metrics/CyclomaticComplexity:
+  MaxComplexity: 20
+
+Style/RedundantBegin:
+  Enabled: true
+
+Lint/NotNil:
+  Enabled: false
+
+Excluded:
+  - lib
+  - src/crytui
+  - src/crytui.cr

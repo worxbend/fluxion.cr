@@ -1,0 +1,11 @@
+# Generated API documentation (`crystal docs`). Hand-written docs live in docs/.
+/api-docs/
+
+/lib/
+/bin/
+/.shards/
+*.dwarf
+
+# Build output
+/fluxion
+/.crystal/

@@ -11,6 +11,9 @@ require "./cli/reporter"
 require "./cli/commands/validate"
 require "./cli/commands/plan"
 require "./cli/commands/apply"
+require "./cli/commands/status"
+require "./cli/commands/doctor"
+require "./cli/commands/state"
 require "./cli/app"
 
 # The command-line interface.

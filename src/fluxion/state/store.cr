@@ -66,7 +66,15 @@ module Fluxion::State
 
     # Bumped when the shape changes. A file from a newer Fluxion is refused
     # rather than misread.
-    SCHEMA_VERSION = 1
+    #
+    # Numbering continues from the Java implementation, which reached 7, so a
+    # machine that has run both never sees a version go backwards.
+    SCHEMA_VERSION = 8
+
+    # The last schema the Java implementation wrote. Files at or below this are
+    # read through the migration below rather than refused: someone upgrading
+    # should not have to reinstall everything they already have.
+    LEGACY_SCHEMA_VERSION = 7
 
     @[JSON::Field(key: "schemaVersion")]
     property schema_version : Int32
@@ -186,14 +194,75 @@ module Fluxion::State
         raise ExecutionError.new("State file is writable by another account: #{file}")
       end
 
-      document = Document.from_json(File.read(file))
-      if document.schema_version > Document::SCHEMA_VERSION
-        raise ExecutionError.new(
-          "State file was written by a newer Fluxion (schema #{document.schema_version}): #{file}")
-      end
-      document
+      parse(File.read(file), profile, file)
     rescue error : JSON::ParseException
       raise ExecutionError.new("Failed to read state file #{file}: #{error.message}")
+    end
+
+    # Reads either the current shape or the one the Java implementation wrote.
+    def parse(body : String, profile : String, file : String = "<memory>") : Document
+      raw = JSON.parse(body)
+      version = raw["schemaVersion"]?.try(&.as_i?) || 0
+
+      if version > Document::SCHEMA_VERSION
+        raise ExecutionError.new(
+          "State file was written by a newer Fluxion (schema #{version}): #{file}")
+      end
+
+      return migrate(raw, profile) if version <= Document::LEGACY_SCHEMA_VERSION
+      Document.from_json(body)
+    end
+
+    # Maps the Java layout onto this one.
+    #
+    # The vocabulary changed (`phases` became `jobs`, `modules` became `steps`)
+    # but the meaning did not, so the records carry over. `sysbootVersion` is
+    # kept as the recorded version: it says which build did the work, and
+    # rewriting it would lose that.
+    private def migrate(raw : JSON::Any, profile : String) : Document
+      items = (raw["entries"]?.try(&.as_a?) || [] of JSON::Any).compact_map do |entry|
+        key = entry["itemKey"]?.try(&.as_s?)
+        next unless key
+        ItemRecord.new(
+          profile: entry["profileName"]?.try(&.as_s?) || profile,
+          step: entry["moduleName"]?.try(&.as_s?) || "",
+          item_key: key,
+          item_type: (entry["itemType"]?.try(&.as_s?) || "").downcase,
+          completed_at: timestamp(entry["completedAt"]?),
+          version: entry["version"]?.try(&.as_s?),
+          checksum: entry["checksum"]?.try(&.as_s?),
+          source_url: entry["sourceUrl"]?.try(&.as_s?),
+        )
+      end
+
+      jobs = (raw["phaseEntries"]?.try(&.as_a?) || [] of JSON::Any).compact_map do |entry|
+        name = entry["phaseName"]?.try(&.as_s?)
+        next unless name
+        JobRecord.new(
+          job: name,
+          status: (entry["status"]?.try(&.as_s?) || "").downcase,
+          completed_at: timestamp(entry["completedAt"]?),
+          fingerprint: entry["fingerprint"]?.try(&.as_s?),
+          reason: entry["reason"]?.try(&.as_s?),
+        )
+      end
+
+      Document.new(
+        profile_name: raw["profileName"]?.try(&.as_s?) || profile,
+        last_run_at: timestamp(raw["lastRunAt"]?),
+        fluxion_version: raw["sysbootVersion"]?.try(&.as_s?) || "unknown",
+        items: items,
+        jobs: jobs,
+        next_job: raw["nextPlanEntry"]?.try(&.as_s?),
+      )
+    end
+
+    private def timestamp(value : JSON::Any?) : Time
+      text = value.try(&.as_s?)
+      return Time.unix(0) unless text
+      Time.parse_rfc3339(text)
+    rescue Time::Format::Error
+      Time.unix(0)
     end
 
     # Writes through a private temporary file and an atomic rename, so a

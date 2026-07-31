@@ -1,11 +1,11 @@
 # Port status
 
-Tracks what the Crystal implementation covers against the Java behavioural
-spec in this directory. Update it as work lands.
+Tracks the Crystal implementation against the Java behavioural spec in this
+directory. Update it as work lands.
 
-## Done
+## Complete
 
-**Core domain** (`src/fluxion/core/`) — validated data with no IO. All 30 step
+**Core domain** (`src/fluxion/core/`) — validated data with no IO. All step
 kinds, trust anchors, `when` conditions, restart policies, execution events and
 results, the job/profile aggregate with dependency ordering.
 
@@ -16,76 +16,76 @@ results, the job/profile aggregate with dependency ordering.
   selection, `spec.sources`, did-you-mean suggestions
 - diagnostics carry the exact config path and accumulate rather than raising
 
-**Host detection** (`src/fluxion/host.cr`) — `/etc/os-release` parsing,
-architecture, PATH lookup, target user under sudo.
+**Host detection** (`src/fluxion/host.cr`) — `/etc/os-release`, architecture,
+PATH lookup, target user under sudo.
 
 **Executor** (`src/fluxion/executor/`):
 
 - redaction: secret patterns, terminal-control stripping, streaming PEM masking
 - process execution: merged streams, fiber pump, bounded capture, timeout kill
 - sudo: `sudo -n -- <trust-resolved target>`, root-owned ancestry checks
-- probes for packages, flatpak, remotes, repo files, paths, shells, git repos,
-  git config, systemd units, groups, fonts, and `probeCommand`
-- step executors for packages, flatpak, tool-packages, sdkman, system-update,
-  user-groups, git-config, git-repo, systemd-unit, system-setting,
-  default-shell, shell-reload, shell-command, shell-script (local), assert,
-  manual
-- orchestrator: ordering, blocking on failed dependencies, skip decisions,
-  cancellation, interrupt checkpoints
-- verified downloads: HTTPS-only with per-redirect revalidation, streaming
-  byte ceiling, truncation detection, digest checked before the file is
-  returned
+- verified downloads: HTTPS-only with per-redirect revalidation, streaming byte
+  ceiling, truncation detection, digest checked before the file is returned
 - signature verification: gpg status output parsed rather than its exit code
   trusted; every VALIDSIG must name the configured signer; SHA-1 rejected
 - checksum documents, treated as supplemental metadata only
+- bounded tar.gz extraction: decompressed stream bounded, exact post-strip
+  path matching, ambiguity refused
+- atomic installer with a privileged path that re-verifies after staging
+- probes for every kind with an observable footprint, plus `probeCommand`
+- **every step kind has an executor** — verified by previewing all nine example
+  profiles with zero unhandled kinds
+- orchestrator: ordering, blocking on failed dependencies, skip decisions,
+  cancellation, interrupt checkpoints
 
 **State** (`src/fluxion/state/`) — atomic private writes, schema versioning,
-per-item and per-job records, job fingerprints.
+per-item and per-job records, job fingerprints, resume points, and migration
+from the Java schema.
 
-**CLI** (`src/fluxion/cli/`) — `apply`, `dry-run`, `plan`, `validate`, `list`,
-`graph`, `kinds`, with the colour layer and the live reporter.
+**CLI** (`src/fluxion/cli/`) — all eighteen commands: `apply`, `dry-run`,
+`plan`, `status`, `diff`, `explain`, `doctor`, `lint`, `state`, `report`,
+`tools`, `generate`, `snapshot`, `import`, `validate`, `list`, `graph`,
+`kinds`. Colour layer and live reporter.
 
-## Remaining
+**TUI** (`src/fluxion/tui/`) — pre-run selector and live execution screen on
+the vendored CryTUI.
 
-### Executor
+**Docs** — README, `docs/` (commands, config schema, workstation profiles,
+architecture, development), the GitHub Pages site with `install.sh`, and
+`wiki/`.
 
-- **Step executors that download** (the download layer itself is done): `compiled-binary` (plus tar.gz extraction,
-  atomic install, binstaller delegation), `gpg-key`, the four repository kinds,
-  `flatpak-remote`, `oh-my-zsh`, `toolchain`, `nerd-fonts`, `dotbot`,
-  `binstaller-profile`, `file-writes`, remote `shell-script`.
-  Until these land the orchestrator reports `no executor for step kind '<k>'`
-  and fails the step, which is deliberate — silently skipping trust-bearing
-  work would be worse than failing.
-- **Privileged atomic publication** (`executor.md` §6.8): stage under a
-  root-owned anchor, verify the digest there, then `mv -fT` into place.
-- **Sudo session**: one prompt per run, keepalive, `sudo -k` on exit.
+**CI** — formatting, lints, specs, build, then validating and previewing every
+example profile. Release builds a static binary per architecture with a
+combined checksum file.
 
-### State
+## Known gaps
 
-- Wire the orchestrator to record successes and job completions (the store is
-  written but `apply` does not yet call it).
-- Resume: `--from-job` from the recorded `nextJob`, and stale-state detection
-  against the manifest fingerprint.
+- **Sudo session.** Each privileged command runs `sudo -n` independently. A
+  session that authenticates once per run — with a keepalive and `sudo -k` on
+  exit — is not implemented, so a host whose sudo timestamp has expired will
+  fail privileged steps rather than prompting once up front.
+- **`.zip` and `.tar.xz` delegation.** Recognised and refused with an
+  explanation. Fluxion does not yet drive `binstaller` for them.
+- **TUI sudo prompt.** The selector and execution screens are complete; there
+  is no in-TUI password prompt, so privileged steps rely on an existing sudo
+  timestamp.
+- **Wiki publication.** Pages are written and ready in `wiki/`; GitHub wikis
+  are unavailable for this repository while it is private on the free plan.
+  See `wiki/README.md`.
 
-### CLI
+## Deliberate divergences from the Java implementation
 
-Remaining commands from `cli.md`: `status`, `diff`, `explain`, `doctor`,
-`lint`, `generate`, `snapshot`, `import`, `tools`, `report`, `state`
-(show/path/reset/forget).
-
-### TUI
-
-`src/fluxion/tui/` is empty. CryTUI is vendored and verified. Needs the pre-run
-selector (job → step → entry), the live execution screen, and the sudo prompt.
-
-### Docs and repo
-
-`docs/`, the GitHub Pages site with `install.sh`, the wiki, and CI/release
-workflows for Crystal builds.
+- `--phase` is `--job`. One vocabulary throughout, matching the docs.
+- `import` emits a complete profile rather than a bare fragment, so the output
+  validates and previews without hand-editing a header onto it.
+- Colour is automatic and honours `NO_COLOR`.
+- State schema numbering continues from the Java version's 7, so a machine that
+  has run both never sees a version go backwards.
 
 ## Conventions
 
-- `crystal spec` and `./lib/ameba/bin/ameba src spec` must both be clean.
+- `crystal spec`, `./lib/ameba/bin/ameba src spec`, and
+  `crystal tool format --check src spec` must all be clean.
 - Commit gradually, Conventional Commits, no co-author trailer.
 - The four spec documents here are the behavioural reference; consult them
   before changing anything user-visible.

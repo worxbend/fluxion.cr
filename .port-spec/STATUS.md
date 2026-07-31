@@ -32,6 +32,12 @@ architecture, PATH lookup, target user under sudo.
   manual
 - orchestrator: ordering, blocking on failed dependencies, skip decisions,
   cancellation, interrupt checkpoints
+- verified downloads: HTTPS-only with per-redirect revalidation, streaming
+  byte ceiling, truncation detection, digest checked before the file is
+  returned
+- signature verification: gpg status output parsed rather than its exit code
+  trusted; every VALIDSIG must name the configured signer; SHA-1 rejected
+- checksum documents, treated as supplemental metadata only
 
 **State** (`src/fluxion/state/`) — atomic private writes, schema versioning,
 per-item and per-job records, job fingerprints.
@@ -43,9 +49,7 @@ per-item and per-job records, job fingerprints.
 
 ### Executor
 
-- **Verified download layer.** Bounded HTTPS fetch with a streaming digest, and
-  the refusal rules from `executor.md` §6. Everything below needs it.
-- **Step executors that download**: `compiled-binary` (plus tar.gz extraction,
+- **Step executors that download** (the download layer itself is done): `compiled-binary` (plus tar.gz extraction,
   atomic install, binstaller delegation), `gpg-key`, the four repository kinds,
   `flatpak-remote`, `oh-my-zsh`, `toolchain`, `nerd-fonts`, `dotbot`,
   `binstaller-profile`, `file-writes`, remote `shell-script`.

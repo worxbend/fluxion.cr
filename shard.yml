@@ -10,7 +10,7 @@ authors:
 
 targets:
   fluxion:
-    main: src/fluxion.cr
+    main: src/main.cr
 
 crystal: ">= 1.21.0"
 

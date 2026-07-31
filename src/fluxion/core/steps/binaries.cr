@@ -306,11 +306,16 @@ module Fluxion
     # The config spelling is uppercase for this kind, unlike every other enum,
     # matching `kind: RUSTUP` in the documented schema.
     def config_name : String
-      to_s.upcase
+      case self
+      in .rustup?  then "RUSTUP"
+      in .juliaup? then "JULIAUP"
+      in .sdkman?  then "SDKMAN"
+      in .generic? then "GENERIC"
+      end
     end
 
     def to_s(io : IO) : Nil
-      io << super.upcase
+      io << config_name
     end
   end
 

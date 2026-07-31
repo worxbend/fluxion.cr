@@ -85,7 +85,7 @@ module Fluxion::CLI
       summary = orchestrator.run(profile, options, reporter, cancellation)
       reporter.print_summary
 
-      exit_code_for(summary, cancellation)
+      exit_code_for(summary, cancellation, options.read_only?)
     end
 
     private def run_with_tui(profile : Profile, options : Executor::RunOptions,
@@ -96,7 +96,7 @@ module Fluxion::CLI
       # rather than a failure.
       return ExitCode::Success unless outcome
 
-      exit_code_for(outcome.summary, cancellation)
+      exit_code_for(outcome.summary, cancellation, options.read_only?)
     end
 
     private def header(profile : Profile, options : Executor::RunOptions) : Nil
@@ -133,9 +133,12 @@ module Fluxion::CLI
       signal
     end
 
-    private def exit_code_for(summary : Executor::RunSummary, cancellation : CancellationSignal) : ExitCode
+    private def exit_code_for(summary : Executor::RunSummary, cancellation : CancellationSignal,
+                              read_only : Bool = false) : ExitCode
       return ExitCode::Cancelled if cancellation.cancelled?
-      return ExitCode::Paused if summary.paused > 0
+      # A preview never pauses. Reporting 75 for one would tell a script the
+      # run stopped at a checkpoint when nothing ran at all.
+      return ExitCode::Paused if summary.paused > 0 && !read_only
       return ExitCode::ExternalDependencyError unless summary.ok?
       ExitCode::Success
     end

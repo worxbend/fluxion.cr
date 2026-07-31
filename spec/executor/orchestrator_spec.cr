@@ -295,3 +295,38 @@ describe Fluxion::State::Fingerprint do
     left.should_not eq(right)
   end
 end
+
+describe "dry-run and interrupts" do
+  it "describes an interrupt instead of obeying it" do
+    # Stopping at a checkpoint during a preview would leave everything after
+    # it undescribed, which is the opposite of what a dry run is for.
+    subject = profile([
+      job("base", [
+        Fluxion::InterruptStep.new("relogin", "Log out and back in."),
+        packages("after", "curl"),
+      ] of Fluxion::Step),
+    ])
+
+    options = Fluxion::Executor::RunOptions.new(dry_run: true)
+    summary, listener, _ = run(subject, options: options)
+
+    summary.paused.should eq(0)
+    summary.dry_run.should eq(2)
+
+    previews = listener.results.compact_map(&.as?(Fluxion::StepResult::DryRun))
+    previews.map(&.item).should eq(%w[relogin curl])
+  end
+
+  it "still halts at an interrupt during a real run" do
+    subject = profile([
+      job("base", [
+        Fluxion::InterruptStep.new("relogin", "Log out and back in."),
+        packages("after", "curl"),
+      ] of Fluxion::Step),
+    ])
+    summary, _, runner = run(subject)
+
+    summary.paused.should eq(1)
+    runner.ran?("install -y curl").should be_false
+  end
+end

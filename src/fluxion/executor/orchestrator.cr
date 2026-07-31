@@ -294,7 +294,12 @@ module Fluxion::Executor
 
         # An interrupt is a control step, not work: it records where to resume
         # and stops, rather than running anything.
+        #
+        # A preview describes it instead of obeying it. Stopping here would
+        # leave everything after the checkpoint undescribed, which is the
+        # opposite of what a dry run is for.
         if step.is_a?(InterruptStep)
+          next preview_interrupt(step, listener, summary) if options.read_only?
           halt(step, listener, summary)
           return JobOutcome::Halted
         end
@@ -315,6 +320,14 @@ module Fluxion::Executor
       end
 
       JobOutcome::Completed
+    end
+
+    private def preview_interrupt(step : InterruptStep, listener : ExecutionListener, summary : RunSummary) : Nil
+      result = StepResult::DryRun.new(step.name,
+        ["interrupt", step.name, "exit", step.exit_code.to_s, "—", step.message])
+      listener.on_event(ExecutionEvent.item_started(step.name, step.name))
+      listener.on_event(ExecutionEvent.item_completed(step.name, step.name, result))
+      summary.record(result)
     end
 
     private def halt(step : InterruptStep, listener : ExecutionListener, summary : RunSummary) : Nil

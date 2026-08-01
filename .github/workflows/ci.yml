@@ -29,6 +29,7 @@ jobs:
       # from its entrypoint rather than with `shards build ameba`.
       - name: Lint
         run: |
+          mkdir -p bin
           crystal build lib/ameba/src/cli.cr -o bin/ameba
           ./bin/ameba src spec --no-color
 

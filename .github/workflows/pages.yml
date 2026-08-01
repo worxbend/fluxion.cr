@@ -1,0 +1,55 @@
+name: Pages
+
+# Publishes site/ to the gh-pages branch, which is what GitHub Pages serves.
+#
+# The branch is rewritten as a single orphan commit each time: the site is
+# build output, not history, and a growing log of "publish site" commits would
+# be noise in a repository whose real history is the code.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the site is intact
+        run: |
+          test -f site/index.html
+          test -f site/install.sh
+          shellcheck --shell=sh site/install.sh
+
+      - name: Publish to gh-pages
+        run: |
+          staging="$(mktemp -d)"
+          cp -R site/. "$staging"/
+          touch "$staging/.nojekyll"
+
+          cd "$staging"
+          git init --quiet -b gh-pages
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit --quiet -m "Publish site from ${GITHUB_SHA::7}"
+          git push --quiet --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages:gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: echo "Published https://worxbend.github.io/fluxion.cr/" >> "$GITHUB_STEP_SUMMARY"

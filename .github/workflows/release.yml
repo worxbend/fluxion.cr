@@ -73,24 +73,3 @@ jobs:
             artifacts/fluxion-*-checksums.sha256
             site/install.sh
           generate_release_notes: true
-
-  pages:
-    needs: publish
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/jekyll-build-pages@v1
-        with:
-          source: ./site
-          destination: ./_site
-      - uses: actions/upload-pages-artifact@v3
-      - id: deploy
-        uses: actions/deploy-pages@v4

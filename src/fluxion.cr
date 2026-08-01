@@ -4,6 +4,7 @@ require "./fluxion/core"
 require "./fluxion/host"
 require "./fluxion/config"
 require "./fluxion/executor"
+require "./fluxion/registry"
 require "./fluxion/tui"
 require "./fluxion/cli"
 

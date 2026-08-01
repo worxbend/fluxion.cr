@@ -4,11 +4,12 @@ Fluxion is a Crystal CLI for bootstrapping Linux workstations. The source is
 layered, and the dependency direction is strict:
 
 ```
-cli ─┬─> tui ──┐
-     │         ├──> executor ──> state
-     └─────────┴──> config ────> core
-                                  ▲
-                          host ───┘
+cli ─┬─> tui ──────┐
+     ├─> registry ─┤
+     │             ├──> executor ──> state
+     └─────────────┴──> config ────> core
+                                     ▲
+                             host ───┘
 ```
 
 Nothing points back up. `core` depends on nothing; `cli` depends on everything.
@@ -72,6 +73,23 @@ fingerprint of their configuration, and where to resume.
 A completed job is skipped only while its fingerprint still matches, so editing
 a package list makes the job run again rather than being silently considered
 done.
+
+### `registry` — profiles shared through a git repository
+
+Reads a manifest out of a git clone and installs the profiles it names. It sits
+beside `executor` rather than inside it: a registry moves files, never
+processes, and installing is deliberately not applying.
+
+Two locations, deliberately separate. The **mirror** is a shallow clone under
+the cache directory and is disposable. The **installed** directory under the
+config directory holds what the user chose, and a sync never overwrites it. If
+the clone were the install destination, "installed" would mean nothing.
+
+Git runs through `Executor::ShellRunner` rather than a direct spawn, so the
+commands are observable in specs and inherit the same redaction and timeout
+handling as every other process Fluxion starts. Installing goes through
+`Config::Loader`, so a profile that cannot be parsed is refused before it lands
+rather than at the first `apply`.
 
 ### `tui` and `cli` — the two front ends
 
@@ -140,7 +158,9 @@ manager at all.
 
 The shipped example profiles are the end-to-end check: they exercise every step
 kind against the real schema, so a regression in any parser shows up there
-first.
+first. The example registry under `examples/registry/` does the same for the
+registry format, and its specs run the whole add/sync/install/publish loop
+against a real git repository served over `file://`.
 
 ## Layout
 
@@ -152,6 +172,7 @@ src/fluxion/
   executor/      processes, downloads, trust, orchestration
     executors/   one file per family of step kinds
   state/         what previous runs recorded
+  registry/      manifest, git mirror, and installed configurations
   cli/           commands, colour, the plain reporter
   tui/           screens, built on the vendored CryTUI
 src/crytui/      vendored TUI toolkit (see VENDORED.md)

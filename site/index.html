@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fluxion — turn a fresh Linux machine into your machine</title>
+<meta name="description" content="One YAML file. One preview. One run. A Crystal workstation bootstrapper that shows you exactly what it would do before it does anything.">
+<link rel="canonical" href="https://worxbend.github.io/fluxion.cr/">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Fluxion">
+<meta property="og:description" content="Turn a fresh Linux machine into your machine. One YAML file. One preview. One run.">
+<meta property="og:url" content="https://worxbend.github.io/fluxion.cr/">
+<meta name="twitter:card" content="summary">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
+
+<style>
+:root {
+  --bg: #08090c;
+  --bg-soft: #0e1116;
+  --panel: #11151b;
+  --panel-2: #151a22;
+  --line: #1f2630;
+  --line-soft: #171d25;
+  --text: #e8ecf2;
+  --text-dim: #98a3b3;
+  --text-faint: #6b7686;
+  --accent: #5eead4;
+  --accent-2: #818cf8;
+  --green: #4ade80;
+  --yellow: #fbbf24;
+  --cyan: #38bdf8;
+  --red: #f87171;
+  --radius: 14px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif;
+  --maxw: 1080px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #fbfcfe;
+    --bg-soft: #f4f6fa;
+    --panel: #ffffff;
+    --panel-2: #f7f9fc;
+    --line: #e2e7ef;
+    --line-soft: #edf1f6;
+    --text: #10141b;
+    --text-dim: #55606f;
+    --text-faint: #7d8798;
+    --accent: #0d9488;
+    --accent-2: #5b60e8;
+    --green: #16a34a;
+    --yellow: #b45309;
+    --cyan: #0284c7;
+    --red: #dc2626;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* The one piece of decoration: a slow flux behind the hero. */
+.aurora {
+  position: fixed;
+  inset: -30vh -10vw auto;
+  height: 90vh;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(45vw 40vh at 22% 18%, color-mix(in oklab, var(--accent) 22%, transparent), transparent 65%),
+    radial-gradient(40vw 36vh at 76% 8%, color-mix(in oklab, var(--accent-2) 20%, transparent), transparent 62%);
+  filter: blur(28px);
+  opacity: .5;
+}
+@media (prefers-color-scheme: light) { .aurora { opacity: .32; } }
+
+.wrap { width: min(100% - 2.5rem, var(--maxw)); margin-inline: auto; position: relative; z-index: 1; }
+
+/* ── nav ─────────────────────────────────────────────────────────── */
+nav {
+  position: sticky; top: 0; z-index: 50;
+  backdrop-filter: blur(14px);
+  background: color-mix(in oklab, var(--bg) 78%, transparent);
+  border-bottom: 1px solid var(--line-soft);
+}
+nav .wrap { display: flex; align-items: center; gap: 1.5rem; height: 60px; }
+.brand { font-weight: 650; letter-spacing: -.02em; font-size: 1.05rem; margin-right: auto; display: flex; align-items: center; gap: .55rem; }
+.brand .spark {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+}
+nav a { color: var(--text-dim); text-decoration: none; font-size: .93rem; transition: color .15s; }
+nav a:hover { color: var(--text); }
+@media (max-width: 720px) { nav .hide-sm { display: none; } }
+
+/* ── hero ────────────────────────────────────────────────────────── */
+header { padding: 5.5rem 0 3.5rem; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: .5rem;
+  font-family: var(--mono); font-size: .78rem; letter-spacing: .04em;
+  color: var(--text-dim);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: .3rem .8rem; margin-bottom: 1.6rem;
+  background: var(--panel);
+}
+h1 {
+  font-size: clamp(2.4rem, 6.2vw, 4rem);
+  line-height: 1.04; letter-spacing: -.035em; font-weight: 700;
+  margin: 0 0 1.1rem;
+  max-width: 17ch;
+}
+h1 .grad {
+  background: linear-gradient(100deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.lede { font-size: clamp(1.05rem, 2.2vw, 1.28rem); color: var(--text-dim); max-width: 60ch; margin: 0 0 2.2rem; }
+
+/* install command */
+.install { display: flex; flex-wrap: wrap; gap: .75rem; align-items: stretch; margin-bottom: .9rem; }
+.cmd {
+  display: flex; align-items: center; gap: .8rem;
+  flex: 1 1 460px; min-width: 0;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: .85rem 1rem;
+  font-family: var(--mono); font-size: .85rem;
+}
+.cmd .prompt { color: var(--accent); user-select: none; }
+.cmd code { overflow-x: auto; white-space: nowrap; scrollbar-width: none; color: var(--text); }
+.cmd code::-webkit-scrollbar { display: none; }
+.copy {
+  margin-left: auto; flex: none;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text-dim);
+  border-radius: 8px; padding: .35rem .6rem; font-size: .75rem; font-family: var(--mono);
+  cursor: pointer; transition: all .15s;
+}
+.copy:hover { color: var(--text); border-color: var(--accent); }
+.copy.done { color: var(--green); border-color: var(--green); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  padding: .85rem 1.4rem; border-radius: var(--radius);
+  font-size: .95rem; font-weight: 550; text-decoration: none;
+  border: 1px solid var(--line); color: var(--text); background: var(--panel);
+  transition: all .15s;
+}
+.btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+.btn-primary {
+  background: linear-gradient(100deg, var(--accent), var(--accent-2));
+  color: #06090d; border-color: transparent; font-weight: 650;
+}
+@media (prefers-color-scheme: light) { .btn-primary { color: #fff; } }
+.btn-primary:hover { filter: brightness(1.08); }
+
+.fineprint { font-size: .87rem; color: var(--text-faint); max-width: 62ch; }
+.fineprint a { color: var(--text-dim); }
+
+/* ── terminal ────────────────────────────────────────────────────── */
+.term {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden;
+  box-shadow: 0 24px 60px -30px rgba(0,0,0,.7);
+}
+.term-bar {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .6rem .9rem; border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-2);
+}
+.term-bar .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+.term-bar .title { margin-left: .6rem; font-family: var(--mono); font-size: .75rem; color: var(--text-faint); }
+.term pre {
+  margin: 0; padding: 1.1rem 1.2rem;
+  font-family: var(--mono); font-size: .795rem; line-height: 1.62;
+  overflow-x: auto; color: var(--text-dim);
+  tab-size: 2;
+}
+.term pre::-webkit-scrollbar { height: 8px; }
+.term pre::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+.g { color: var(--green); }
+.y { color: var(--yellow); }
+.c { color: var(--cyan); }
+.r { color: var(--red); }
+.d { color: var(--text-faint); }
+.b { color: var(--text); font-weight: 600; }
+
+/* ── sections ────────────────────────────────────────────────────── */
+section { padding: 4.5rem 0; }
+section + section { border-top: 1px solid var(--line-soft); }
+.kicker {
+  font-family: var(--mono); font-size: .76rem; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: .9rem;
+}
+h2 { font-size: clamp(1.6rem, 3.4vw, 2.15rem); letter-spacing: -.025em; line-height: 1.15; margin: 0 0 1rem; font-weight: 660; }
+h3 { font-size: 1.06rem; margin: 0 0 .5rem; letter-spacing: -.012em; font-weight: 620; }
+p { margin: 0 0 1rem; }
+.sub { color: var(--text-dim); max-width: 64ch; margin-bottom: 2.4rem; }
+
+.split { display: grid; gap: 2.5rem; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 900px) { .split { grid-template-columns: 1fr 1.15fr; gap: 3rem; } }
+
+.cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1.4rem;
+  transition: border-color .18s, transform .18s;
+}
+.card:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--line)); transform: translateY(-2px); }
+.card p { color: var(--text-dim); font-size: .93rem; margin: 0; }
+.card .mark { font-family: var(--mono); color: var(--accent); font-size: .8rem; margin-bottom: .7rem; display: block; }
+
+pre.code {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.1rem 1.2rem; margin: 0; overflow-x: auto;
+  font-family: var(--mono); font-size: .8rem; line-height: 1.6; color: var(--text-dim);
+}
+pre.code .k { color: var(--accent-2); }
+pre.code .s { color: var(--green); }
+pre.code .cm { color: var(--text-faint); font-style: italic; }
+
+/* step flow */
+.flow { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(142px, 1fr)); margin-top: 1.6rem; }
+.step {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; background: var(--panel);
+}
+.step code { font-family: var(--mono); font-size: .85rem; color: var(--accent); }
+.step span { display: block; font-size: .87rem; color: var(--text-dim); margin-top: .3rem; }
+
+/* refusals */
+.refusals { display: grid; gap: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.refusal { padding: 1.25rem 1.4rem; background: var(--panel); }
+.refusal + .refusal { border-top: 1px solid var(--line-soft); }
+/* Not flex: an inline <code> inside the heading would become a flex item and
+   the sentence would break apart around it. */
+.refusal h3 { line-height: 1.4; }
+.refusal h3 .no { font-family: var(--mono); color: var(--red); font-size: .8rem; margin-right: .55rem; }
+.refusal h3 code, .refusal p code { font-family: var(--mono); font-size: .86em; color: var(--accent); }
+.refusal p { color: var(--text-dim); font-size: .93rem; margin: 0; }
+
+/* command table */
+.cmds { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.cmds td { padding: .62rem .8rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.cmds tr:last-child td { border-bottom: 0; }
+.cmds td:first-child { font-family: var(--mono); color: var(--accent); white-space: nowrap; width: 1%; font-size: .85rem; }
+.cmds td:last-child { color: var(--text-dim); }
+
+/* footer */
+footer { padding: 3rem 0 4rem; border-top: 1px solid var(--line-soft); color: var(--text-faint); font-size: .9rem; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 1rem 1.6rem; align-items: center; }
+footer a { color: var(--text-dim); text-decoration: none; }
+footer a:hover { color: var(--accent); }
+footer .spacer { margin-left: auto; }
+
+/* Reveal on scroll — but only once JS has confirmed it can undo it. Content
+   that needs a script to become visible is content that disappears when the
+   script does not run. */
+.js .reveal { opacity: 0; transform: translateY(14px); transition: opacity .55s ease, transform .55s ease; }
+.js .reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .js .reveal { opacity: 1; transform: none; transition: none; } }
+</style>
+</head>
+<body>
+<div class="aurora"></div>
+
+<nav>
+  <div class="wrap">
+    <span class="brand"><span class="spark"></span>Fluxion</span>
+    <a href="#how" class="hide-sm">How it works</a>
+    <a href="#trust" class="hide-sm">Trust</a>
+    <a href="#registries" class="hide-sm">Registries</a>
+    <a href="#commands" class="hide-sm">Commands</a>
+    <a href="https://github.com/worxbend/fluxion.cr">GitHub&nbsp;↗</a>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <span class="eyebrow">Crystal · Linux · MIT</span>
+    <h1>Turn a fresh Linux machine into <span class="grad">your machine</span>.</h1>
+    <p class="lede">
+      One YAML file. One preview. One run. Fluxion shows you the exact commands it
+      would execute — then runs that same traversal with mutation switched on.
+      What you review is what happens.
+    </p>
+
+    <div class="install">
+      <div class="cmd">
+        <span class="prompt">$</span>
+        <code id="install-cmd">curl --proto '=https' --tlsv1.2 -sSfL https://worxbend.github.io/fluxion.cr/install.sh | sh</code>
+        <button class="copy" data-copy="#install-cmd">copy</button>
+      </div>
+      <a class="btn btn-primary" href="https://github.com/worxbend/fluxion.cr">Source</a>
+    </div>
+    <p class="fineprint">
+      The installer verifies the release's published SHA-256 before writing anything,
+      installs to <code>~/.local/bin/fluxion</code>, and leaves your shell startup files alone.
+      <a href="install.sh">Read it first</a> if you would rather not pipe a script to a shell —
+      that is a reasonable instinct, and the script is short.
+    </p>
+  </div>
+</header>
+
+<section id="how">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="kicker">The idea</div>
+        <h2>Describe the machine. See what would happen. Then let it.</h2>
+        <p class="sub">
+          Preview and run are the same code path with one flag different, so a dry run
+          cannot describe something other than what executes.
+        </p>
+
+        <pre class="code"><span class="k">profile</span>: my-laptop
+<span class="k">os</span>:
+  <span class="k">type</span>: arch
+
+<span class="k">jobs</span>:
+  - <span class="k">name</span>: system-foundation
+    <span class="k">steps</span>:
+      - <span class="k">type</span>: packages
+        <span class="k">name</span>: core-cli-tools
+        <span class="k">packageManager</span>: pacman
+        <span class="k">packages</span>: [<span class="s">git</span>, <span class="s">curl</span>, <span class="s">ripgrep</span>, <span class="s">zsh</span>]</pre>
+
+        <div class="flow">
+          <div class="step"><code>fluxion validate</code><span>Is this profile sound?</span></div>
+          <div class="step"><code>fluxion dry-run</code><span>What would it do?</span></div>
+          <div class="step"><code>fluxion apply</code><span>Do it.</span></div>
+        </div>
+      </div>
+
+      <div class="term reveal">
+        <div class="term-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="title">fluxion dry-run</span>
+        </div>
+<pre><span class="b">Fluxion · arch-workstation · dry-run</span>
+<span class="d">Target: arch   Host: CachyOS (amd64)</span>
+
+<span class="c">[JOB]</span> <span class="b">system-foundation</span>
+  core-cli-tools
+    <span class="c">▸</span> git <span class="d">...</span> <span class="y">would run</span>
+        <span class="d">$ sudo pacman -S --noconfirm git</span>
+    <span class="c">▸</span> ripgrep <span class="d">...</span> <span class="y">would run</span>
+        <span class="d">$ sudo pacman -S --noconfirm ripgrep</span>
+    <span class="c">▸</span> zsh <span class="d">...</span> <span class="y">would run</span>
+        <span class="d">$ sudo pacman -S --noconfirm zsh</span>
+<span class="g">[DONE]</span> system-foundation
+
+<span class="c">[JOB]</span> <span class="b">shell</span>
+  oh-my-zsh
+    <span class="c">▸</span> ~/.oh-my-zsh <span class="d">...</span> <span class="y">would run</span>
+        <span class="d">$ download https://raw.githubusercontent.com/…/install.sh</span>
+        <span class="d">  verify 95118b50d0…0172b61 run sh</span>
+<span class="g">[DONE]</span> shell
+
+<span class="y">⚠ Restart required</span>
+  <span class="d">Default shell changed to zsh. Log out and back in,</span>
+  <span class="d">then re-run fluxion.</span>
+
+Summary: <span class="g">0 ok</span> · <span class="r">0 failed</span> · <span class="d">0 skipped</span> · <span class="y">34 would run</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="trust">
+  <div class="wrap">
+    <div class="kicker">Trust</div>
+    <h2>What it refuses to do</h2>
+    <p class="sub">
+      A bootstrapper runs privileged commands on a machine you have not finished
+      setting up. Each of these is deliberate, and each has a reason.
+    </p>
+
+    <div class="refusals">
+      <div class="refusal reveal">
+        <h3><span class="no">no</span> It will not run unverified bytes.</h3>
+        <p>
+          Every download is HTTPS-only with no URL credentials, re-validated after each
+          redirect — a redirect is an attacker-controllable hop — size-bounded while
+          streaming rather than after, and digest-checked before use. A detached signature
+          must name a signer the profile explicitly trusts: a valid signature from an
+          unknown key is not trust.
+        </p>
+      </div>
+      <div class="refusal reveal">
+        <h3><span class="no">no</span> It will not trust <code>PATH</code> for anything privileged.</h3>
+        <p>
+          A <code>sudo</code> step becomes <code>sudo -n -- &lt;resolved target&gt;</code>, where the
+          target is a real path under a root-owned system directory with no writable ancestor.
+        </p>
+      </div>
+      <div class="refusal reveal">
+        <h3><span class="no">no</span> It will not apply as root.</h3>
+        <p>
+          There is no safe way to drop back to your account for the steps that must not
+          end up root-owned.
+        </p>
+      </div>
+      <div class="refusal reveal">
+        <h3><span class="no">no</span> It will not prompt mid-run.</h3>
+        <p>
+          Items marked <code>confirm</code> need <code>--yes</code> up front. A run that waits
+          for input is a run that hangs unattended.
+        </p>
+      </div>
+      <div class="refusal reveal">
+        <h3><span class="no">no</span> It will not guess.</h3>
+        <p>
+          A probe that cannot answer reports <em>unknown</em>, never <em>missing</em>. Absence of
+          evidence is not evidence of absence, and reinstalling on that basis would be wrong.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="kicker">Reruns</div>
+    <h2>Running it twice is cheap</h2>
+    <p class="sub">
+      Fluxion records what worked — versions, checksums — and fingerprints each job's
+      configuration. A completed job is skipped only while that fingerprint still matches,
+      so editing a package list makes the job run again rather than being quietly
+      considered done.
+    </p>
+    <div class="cards">
+      <div class="card reveal">
+        <span class="mark">fluxion status</span>
+        <p>What is installed, missing, unknown, or drifted — probed against the real host.</p>
+      </div>
+      <div class="card reveal">
+        <span class="mark">fluxion diff</span>
+        <p>Only what differs from this machine. The short list you actually read.</p>
+      </div>
+      <div class="card reveal">
+        <span class="mark">fluxion explain --item git</span>
+        <p>Why one job or item would run or skip, in the orchestrator's own terms.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="registries">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="kicker">Registries</div>
+        <h2>Share profiles between machines</h2>
+        <p class="sub">
+          Keep the profiles you want everywhere in a git repository, and install
+          them by id.
+        </p>
+        <p style="color:var(--text-dim);font-size:.95rem">
+          The clone lives in your cache directory and is disposable. What you install
+          lives in your config directory and is <em>yours</em> — a sync refreshes the first
+          and never touches the second, and tells you which of your configurations
+          changed upstream.
+        </p>
+        <p style="color:var(--text-dim);font-size:.95rem">
+          Installing writes a file and stops. Running it stays a separate,
+          deliberate step.
+        </p>
+      </div>
+
+      <div class="term reveal">
+        <div class="term-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="title">fluxion remote-ls</span>
+        </div>
+<pre><span class="d">$</span> fluxion registry add https://github.com/you/profiles
+<span class="g">✔</span> Registered <span class="b">profiles</span> <span class="d">(https://github.com/you/profiles)</span>
+  <span class="d">syncing…</span>
+<span class="g">✔</span> 3 configurations available
+
+<span class="d">$</span> fluxion remote-ls
+<span class="b">example-profiles</span> <span class="d">(profiles)</span>
+  <span class="d">Bootstrap configurations, one entry per role</span>
+
+<span class="c">base     </span>  Base tools             <span class="g">current</span>
+<span class="c">developer</span>  Developer workstation  <span class="c">update available</span>
+<span class="c">server   </span>  Headless server        <span class="d">not installed</span>
+
+<span class="d">$</span> fluxion registry install developer --with-requires
+<span class="g">✔</span> Installed <span class="b">base</span> <span class="d">→ ~/.config/fluxion/registries/…</span>
+<span class="g">✔</span> Installed <span class="b">developer</span> <span class="d">→ ~/.config/fluxion/registries/…</span>
+
+<span class="d">Review before running:</span>
+  <span class="c">fluxion dry-run -c ~/.config/fluxion/…/developer.yaml</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="kicker">Two schemas</div>
+    <h2>An explicit graph, or one ordered plan</h2>
+    <div class="cards">
+      <div class="card reveal">
+        <span class="mark">jobs / steps</span>
+        <p>
+          The stable schema. Jobs declare dependencies, so ordering is a graph you can
+          read and render — <code>fluxion graph</code> emits Mermaid, DOT, or JSON.
+        </p>
+      </div>
+      <div class="card reveal">
+        <span class="mark">WorkstationProfile</span>
+        <p>
+          One ordered plan, selected by host facts and per-entry <code>when</code> rules.
+          The same profile does the right thing on Fedora and on Arch.
+        </p>
+      </div>
+    </div>
+    <p style="margin-top:1.4rem;color:var(--text-faint);font-size:.92rem">
+      Both land on the same domain model, so every command works with either.
+    </p>
+  </div>
+</section>
+
+<section id="commands">
+  <div class="wrap">
+    <div class="kicker">Reference</div>
+    <h2>Read-first by design</h2>
+    <p class="sub">The safe commands come first. The one that changes anything comes last.</p>
+    <table class="cmds">
+      <tr><td>generate</td><td>A starter profile for this machine</td></tr>
+      <tr><td>validate</td><td>Would this profile run at all?</td></tr>
+      <tr><td>lint</td><td>Profile quality and safety advice</td></tr>
+      <tr><td>doctor</td><td>Is this host ready for this profile?</td></tr>
+      <tr><td>plan</td><td>The execution plan — text, table, tree, or JSON</td></tr>
+      <tr><td>graph</td><td>The job dependency graph (Mermaid, DOT, JSON)</td></tr>
+      <tr><td>status · diff · explain</td><td>What is installed, what differs, and why</td></tr>
+      <tr><td>dry-run</td><td>The real traversal with mutation switched off</td></tr>
+      <tr><td>apply</td><td>Do it</td></tr>
+      <tr><td>registry · remote-ls</td><td>Profiles shared through a git repository</td></tr>
+      <tr><td>snapshot · import</td><td>Turn what is installed into a profile</td></tr>
+      <tr><td>state · report</td><td>Inspect what previous runs recorded</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="kicker">Documentation</div>
+    <h2>Everything is written down</h2>
+    <div class="cards">
+      <div class="card reveal"><span class="mark">docs/commands.md</span><p><a href="https://github.com/worxbend/fluxion.cr/blob/main/docs/commands.md" style="color:var(--text-dim)">Every command, flag, and exit code.</a></p></div>
+      <div class="card reveal"><span class="mark">docs/config-schema.md</span><p><a href="https://github.com/worxbend/fluxion.cr/blob/main/docs/config-schema.md" style="color:var(--text-dim)">The jobs/steps schema in full.</a></p></div>
+      <div class="card reveal"><span class="mark">docs/registry.md</span><p><a href="https://github.com/worxbend/fluxion.cr/blob/main/docs/registry.md" style="color:var(--text-dim)">The registry manifest format.</a></p></div>
+      <div class="card reveal"><span class="mark">docs/architecture.md</span><p><a href="https://github.com/worxbend/fluxion.cr/blob/main/docs/architecture.md" style="color:var(--text-dim)">Layers, trust boundaries, failure model.</a></p></div>
+      <div class="card reveal"><span class="mark">wiki</span><p><a href="https://github.com/worxbend/fluxion.cr/wiki" style="color:var(--text-dim)">Recipes, troubleshooting, design decisions.</a></p></div>
+      <div class="card reveal"><span class="mark">examples/</span><p><a href="https://github.com/worxbend/fluxion.cr/tree/main/examples" style="color:var(--text-dim)">Profiles for Fedora, Arch, openSUSE, Ubuntu.</a></p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="kicker">History</div>
+    <h2>Upgrading from the Java version</h2>
+    <p class="sub" style="margin-bottom:0">
+      Fluxion was a Java 25 / GraalVM project. This is a ground-up Crystal reimplementation
+      of the same product: same schemas, same commands, same trust rules. State files
+      written by the Java version are read directly, so upgrading does not mean
+      reinstalling everything you already have.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>MIT licensed</span>
+    <a href="https://github.com/worxbend/fluxion.cr">GitHub</a>
+    <a href="https://github.com/worxbend/fluxion.cr/issues">Issues</a>
+    <a href="https://github.com/worxbend/fluxion.cr/wiki">Wiki</a>
+    <a href="install.sh">install.sh</a>
+    <span class="spacer">Read the dry run. Then let it go.</span>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.copy').forEach(function (button) {
+  button.addEventListener('click', function () {
+    var text = document.querySelector(button.dataset.copy).textContent.trim();
+    navigator.clipboard.writeText(text).then(function () {
+      button.textContent = 'copied';
+      button.classList.add('done');
+      setTimeout(function () {
+        button.textContent = 'copy';
+        button.classList.remove('done');
+      }, 1600);
+    });
+  });
+});
+
+var reveals = document.querySelectorAll('.reveal');
+
+if ('IntersectionObserver' in window && reveals.length) {
+  document.documentElement.classList.add('js');
+
+  var show = function (el) { el.classList.add('in'); };
+  var seen = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) {
+        show(entry.target);
+        seen.unobserve(entry.target);
+      }
+    });
+  }, { rootMargin: '0px 0px -8% 0px' });
+
+  reveals.forEach(function (el, i) {
+    el.style.transitionDelay = (i % 6) * 55 + 'ms';
+    seen.observe(el);
+  });
+
+  // Failsafe. If the observer never delivers — a headless renderer, an
+  // aggressive extension, a browser doing something unexpected — the page must
+  // still end up readable. An effect that can hide content permanently is not
+  // an effect worth having.
+  setTimeout(function () {
+    seen.disconnect();
+    reveals.forEach(show);
+  }, 1500);
+}
+</script>
+</body>
+</html>

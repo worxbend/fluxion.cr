@@ -1,7 +1,0 @@
-title: Fluxion
-description: Turn a fresh Linux machine into your machine.
-theme: jekyll-theme-minimal
-
-# install.sh is served verbatim, so it must not be treated as a page to render.
-include:
-  - install.sh

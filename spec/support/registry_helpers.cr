@@ -80,6 +80,19 @@ module RegistryHelpers
     ENV["XDG_CONFIG_HOME"] = File.join(root, "config")
     ENV["XDG_CACHE_HOME"] = File.join(root, "cache")
 
+    # `registry publish` commits through the user's own git, which refuses to
+    # commit without an identity. A CI container has none configured, so the
+    # spec supplies one instead of depending on whatever the host happens to
+    # have set.
+    identity = {
+      "GIT_AUTHOR_NAME"     => "fluxion-spec",
+      "GIT_AUTHOR_EMAIL"    => "spec@fluxion.test",
+      "GIT_COMMITTER_NAME"  => "fluxion-spec",
+      "GIT_COMMITTER_EMAIL" => "spec@fluxion.test",
+    }
+    previous_identity = identity.keys.to_h { |key| {key, ENV[key]?} }
+    identity.each { |key, value| ENV[key] = value }
+
     begin
       repository = File.join(root, "repository")
       source = Fluxion::Registry::Source.new(name, "file://#{repository}", default: true)
@@ -94,6 +107,7 @@ module RegistryHelpers
     ensure
       previous_config ? (ENV["XDG_CONFIG_HOME"] = previous_config) : ENV.delete("XDG_CONFIG_HOME")
       previous_cache ? (ENV["XDG_CACHE_HOME"] = previous_cache) : ENV.delete("XDG_CACHE_HOME")
+      previous_identity.each { |key, value| value ? (ENV[key] = value) : ENV.delete(key) }
       FileUtils.rm_rf(root)
     end
   end

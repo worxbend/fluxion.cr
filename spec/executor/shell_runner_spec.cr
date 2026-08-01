@@ -74,7 +74,10 @@ describe Fluxion::Executor::SystemShellRunner do
 
   it "strips escape sequences out of streamed output" do
     lines = [] of String
-    runner.run(command("/bin/printf", "\\033[31mred\\n")) { |line| lines << line }
+    # Through the shell rather than /bin/printf: on Alpine — which is what CI
+    # runs — printf is a builtin and that path does not exist, so the spec
+    # would pass by producing no output at all.
+    runner.run(command("/bin/sh", "-c", "printf '\\033[31mred\\n'")) { |line| lines << line }
     lines.join.should eq("red")
   end
 

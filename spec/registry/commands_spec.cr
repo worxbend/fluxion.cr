@@ -157,7 +157,7 @@ describe "fluxion registry" do
   end
 
   it "asks for a sync before reading a registry that was added with --no-sync" do
-    RegistryHelpers.with_sandbox do |sandbox|
+    RegistryHelpers.with_sandbox do |_|
       invoke("registry", "add", "https://example.invalid/profiles", "--name", "later", "--no-sync")
 
       result = invoke("remote-ls")

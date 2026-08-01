@@ -36,6 +36,7 @@ so `[Getting started](Getting-started)` resolves to `Getting-started.md`.
 | `Home.md` | Landing page and index |
 | `Getting-started.md` | From nothing to a working profile |
 | `Recipes.md` | Profile patterns worth copying |
+| `Registries.md` | Sharing profiles between machines |
 | `Troubleshooting.md` | What a message means and what to do |
 | `Migrating-from-Java.md` | Moving from the Java implementation |
 | `Design-decisions.md` | Why Fluxion refuses certain things |

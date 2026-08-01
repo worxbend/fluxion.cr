@@ -91,6 +91,27 @@ fluxion explain --item git
 
 ---
 
+## Share profiles between machines
+
+Keep the profiles you want everywhere in a git repository, and install them by
+id:
+
+```bash
+fluxion registry add https://github.com/you/fluxion-profiles
+fluxion remote-ls
+fluxion registry install workstation
+```
+
+The clone lives in your cache directory and is disposable. What you install
+lives in your config directory and is yours — a `sync` refreshes the first and
+never touches the second, and tells you which of your configurations changed
+upstream.
+
+Installing writes a file and stops. Running it stays a separate, deliberate
+step.
+
+---
+
 ## Two schemas
 
 The stable **jobs/steps** schema gives you an explicit dependency graph.
@@ -108,6 +129,7 @@ Both land on the same model, so every command works with either.
 - [Command reference](https://github.com/worxbend/fluxion.cr/blob/main/docs/commands.md)
 - [Config schema](https://github.com/worxbend/fluxion.cr/blob/main/docs/config-schema.md)
 - [WorkstationProfile manifests](https://github.com/worxbend/fluxion.cr/blob/main/docs/workstation-profile.md)
+- [Registries](https://github.com/worxbend/fluxion.cr/blob/main/docs/registry.md)
 - [Architecture](https://github.com/worxbend/fluxion.cr/blob/main/docs/architecture.md)
 - [Development](https://github.com/worxbend/fluxion.cr/blob/main/docs/development.md)
 

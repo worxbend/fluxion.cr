@@ -99,3 +99,60 @@ fluxion state reset --force  # start over
 
 Resetting state does not uninstall anything. It only forgets, so the next run
 re-probes.
+
+## "\<name\> has not been synced yet"
+
+The registry is configured but has never been cloned — usually because it was
+added with `--no-sync`, or the first clone failed.
+
+```bash
+fluxion registry sync <name>
+```
+
+If the clone itself fails, test the URL directly with `git ls-remote <url>`.
+Fluxion disables terminal prompting for every git call, so an authentication
+problem fails immediately instead of hanging; the fix is in your ssh agent or
+credential helper, not in Fluxion.
+
+## "Several registries are configured and none is the default"
+
+With more than one registry, commands refuse to guess:
+
+```bash
+fluxion registry list
+fluxion remote-ls work                 # name one for a single command
+fluxion registry install x --registry work
+```
+
+Adding a registry with `--default` marks it permanently. The first registry you
+add becomes the default automatically.
+
+## "\<file\> has local edits"
+
+You edited an installed configuration, and the registry has a different version.
+Nothing is overwritten until you choose:
+
+```bash
+fluxion registry status                   # which side moved
+fluxion registry publish                  # keep yours, send it upstream
+fluxion registry install <id> --force     # take theirs, losing your edits
+```
+
+## "changed both locally and upstream"
+
+Both copies moved, and Fluxion will not merge them for you:
+
+```bash
+fluxion registry show <id> > /tmp/upstream.yaml
+diff /tmp/upstream.yaml ~/.config/fluxion/registries/<registry>/<id>.yaml
+```
+
+Fold one into the other, then publish or force-install. See
+**[Registries](Registries)**.
+
+## "resolves outside the registry"
+
+An entry in the manifest points at a symlink leading out of the repository.
+Confinement is re-checked against the resolved path, because the manifest
+cannot see where a symlink goes. This is the registry's problem to fix: entries
+must be real files inside `profiles/`.

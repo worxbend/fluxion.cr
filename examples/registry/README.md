@@ -10,17 +10,22 @@ profiles/                 every entry lives in here
 └── developer.yaml
 ```
 
-Try it against this directory, without a remote:
+Try it without a remote. A registry is always a git repository, so copy this
+directory somewhere and make one:
 
 ```bash
-fluxion registry add "file://$PWD/examples/registry" --name example
+cp -r examples/registry /tmp/example-registry
+git -C /tmp/example-registry init -q -b main
+git -C /tmp/example-registry add -A
+git -C /tmp/example-registry commit -qm "Example registry"
+
+fluxion registry add file:///tmp/example-registry --name example
 fluxion remote-ls --all
 fluxion registry show developer
 fluxion registry install developer --with-requires
 fluxion registry remove example --purge
 ```
 
-A real registry is a git repository — `sync` and `publish` need one. Reading
-works from a plain directory, which is enough to see the shape.
+It is a copy, so publishing back to it is safe to experiment with.
 
 The full format is documented in [docs/registry.md](../../docs/registry.md).

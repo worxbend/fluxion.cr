@@ -232,14 +232,26 @@ rather than picking the first. Mark one with `--default`.
 
 ## Trying it without a remote
 
-The repository ships an example registry:
+The repository ships an example registry. A registry is always a git
+repository, so copy it somewhere and make one — then everything, including
+`publish`, works against a throwaway:
 
 ```bash
-fluxion registry add "file://$PWD/examples/registry" --name example
+cp -r examples/registry /tmp/example-registry
+git -C /tmp/example-registry init -q -b main
+git -C /tmp/example-registry add -A
+git -C /tmp/example-registry commit -qm "Example registry"
+git -C /tmp/example-registry config receive.denyCurrentBranch updateInstead
+
+fluxion registry add file:///tmp/example-registry --name example
 fluxion remote-ls --all
 fluxion registry show developer
+fluxion registry install developer --with-requires
+fluxion registry edit developer
+fluxion registry publish --message "Try publishing"
 fluxion registry remove example --purge
 ```
 
-`sync` and `publish` need a real git repository; reading works from a plain
-directory, which is enough to see the shape.
+`receive.denyCurrentBranch updateInstead` is only needed because the push
+target here has a working tree checked out; a repository on a git host does
+not need it.

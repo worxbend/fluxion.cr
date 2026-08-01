@@ -1,0 +1,11 @@
+profile: base-arch
+os:
+  type: arch
+
+jobs:
+  - name: core
+    steps:
+      - type: packages
+        name: core-tools
+        packageManager: pacman
+        packages: [git, curl, jq, ripgrep, fd]

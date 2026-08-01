@@ -1,0 +1,38 @@
+# An example registry, in the layout `fluxion registry init` scaffolds.
+#
+# Point Fluxion at a copy of this directory to try it without a remote:
+#
+#   fluxion registry add file://$PWD/examples/registry --name example
+#   fluxion remote-ls --all
+#
+# (A real registry is a git repository; a plain directory works for reading.)
+apiVersion: fluxion.dev/registry/v1
+kind: Registry
+
+metadata:
+  name: example-profiles
+  description: Bootstrap configurations, one entry per role
+  maintainer: worxbend
+
+entries:
+  - id: base-fedora
+    name: Base tools (Fedora)
+    description: The handful of things every Fedora machine needs
+    path: profiles/base-fedora.yaml
+    distributions: [fedora]
+    tags: [core]
+
+  - id: base-arch
+    name: Base tools (Arch)
+    description: The handful of things every Arch machine needs
+    path: profiles/base-arch.yaml
+    distributions: [arch]
+    tags: [core]
+
+  - id: developer
+    name: Developer workstation
+    description: Editors, language servers, and the terminal setup
+    path: profiles/developer.yaml
+    distributions: [fedora]
+    tags: [developer, desktop]
+    requires: [base-fedora]

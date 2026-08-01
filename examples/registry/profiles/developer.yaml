@@ -1,0 +1,19 @@
+profile: developer
+os:
+  type: fedora
+
+jobs:
+  - name: editors
+    steps:
+      - type: packages
+        name: editors
+        packageManager: dnf
+        packages: [neovim, helix]
+
+  - name: desktop
+    dependsOn: [editors]
+    steps:
+      - type: flatpak
+        name: apps
+        appIds:
+          - com.github.tchx84.Flatseal

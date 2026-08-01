@@ -126,8 +126,24 @@ There is a second frontend for ordered, host-selected plans — see
 | `generate` | A starter profile for this machine |
 | `snapshot` | A review-required inventory of this host |
 | `import` | Turn what is installed into a profile |
+| `registry` | Install profiles shared through a git repository |
+| `remote-ls` | List what a registry offers |
 
 Full reference: [docs/commands.md](docs/commands.md).
+
+### Shared profiles
+
+Profiles you want on more than one machine can live in a git repository and be
+installed by id:
+
+```bash
+fluxion registry add https://github.com/you/fluxion-profiles
+fluxion remote-ls
+fluxion registry install workstation
+```
+
+Installing writes a file and stops — running it stays a separate, deliberate
+step. See [docs/registry.md](docs/registry.md).
 
 ## What it will not do
 
@@ -154,6 +170,7 @@ These are deliberate, and each has a reason:
 - [Command reference](docs/commands.md)
 - [Config schema](docs/config-schema.md)
 - [WorkstationProfile manifests](docs/workstation-profile.md)
+- [Registries](docs/registry.md)
 - [Architecture](docs/architecture.md)
 - [Development](docs/development.md)
 

@@ -1,0 +1,11 @@
+profile: base-fedora
+os:
+  type: fedora
+
+jobs:
+  - name: core
+    steps:
+      - type: packages
+        name: core-tools
+        packageManager: dnf
+        packages: [git, curl, jq, ripgrep, fd-find]

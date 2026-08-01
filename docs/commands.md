@@ -326,3 +326,57 @@ immediately — and the job inside it lifts straight into an existing profile.
 
 Review it before applying. On Arch it lists explicitly installed packages only,
 because a fragment enumerating every transitive dependency is unusable.
+
+## `registry`
+
+Profiles shared through a git repository, installed by id.
+
+```bash
+fluxion registry add https://github.com/you/fluxion-profiles
+fluxion remote-ls
+fluxion registry install workstation --with-requires
+fluxion registry status
+fluxion registry sync
+```
+
+| Subcommand | What it does |
+|---|---|
+| `add <url>` | Configure a registry and clone it |
+| `list` | The configured registries |
+| `remove <name>` | Forget one (`--purge` also deletes what it installed) |
+| `sync [name]` | Fetch the latest, and say what changed upstream |
+| `ls [name]` | What the registry offers |
+| `show <id>` | One configuration in detail, including the profile itself |
+| `install <id>` | Install it to `~/.config/fluxion/registries/<registry>/<id>.yaml` |
+| `uninstall <id>` | Remove an installed configuration |
+| `edit <id>` | Open the installed copy in `$EDITOR`, then validate it |
+| `status` | How installed configurations compare to the registry |
+| `publish` | Send local edits back to the registry |
+| `init [dir]` | Scaffold a registry repository |
+
+The git clone lives in the cache directory and is disposable; installed
+configurations live under the config directory and are yours. `sync` refreshes
+the first and never touches the second.
+
+Installing never applies anything. It writes a file and stops.
+
+Full reference, including the manifest format: [docs/registry.md](registry.md).
+
+## `remote-ls`
+
+The top-level spelling of `registry ls`, because it is the first thing anyone
+reaches for.
+
+```bash
+fluxion remote-ls
+fluxion remote-ls --search editor
+fluxion remote-ls --all --format json
+```
+
+```text
+--registry=NAME  Which registry to use
+--search=TEXT    Match id, name, description, or tag
+--installed      Only what is already installed
+--all            Include entries written for other distributions
+--format=FORMAT  text (default), json
+```

@@ -17,14 +17,12 @@ plan, which is why this is a manual first step rather than a script.
 Once the wiki exists:
 
 ```bash
-git clone git@github.com:worxbend/fluxion.cr.wiki.git /tmp/fluxion-wiki
-cp wiki/*.md /tmp/fluxion-wiki/
-cd /tmp/fluxion-wiki
-rm -f README.md            # this file describes the source, not the wiki
-git add -A
-git commit -m "docs: sync wiki from the repository"
-git push
+./scripts/sync-wiki.sh --dry-run   # which pages would change
+./scripts/sync-wiki.sh             # copy, commit, push
 ```
+
+The script skips this file — it describes the source, not the wiki — and says
+what to do by hand if the wiki repository has not been created yet.
 
 `Home.md` becomes the landing page; the rest are linked from it by filename,
 so `[Getting started](Getting-started)` resolves to `Getting-started.md`.

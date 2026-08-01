@@ -54,15 +54,15 @@ module Fluxion::Registry
 
     # The commit the mirror is currently at.
     def revision(source : Source) : String?
-      return nil unless source.cloned?
+      return unless source.cloned?
       result = @runner.run(command(git_in(source, ["rev-parse", "--short", "HEAD"]), QUICK_TIMEOUT))
-      return nil unless result.success?
+      return unless result.success?
       result.stdout.strip.presence
     end
 
     def current_branch(source : Source) : String?
       result = @runner.run(command(git_in(source, ["rev-parse", "--abbrev-ref", "HEAD"]), QUICK_TIMEOUT))
-      return nil unless result.success?
+      return unless result.success?
       branch = result.stdout.strip
       branch.presence && branch != "HEAD" ? branch : nil
     end

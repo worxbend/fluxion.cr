@@ -579,7 +579,7 @@ module Fluxion::CLI
       end
 
       # The requested entry, not the first requirement installed on its behalf.
-      path = installed.find { |item, _| item.id == found.id }.not_nil![1]
+      path = installed.find! { |item, _| item.id == found.id }[1]
       puts
       puts Style.dim("Review before running:")
       puts "  #{Style.cyan("fluxion dry-run -c #{path}")}"
@@ -908,19 +908,19 @@ module Fluxion::CLI
     end
 
     EXAMPLE_PROFILE = <<-YAML
-    # A starting point. Replace it with what your machines actually need.
-    profile: workstation
-    os:
-      type: fedora
+      # A starting point. Replace it with what your machines actually need.
+      profile: workstation
+      os:
+        type: fedora
 
-    jobs:
-      - name: base
-        steps:
-          - type: packages
-            name: core-tools
-            packageManager: dnf
-            packages: [git, curl, jq]
+      jobs:
+        - name: base
+          steps:
+            - type: packages
+              name: core-tools
+              packageManager: dnf
+              packages: [git, curl, jq]
 
-    YAML
+      YAML
   end
 end

@@ -199,7 +199,7 @@ module Fluxion::Registry
 
     private def recorded_digest(entry : Entry) : String?
       path = digest_path(entry)
-      return nil unless File.exists?(path)
+      return unless File.exists?(path)
       File.read(path).strip.presence
     end
 

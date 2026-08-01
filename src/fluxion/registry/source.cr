@@ -73,12 +73,12 @@ module Fluxion::Registry
     #     git@github.com:worxbend/fluxion-profiles          ->  fluxion-profiles
     def self.derive_name(url : String) : String?
       trimmed = url.strip.rstrip('/')
-      return nil if trimmed.empty?
+      return if trimmed.empty?
 
       # An scp-style URL has no scheme, so splitting on ':' finds the path.
       tail = trimmed.includes?("://") ? trimmed : trimmed.split(':').last
       segment = tail.split('/').last.presence
-      return nil unless segment
+      return unless segment
 
       name = segment.chomp(".git")
       valid_name?(name) ? name : nil
@@ -95,11 +95,11 @@ module Fluxion::Registry
       value = url.strip
       return "registry URL must not be blank" if value.empty?
 
-      return nil if value.starts_with?("https://")
-      return nil if value.starts_with?("file://") || value.starts_with?('/')
+      return if value.starts_with?("https://")
+      return if value.starts_with?("file://") || value.starts_with?('/')
       # scp-style ssh, as GitHub and GitLab hand out.
-      return nil if value.matches?(/\A[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:.+\z/)
-      return nil if value.starts_with?("ssh://")
+      return if value.matches?(/\A[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:.+\z/)
+      return if value.starts_with?("ssh://")
 
       if value.starts_with?("http://")
         return "registry URL must use https, not http"
@@ -225,6 +225,10 @@ module Fluxion::Registry
       Settings.new(@sources.reject { |source| source.name == name })
     end
 
+    # Not `default=`: this returns new settings rather than mutating, and an
+    # assignment method in Crystal returns its argument, so the result would be
+    # unreachable.
+    # ameba:disable Naming/AccessorMethodName
     def set_default(name : String) : self
       unless find(name)
         raise ExecutionError.new("Unknown registry '#{name}'. Configured: #{describe_configured}")

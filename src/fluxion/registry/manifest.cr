@@ -208,20 +208,20 @@ module Fluxion::Registry
 
       if raw.starts_with?('/') || raw.includes?('\\')
         diagnostics.error(node.path, "path must be relative to the registry root")
-        return nil
+        return
       end
 
       normalized = Path.posix(raw).normalize.to_s
       unless normalized == raw
         diagnostics.error(node.path, "path must be normalized", "no '.' or '..' segments")
-        return nil
+        return
       end
 
       unless normalized == PROFILE_DIRECTORY || normalized.starts_with?("#{PROFILE_DIRECTORY}/")
         diagnostics.error(node.path,
           "path must be inside #{PROFILE_DIRECTORY}/",
           "a registry may only publish files from its profile folder")
-        return nil
+        return
       end
 
       normalized
@@ -240,24 +240,24 @@ module Fluxion::Registry
     # A starter manifest, for `registry init`.
     def self.template(name : String) : String
       <<-YAML
-      apiVersion: #{SUPPORTED_API_VERSION}
-      kind: Registry
+        apiVersion: #{SUPPORTED_API_VERSION}
+        kind: Registry
 
-      metadata:
-        name: #{name}
-        description: Bootstrap configurations for my machines
+        metadata:
+          name: #{name}
+          description: Bootstrap configurations for my machines
 
-      # Every entry names a profile inside #{PROFILE_DIRECTORY}/.
-      # The id becomes the filename when someone installs it.
-      entries:
-        - id: workstation
-          name: Developer workstation
-          description: Editors, toolchains, and the shell setup I expect everywhere
-          path: #{PROFILE_DIRECTORY}/workstation.yaml
-          distributions: [fedora, arch]
-          tags: [developer]
+        # Every entry names a profile inside #{PROFILE_DIRECTORY}/.
+        # The id becomes the filename when someone installs it.
+        entries:
+          - id: workstation
+            name: Developer workstation
+            description: Editors, toolchains, and the shell setup I expect everywhere
+            path: #{PROFILE_DIRECTORY}/workstation.yaml
+            distributions: [fedora, arch]
+            tags: [developer]
 
-      YAML
+        YAML
     end
   end
 end

@@ -15,6 +15,7 @@ require "./cli/commands/status"
 require "./cli/commands/doctor"
 require "./cli/commands/state"
 require "./cli/commands/generate"
+require "./cli/commands/registry"
 require "./cli/app"
 
 # The command-line interface.

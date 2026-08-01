@@ -24,6 +24,8 @@ module Fluxion::CLI
         StateCommand.new(@globals, @output, @error_output),
         ReportCommand.new(@globals, @output, @error_output),
         ToolsCommand.new(@globals, @output, @error_output),
+        RegistryCommand.new(@globals, @output, @error_output),
+        RemoteLsCommand.new(@globals, @output, @error_output),
         GenerateCommand.new(@globals, @output, @error_output),
         SnapshotCommand.new(@globals, @output, @error_output),
         ImportCommand.new(@globals, @output, @error_output),

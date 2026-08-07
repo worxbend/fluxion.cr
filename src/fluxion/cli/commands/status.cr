@@ -167,8 +167,8 @@ module Fluxion::CLI
 
     protected def build_report : StatusReport
       profile = load_profile
-      StatusReport.build(profile, Executor::SystemShellRunner.new,
-        Executor::ProbeRegistry.default, State::Store.new, @profile_name)
+      StatusReport.build(profile, deps.runner,
+        Executor::ProbeRegistry.default, deps.store, @profile_name)
     end
 
     protected def colour_for(classification : StatusReport::Classification, text : String) : String

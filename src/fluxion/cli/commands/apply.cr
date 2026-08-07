@@ -69,8 +69,8 @@ module Fluxion::CLI
 
       cancellation = install_interrupt_handler
       orchestrator = Executor::Orchestrator.new(
-        Executor::SystemShellRunner.new,
-        state: State::Store.new,
+        deps.runner,
+        state: deps.store,
       )
 
       # The TUI needs a real terminal on both ends. In CI, a pipe, or a build
@@ -174,7 +174,8 @@ module Fluxion::CLI
 
     def initialize(globals : GlobalOptions = GlobalOptions.new,
                    output : IO = STDOUT,
-                   error_output : IO = STDERR)
+                   error_output : IO = STDERR,
+                   deps : Deps = Deps.new)
       super
       self.forced_dry_run = true
     end

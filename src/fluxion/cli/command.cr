@@ -73,9 +73,14 @@ module Fluxion::CLI
     property output : IO
     property error_output : IO
 
+    # Everything that reaches the outside world, for the same reason as above:
+    # a command that builds its own `SystemShellRunner` cannot be handed a fake.
+    property deps : Deps
+
     def initialize(@globals : GlobalOptions = GlobalOptions.new,
                    @output : IO = STDOUT,
-                   @error_output : IO = STDERR)
+                   @error_output : IO = STDERR,
+                   @deps : Deps = Deps.new)
     end
 
     # Shorthands so renderers read the same as they would with Kernel#puts.

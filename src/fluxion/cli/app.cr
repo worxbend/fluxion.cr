@@ -6,34 +6,39 @@ module Fluxion::CLI
     getter output : IO
     getter error_output : IO
 
+    # The composition root: the one place the real runner and state store are
+    # chosen, so a spec can build an App with fakes and drive any command.
+    getter deps : Deps
+
     def initialize(@globals : GlobalOptions = GlobalOptions.new,
                    @output : IO = STDOUT,
-                   @error_output : IO = STDERR)
+                   @error_output : IO = STDERR,
+                   @deps : Deps = Deps.new)
     end
 
     def commands : Array(Command)
       [
-        ApplyCommand.new(@globals, @output, @error_output),
-        DryRunCommand.new(@globals, @output, @error_output),
-        PlanCommand.new(@globals, @output, @error_output),
-        StatusCommand.new(@globals, @output, @error_output),
-        DiffCommand.new(@globals, @output, @error_output),
-        ExplainCommand.new(@globals, @output, @error_output),
-        DoctorCommand.new(@globals, @output, @error_output),
-        LintCommand.new(@globals, @output, @error_output),
-        StateCommand.new(@globals, @output, @error_output),
-        ReportCommand.new(@globals, @output, @error_output),
-        ToolsCommand.new(@globals, @output, @error_output),
-        RegistryCommand.new(@globals, @output, @error_output),
-        RemoteLsCommand.new(@globals, @output, @error_output),
-        GenerateCommand.new(@globals, @output, @error_output),
-        SnapshotCommand.new(@globals, @output, @error_output),
-        ImportCommand.new(@globals, @output, @error_output),
-        ValidateCommand.new(@globals, @output, @error_output),
-        ListCommand.new(@globals, @output, @error_output),
-        GraphCommand.new(@globals, @output, @error_output),
-        KindsCommand.new(@globals, @output, @error_output),
-        SpinnersCommand.new(@globals, @output, @error_output),
+        ApplyCommand.new(@globals, @output, @error_output, @deps),
+        DryRunCommand.new(@globals, @output, @error_output, @deps),
+        PlanCommand.new(@globals, @output, @error_output, @deps),
+        StatusCommand.new(@globals, @output, @error_output, @deps),
+        DiffCommand.new(@globals, @output, @error_output, @deps),
+        ExplainCommand.new(@globals, @output, @error_output, @deps),
+        DoctorCommand.new(@globals, @output, @error_output, @deps),
+        LintCommand.new(@globals, @output, @error_output, @deps),
+        StateCommand.new(@globals, @output, @error_output, @deps),
+        ReportCommand.new(@globals, @output, @error_output, @deps),
+        ToolsCommand.new(@globals, @output, @error_output, @deps),
+        RegistryCommand.new(@globals, @output, @error_output, @deps),
+        RemoteLsCommand.new(@globals, @output, @error_output, @deps),
+        GenerateCommand.new(@globals, @output, @error_output, @deps),
+        SnapshotCommand.new(@globals, @output, @error_output, @deps),
+        ImportCommand.new(@globals, @output, @error_output, @deps),
+        ValidateCommand.new(@globals, @output, @error_output, @deps),
+        ListCommand.new(@globals, @output, @error_output, @deps),
+        GraphCommand.new(@globals, @output, @error_output, @deps),
+        KindsCommand.new(@globals, @output, @error_output, @deps),
+        SpinnersCommand.new(@globals, @output, @error_output, @deps),
       ] of Command
     end
 

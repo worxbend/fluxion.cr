@@ -11,10 +11,10 @@ module Fluxion::CLI
 
     def subcommands : Array(Command)
       [
-        StateShowCommand.new(@globals, @output, @error_output),
-        StatePathCommand.new(@globals, @output, @error_output),
-        StateResetCommand.new(@globals, @output, @error_output),
-        StateForgetCommand.new(@globals, @output, @error_output),
+        StateShowCommand.new(@globals, @output, @error_output, @deps),
+        StatePathCommand.new(@globals, @output, @error_output, @deps),
+        StateResetCommand.new(@globals, @output, @error_output, @deps),
+        StateForgetCommand.new(@globals, @output, @error_output, @deps),
       ] of Command
     end
   end
@@ -25,7 +25,7 @@ module Fluxion::CLI
     @format = Format::Text
 
     protected def store : State::Store
-      State::Store.new
+      deps.store
     end
 
     protected def profile_argument(positional : Array(String)) : String

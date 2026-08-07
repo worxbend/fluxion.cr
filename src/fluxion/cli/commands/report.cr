@@ -39,7 +39,7 @@ module Fluxion::CLI
     end
 
     private def store : State::Store
-      State::Store.new
+      deps.store
     end
 
     private def render_markdown(document : State::Document) : Nil

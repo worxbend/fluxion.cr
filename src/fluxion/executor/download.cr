@@ -101,44 +101,56 @@ module Fluxion::Executor
     def download(url : String, destination : String) : String
       uri = validate(url)
       digest = Digest::SHA256.new
-      written = 0_i64
 
       begin
         File.open(destination, "w") do |file|
-          fetch(uri) do |body, declared|
-            if declared && declared > @max_bytes
-              raise TrustError.new("Download exceeds the maximum size of #{@max_bytes} bytes: #{PublicUrl.from(url)}")
-            end
-
-            buffer = Bytes.new(CHUNK_BYTES)
-            loop do
-              read = body.read(buffer)
-              break if read.zero?
-
-              written += read
-              if written > @max_bytes
-                raise TrustError.new("Download exceeds the maximum size of #{@max_bytes} bytes: #{PublicUrl.from(url)}")
-              end
-
-              chunk = buffer[0, read]
-              digest << chunk
-              file.write(chunk)
-            end
-
-            # A truncated response would otherwise digest cleanly as whatever
-            # arrived, so a short read is a failure rather than a small file.
-            if declared && written != declared
-              raise TrustError.new(
-                "Download was truncated: expected #{declared} bytes but received #{written}")
-            end
-          end
+          fetch(uri) { |body, declared| stream_to(file, body, declared, digest, url) }
         end
       rescue error
+        # No code path returns a file whose digest was not checked, so a failure
+        # anywhere above takes the partial download with it.
         File.delete(destination) rescue nil
         raise error
       end
 
       digest.hexfinal
+    end
+
+    # Copies the body to `file`, digesting as it goes and enforcing the ceiling
+    # continuously rather than after the fact.
+    #
+    # Extracted from `download`, which was five block levels deep — the deepest
+    # nesting in src/fluxion — with the trust rules buried at the bottom.
+    private def stream_to(file : IO, body : IO, declared : Int64?,
+                          digest : Digest::SHA256, url : String) : Nil
+      if declared && declared > @max_bytes
+        raise TrustError.new(
+          "Download exceeds the maximum size of #{@max_bytes} bytes: #{PublicUrl.from(url)}")
+      end
+
+      buffer = Bytes.new(CHUNK_BYTES)
+      written = 0_i64
+
+      loop do
+        read = body.read(buffer)
+        break if read.zero?
+
+        written += read
+        if written > @max_bytes
+          raise TrustError.new(
+            "Download exceeds the maximum size of #{@max_bytes} bytes: #{PublicUrl.from(url)}")
+        end
+
+        chunk = buffer[0, read]
+        digest << chunk
+        file.write(chunk)
+      end
+
+      # A truncated response would otherwise digest cleanly as whatever
+      # arrived, so a short read is a failure rather than a small file.
+      return unless declared && written != declared
+      raise TrustError.new(
+        "Download was truncated: expected #{declared} bytes but received #{written}")
     end
 
     # Downloads and verifies against `expected`, deleting the file on mismatch.

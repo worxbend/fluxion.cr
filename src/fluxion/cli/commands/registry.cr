@@ -11,18 +11,18 @@ module Fluxion::CLI
 
     def subcommands : Array(Command)
       [
-        RegistryListCommand.new(@globals, @output, @error_output),
-        RegistryAddCommand.new(@globals, @output, @error_output),
-        RegistryRemoveCommand.new(@globals, @output, @error_output),
-        RegistrySyncCommand.new(@globals, @output, @error_output),
-        RegistryLsCommand.new(@globals, @output, @error_output),
-        RegistryShowCommand.new(@globals, @output, @error_output),
-        RegistryInstallCommand.new(@globals, @output, @error_output),
-        RegistryUninstallCommand.new(@globals, @output, @error_output),
-        RegistryEditCommand.new(@globals, @output, @error_output),
-        RegistryStatusCommand.new(@globals, @output, @error_output),
-        RegistryPublishCommand.new(@globals, @output, @error_output),
-        RegistryInitCommand.new(@globals, @output, @error_output),
+        RegistryListCommand.new(@globals, @output, @error_output, @deps),
+        RegistryAddCommand.new(@globals, @output, @error_output, @deps),
+        RegistryRemoveCommand.new(@globals, @output, @error_output, @deps),
+        RegistrySyncCommand.new(@globals, @output, @error_output, @deps),
+        RegistryLsCommand.new(@globals, @output, @error_output, @deps),
+        RegistryShowCommand.new(@globals, @output, @error_output, @deps),
+        RegistryInstallCommand.new(@globals, @output, @error_output, @deps),
+        RegistryUninstallCommand.new(@globals, @output, @error_output, @deps),
+        RegistryEditCommand.new(@globals, @output, @error_output, @deps),
+        RegistryStatusCommand.new(@globals, @output, @error_output, @deps),
+        RegistryPublishCommand.new(@globals, @output, @error_output, @deps),
+        RegistryInitCommand.new(@globals, @output, @error_output, @deps),
       ] of Command
     end
   end
@@ -45,7 +45,7 @@ module Fluxion::CLI
     end
 
     protected def git : Registry::Git
-      Registry::Git.new(Executor::SystemShellRunner.new)
+      deps.git
     end
 
     protected def register_registry_option(parser : OptionParser) : Nil

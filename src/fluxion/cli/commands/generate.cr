@@ -223,7 +223,7 @@ module Fluxion::CLI
       output = @output_path
       raise Failure.invalid_input("Specify --output") unless output
 
-      runner = Executor::SystemShellRunner.new
+      runner = deps.runner
       facts = Host.facts
 
       snapshot = {
@@ -290,8 +290,8 @@ module Fluxion::CLI
 
     def subcommands : Array(Command)
       [
-        ImportPackagesCommand.new(@globals, @output, @error_output),
-        ImportFlatpaksCommand.new(@globals, @output, @error_output),
+        ImportPackagesCommand.new(@globals, @output, @error_output, @deps),
+        ImportFlatpaksCommand.new(@globals, @output, @error_output, @deps),
       ] of Command
     end
   end
@@ -362,7 +362,7 @@ module Fluxion::CLI
       manager = facts.distribution.try(&.package_managers.first)
       raise Failure.external("No supported host package database found") unless manager
 
-      runner = Executor::SystemShellRunner.new
+      runner = deps.runner
       names = installed(runner, facts)
       raise Failure.external("No installed packages found") if names.empty?
 
@@ -414,7 +414,7 @@ module Fluxion::CLI
 
       raise Failure.external("Flatpak command not found") unless Host.command_exists?("flatpak")
 
-      runner = Executor::SystemShellRunner.new
+      runner = deps.runner
       apps = list(runner, ["flatpak", "list", "--app", "--columns=application"])
       raise Failure.external("No installed Flatpak apps found") if apps.empty?
 

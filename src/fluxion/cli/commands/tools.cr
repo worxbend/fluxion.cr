@@ -11,8 +11,8 @@ module Fluxion::CLI
 
     def subcommands : Array(Command)
       [
-        ToolsListCommand.new(@globals, @output, @error_output),
-        ToolsInstallCommand.new(@globals, @output, @error_output),
+        ToolsListCommand.new(@globals, @output, @error_output, @deps),
+        ToolsInstallCommand.new(@globals, @output, @error_output, @deps),
       ] of Command
     end
   end
@@ -38,7 +38,7 @@ module Fluxion::CLI
 
     def run(arguments : Array(String)) : ExitCode
       parse(arguments)
-      broker = Executor::ToolBroker.new(Executor::SystemShellRunner.new)
+      broker = deps.tool_broker
       resolutions = Executor::KnownTools.all.map { |spec| broker.locate(spec) }
 
       @format.json? ? render_json(resolutions) : render_text(resolutions)
@@ -109,7 +109,7 @@ module Fluxion::CLI
           "Unknown tool '#{selector}'. Known tools: #{known.map(&.name).join(", ")}")
       end
 
-      broker = Executor::ToolBroker.new(Executor::SystemShellRunner.new)
+      broker = deps.tool_broker
       resolution = broker.locate(spec)
 
       # A tool the user manages themselves is theirs; Fluxion uses it and

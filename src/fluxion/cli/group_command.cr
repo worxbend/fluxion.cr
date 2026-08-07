@@ -25,6 +25,7 @@ module Fluxion::CLI
 
       command.output = @output
       command.error_output = @error_output
+      command.deps = @deps
       # The verb is removed and everything around it kept, so flags on either
       # side reach the subcommand's own parser.
       remaining = arguments.dup

@@ -229,12 +229,15 @@ module Fluxion::Executor
     # step fails with its message rather than silently passing.
     def execute(step : Step, item : StepItem, runner : ShellRunner, &_sink : String ->) : StepResult
       manual = step.as(ManualStep)
-      probe = manual.probe_command
-      unless probe
+      # The command comes from `commands` rather than being rebuilt here, so the
+      # preview and the run cannot describe different things — which is the
+      # whole reason previews are generated from the same method as the run.
+      command = commands(step, item).first?
+      unless command
         return StepResult::Failure.new(item.key, "Manual step required: #{manual.message}", 2)
       end
 
-      result = runner.run(Command.new(["/bin/bash", "-lc", probe], timeout: TIMEOUT))
+      result = runner.run(command)
       return StepResult::Success.new(item.key, result.elapsed) if result.success?
       StepResult::Failure.new(item.key, manual.message, result.exit_code, result.elapsed)
     end

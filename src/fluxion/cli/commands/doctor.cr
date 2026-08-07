@@ -89,7 +89,7 @@ module Fluxion::CLI
     end
 
     private def state_checks : Array(Check)
-      store = State::Store.new
+      store = deps.store
       directory = store.root
 
       if Dir.exists?(directory)

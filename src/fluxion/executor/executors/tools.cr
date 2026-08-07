@@ -86,8 +86,7 @@ module Fluxion::Executor
     end
 
     def self.cache_root : String
-      base = ENV["XDG_CACHE_HOME"]?.presence || File.join(Host.home, ".cache")
-      File.join(base, "fluxion", "tools")
+      File.join(Paths.cache_root, "tools")
     end
 
     # Where a tool would come from, without fetching anything. Backs

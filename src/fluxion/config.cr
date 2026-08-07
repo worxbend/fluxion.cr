@@ -1,6 +1,7 @@
 require "yaml"
 require "./core"
 require "./host"
+require "./paths"
 require "./config/node"
 require "./config/context"
 require "./config/condition_parser"

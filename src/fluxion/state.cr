@@ -1,6 +1,7 @@
 require "digest/sha256"
 require "./core"
 require "./host"
+require "./paths"
 require "./state/store"
 
 # What a profile has already done, so a rerun is cheap and an interrupted run

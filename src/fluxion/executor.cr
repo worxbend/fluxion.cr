@@ -1,5 +1,6 @@
 require "./core"
 require "./host"
+require "./paths"
 require "./state"
 require "./executor/redaction"
 require "./executor/command"

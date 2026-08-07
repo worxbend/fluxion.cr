@@ -81,7 +81,7 @@ module Fluxion::Config
 
     # The default profile location, used when `-c` is not given.
     def default_path : String
-      File.join(ENV["HOME"]? || ".", ".config", "fluxion", "default.yaml")
+      Paths.default_profile
     end
   end
 end

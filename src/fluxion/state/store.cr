@@ -169,8 +169,7 @@ module Fluxion::State
     end
 
     def self.default_root : String
-      base = ENV["XDG_DATA_HOME"]?.presence || File.join(Host.home, ".local", "share")
-      File.join(base, "fluxion")
+      Paths.data_root
     end
 
     def path(profile : String) : String

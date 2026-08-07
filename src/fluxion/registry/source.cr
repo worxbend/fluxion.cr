@@ -45,19 +45,20 @@ module Fluxion::Registry
       Dir.exists?(File.join(mirror_path, ".git"))
     end
 
+    # The clone. Under the cache root because it is disposable: `sync` refreshes
+    # it and never touches what the user installed.
     def self.mirror_root : String
-      base = ENV["XDG_CACHE_HOME"]?.presence || File.join(Host.home, ".cache")
-      File.join(base, "fluxion", "registries")
+      File.join(Paths.cache_root, "registries")
     end
 
+    # What the user chose to install. Under the config root because it is
+    # theirs, which is the whole reason it is not the clone.
     def self.install_root : String
-      base = ENV["XDG_CONFIG_HOME"]?.presence || File.join(Host.home, ".config")
-      File.join(base, "fluxion", "registries")
+      File.join(Paths.config_root, "registries")
     end
 
     def self.settings_path : String
-      base = ENV["XDG_CONFIG_HOME"]?.presence || File.join(Host.home, ".config")
-      File.join(base, "fluxion", "registries.yaml")
+      File.join(Paths.config_root, "registries.yaml")
     end
 
     # Names become directory names, so they are constrained rather than escaped.

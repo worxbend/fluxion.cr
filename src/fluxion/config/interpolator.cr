@@ -37,8 +37,8 @@ module Fluxion::Config
     private def build_variables(spec_vars : Hash(String, String)) : Hash(String, String)
       variables = {} of String => String
       ENV.each { |key, value| variables[key] = value }
-      variables["HOME"] ||= Path.home.to_s
-      variables["USER"] ||= ENV["LOGNAME"]? || ""
+      variables["HOME"] ||= Host.home
+      variables["USER"] ||= Host.target_user
 
       spec_vars.each { |key, value| variables[key] ||= value }
 
@@ -46,12 +46,15 @@ module Fluxion::Config
       variables
     end
 
+    # `Host` answers the user and home questions so that `${USER}`, `${HOME}`,
+    # `${host.user}` and `${host.home}` cannot disagree with each other or with
+    # the paths the rest of Fluxion resolves.
     private def host_variables : Hash(String, String)
       {
         "host.os.name" => @host.distribution_id || @host.family.try(&.config_name) || "linux",
         "host.os.arch" => @host.architecture.try(&.config_name) || "",
-        "host.user"    => ENV["USER"]? || ENV["LOGNAME"]? || "",
-        "host.home"    => Path.home.to_s,
+        "host.user"    => Host.target_user,
+        "host.home"    => Host.home,
       }
     end
 

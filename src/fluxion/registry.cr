@@ -3,6 +3,7 @@ require "file_utils"
 
 require "./core"
 require "./host"
+require "./paths"
 require "./config"
 require "./executor"
 require "./registry/manifest"

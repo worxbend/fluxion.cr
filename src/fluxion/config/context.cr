@@ -209,7 +209,11 @@ module Fluxion::Config
     # Expands a leading `~` only. A `~` in the middle of a path is a literal
     # character, and replacing every occurrence would corrupt real filenames.
     def expand_home(raw : String) : String
-      home = ENV["HOME"]? || ""
+      # `Host.home` rather than a bare `ENV["HOME"]?`: with the variable unset
+      # this used to expand `~` to the empty string, turning `~/bin` into
+      # `/bin`. Falling back to the passwd entry is both safer and what every
+      # other home lookup in the codebase does.
+      home = Host.home
       return home if raw == "~"
       return home + raw[1..] if raw.starts_with?("~/")
       raw

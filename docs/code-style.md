@@ -56,20 +56,27 @@ Currently over the line and worth splitting when next touched:
 | File | Lines |
 |---|---|
 | `src/fluxion/cli/commands/registry.cr` | 931 |
-| `src/fluxion/executor/step_executor.cr` | 769 |
-| `src/fluxion/cli/commands/state.cr` | 521 |
 
 Splitting these is a real improvement, not bookkeeping: each is several
 responsibilities sharing a file, and every edit to one loads all of them.
+
+`step_executor.cr` (769) and `commands/state.cr` (521) were the other two. The
+first kept the abstraction and gave its sixteen concrete executors to
+`executors/packages.cr`, `executors/system.cr` and `executors/shell.cr`, beside
+the ones already there. The second was three unrelated command families sharing
+a filename — `GroupCommand` moved next to `Command`, and `report` and `tools`
+took their own files, which also removed an undocumented require-order
+constraint in `cli.cr`: `commands/state` had to precede `commands/generate` and
+`commands/registry` because it defined their superclass.
 
 ## Names are searchable or they are wrong
 
 The test is mechanical: grep the name. If mostly irrelevant matches come back,
 rename it.
 
-`ProbeSweep`, `StreamingSanitizer`, `SkippedPlanEntry`, and `forget_commands`
-each land on exactly what they describe. `Manager`, `Handler`, `data`, and
-`process` do not, and are absent from this codebase deliberately.
+`ProbeSweep`, `StreamingSanitizer`, `SkippedPlanEntry`, and `forget_phase` each
+land on exactly what they describe. `Manager`, `Handler`, `data`, and `process`
+do not, and are absent from this codebase deliberately.
 
 This is also why the config vocabulary and the internal model use the same word.
 When configuration said `phases` and the code said `Job`, every reader had to

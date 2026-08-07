@@ -12,9 +12,13 @@ require "./executor/probe"
 require "./executor/probe_sweep"
 require "./executor/item_types"
 require "./executor/step_executor"
+require "./executor/executors/packages"
+require "./executor/executors/system"
+require "./executor/executors/shell"
 require "./executor/executors/downloads"
 require "./executor/executors/repositories"
 require "./executor/executors/tools"
+require "./executor/run_options"
 require "./executor/orchestrator"
 
 # Runs the work a profile describes.

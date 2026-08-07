@@ -1,48 +1,4 @@
 module Fluxion::CLI
-  # A command that dispatches to subcommands.
-  #
-  # Bare invocation prints its own subcommands rather than doing something:
-  # `fluxion state` with no verb is a question, not an instruction.
-  abstract class GroupCommand < Command
-    def run(arguments : Array(String)) : ExitCode
-      # Global flags may precede the verb, so the subcommand is the first
-      # argument that is not a flag rather than simply the first argument.
-      index = arguments.index { |argument| !argument.starts_with?('-') }
-      verb = index.try { |position| arguments[position] }
-
-      if verb.nil? || arguments.includes?("-h") || arguments.includes?("--help")
-        @globals.color = false if arguments.includes?("--no-color")
-        @globals.apply_color!
-        print_subcommands
-        return ExitCode::Success
-      end
-
-      command = subcommands.find { |candidate| candidate.name == verb }
-      unless command
-        raise Failure.invalid_input(
-          "Unknown #{name} subcommand '#{verb}'. Try: #{subcommands.map(&.name).join(", ")}")
-      end
-
-      command.output = @output
-      command.error_output = @error_output
-      # The verb is removed and everything around it kept, so flags on either
-      # side reach the subcommand's own parser.
-      remaining = arguments.dup
-      remaining.delete_at(index.not_nil!)
-      command.run(remaining)
-    end
-
-    private def print_subcommands : Nil
-      puts "#{Style.bold("fluxion #{name}")} — #{summary}"
-      puts
-      puts Style.bold("Subcommands:")
-      width = subcommands.max_of(&.name.size)
-      subcommands.each do |command|
-        puts "  #{Style.cyan(command.name.ljust(width))}  #{command.summary}"
-      end
-    end
-  end
-
   # `fluxion state` — inspect and edit what previous runs recorded.
   class StateCommand < GroupCommand
     def name : String
@@ -235,6 +191,9 @@ module Fluxion::CLI
       parser.on("--type=TYPE", "Item type qualifying --item") { |value| @type = value }
     end
 
+    # `forget` is two commands wearing one name — forgetting a phase and
+    # forgetting an item share only their argument validation — so `run` does
+    # the validation and hands off.
     def run(arguments : Array(String)) : ExitCode
       parse(arguments)
 
@@ -250,24 +209,22 @@ module Fluxion::CLI
         return ExitCode::Success
       end
 
-      type = @type.try do |raw|
-        parsed = ItemType.from_config?(raw)
-        raise Failure.invalid_input("Unknown item type: #{raw}") unless parsed
-        parsed.json_name
-      end
-
       document = store.load(@profile_name)
+      phase ? forget_phase(document, phase) : forget_item(document, item.not_nil!)
+    end
 
-      if phase
-        unless document.forget_phase(phase)
-          raise Failure.invalid_input("No recorded phase named '#{phase}'")
-        end
-        store.save(document)
-        puts "#{Style.green(Symbols.success)} Forgot phase '#{phase}'"
-        return ExitCode::Success
+    private def forget_phase(document : State::Document, phase : String) : ExitCode
+      unless document.forget_phase(phase)
+        raise Failure.invalid_input("No recorded phase named '#{phase}'")
       end
 
-      key = item.not_nil!
+      store.save(document)
+      puts "#{Style.green(Symbols.success)} Forgot phase '#{phase}'"
+      ExitCode::Success
+    end
+
+    private def forget_item(document : State::Document, key : String) : ExitCode
+      type = requested_type
       matches = document.items.count do |record|
         record.item_key == key &&
           (@step.nil? || record.step == @step) &&
@@ -287,235 +244,13 @@ module Fluxion::CLI
       puts "#{Style.green(Symbols.success)} Forgot item '#{key}'"
       ExitCode::Success
     end
-  end
 
-  # `fluxion report` — render what the last run recorded.
-  class ReportCommand < Command
-    def name : String
-      "report"
-    end
-
-    def summary : String
-      "Render a report from the recorded state"
-    end
-
-    def usage : String
-      "fluxion report [--profile NAME] [--format markdown|html|json]"
-    end
-
-    @profile_name = "default"
-    @format = Format::Markdown
-
-    def register(parser : OptionParser) : Nil
-      parser.on("--profile=NAME", "Profile name [default: default]") { |value| @profile_name = value }
-      format_option(parser, [Format::Markdown, Format::Html, Format::Json]) { |value| @format = value }
-    end
-
-    def run(arguments : Array(String)) : ExitCode
-      parse(arguments)
-
-      unless store.exists?(@profile_name)
-        raise Failure.configuration("No state recorded for profile: #{@profile_name}")
+    private def requested_type : String?
+      @type.try do |raw|
+        parsed = ItemType.from_config?(raw)
+        raise Failure.invalid_input("Unknown item type: #{raw}") unless parsed
+        parsed.json_name
       end
-
-      document = store.load(@profile_name)
-      case @format
-      when .html? then render_html(document)
-      when .json? then puts document.to_json
-      else             render_markdown(document)
-      end
-
-      ExitCode::Success
-    end
-
-    private def store : State::Store
-      State::Store.new
-    end
-
-    private def render_markdown(document : State::Document) : Nil
-      puts "# Fluxion run report"
-      puts
-      puts "- Profile: `#{document.profile_name}`"
-      puts "- Last run: `#{document.last_run_at}`"
-      puts "- Fluxion version: `#{document.fluxion_version}`"
-      document.next_phase.try { |phase| puts "- Next phase: `#{phase}`" }
-      puts
-      puts "## Phases"
-      puts
-      if document.phases.empty?
-        puts "_No phases recorded._"
-      else
-        puts "| Phase | Status | Completed |"
-        puts "| --- | --- | --- |"
-        document.phases.each { |phase| puts "| #{phase.phase} | #{phase.status} | #{phase.completed_at} |" }
-      end
-      puts
-      puts "## Items"
-      puts
-      if document.items.empty?
-        puts "_No items recorded._"
-      else
-        puts "| Step | Item | Type | Version | Completed |"
-        puts "| --- | --- | --- | --- | --- |"
-        document.items.each do |item|
-          puts "| #{escape(item.step)} | #{escape(item.item_key)} | #{item.item_type} | " \
-               "#{escape(item.version || "")} | #{item.completed_at} |"
-        end
-      end
-    end
-
-    # A pipe would break the table, and a newline would break the row.
-    private def escape(text : String) : String
-      text.gsub('|', "\\|").gsub('\n', ' ')
-    end
-
-    private def render_html(document : State::Document) : Nil
-      puts "<!doctype html>"
-      puts %(<html><head><meta charset="utf-8"><title>Fluxion run report</title></head><body>)
-      puts "<h1>Fluxion run report</h1>"
-      puts "<p><strong>Profile:</strong> #{html_escape(document.profile_name)}</p>"
-      puts "<p><strong>Last run:</strong> #{document.last_run_at}</p>"
-      puts "<h2>Phases</h2><table><tr><th>Phase</th><th>Status</th><th>Completed</th></tr>"
-      document.phases.each do |phase|
-        puts "<tr><td>#{html_escape(phase.phase)}</td><td>#{phase.status}</td><td>#{phase.completed_at}</td></tr>"
-      end
-      puts "</table>"
-      puts "<h2>Items</h2><table><tr><th>Step</th><th>Item</th><th>Type</th><th>Version</th></tr>"
-      document.items.each do |item|
-        puts "<tr><td>#{html_escape(item.step)}</td><td>#{html_escape(item.item_key)}</td>" \
-             "<td>#{item.item_type}</td><td>#{html_escape(item.version || "")}</td></tr>"
-      end
-      puts "</table></body></html>"
-    end
-
-    private def html_escape(text : String) : String
-      text.gsub('&', "&amp;").gsub('<', "&lt;").gsub('>', "&gt;")
-    end
-  end
-
-  # `fluxion tools` — the external tools Fluxion delegates to.
-  class ToolsCommand < GroupCommand
-    def name : String
-      "tools"
-    end
-
-    def summary : String
-      "Inspect and install the delegated external tools"
-    end
-
-    def subcommands : Array(Command)
-      [
-        ToolsListCommand.new(@globals, @output, @error_output),
-        ToolsInstallCommand.new(@globals, @output, @error_output),
-      ] of Command
-    end
-  end
-
-  class ToolsListCommand < Command
-    def name : String
-      "list"
-    end
-
-    def summary : String
-      "Show each tool, its pinned version, and where it would come from"
-    end
-
-    def usage : String
-      "fluxion tools list [--format text|json]"
-    end
-
-    @format = Format::Text
-
-    def register(parser : OptionParser) : Nil
-      format_option(parser, [Format::Text, Format::Json]) { |value| @format = value }
-    end
-
-    def run(arguments : Array(String)) : ExitCode
-      parse(arguments)
-      broker = Executor::ToolBroker.new(Executor::SystemShellRunner.new)
-      resolutions = Executor::KnownTools.all.map { |spec| broker.locate(spec) }
-
-      @format.json? ? render_json(resolutions) : render_text(resolutions)
-      ExitCode::Success
-    end
-
-    private def render_text(resolutions : Array(Executor::ToolBroker::Resolution)) : Nil
-      puts "Platform: #{Style.cyan("linux/#{Host.architecture || "unknown"}")}"
-      puts
-
-      width = resolutions.max_of(&.spec.name.size)
-      resolutions.each do |resolution|
-        source = case resolution.source
-                 in .path?     then Style.green("on PATH: #{resolution.path}")
-                 in .cache?    then Style.cyan("cached: #{resolution.path}")
-                 in .download? then Style.dim("would download #{resolution.path}")
-                 end
-        puts "#{Style.cyan(Style.pad(resolution.spec.name, width))}  " \
-             "#{Style.dim(resolution.spec.version)}  #{source}"
-      end
-
-      puts
-      puts Style.dim("A tool already on PATH is used as-is; Fluxion never replaces it.")
-    end
-
-    private def render_json(resolutions : Array(Executor::ToolBroker::Resolution)) : Nil
-      puts({
-        "platform" => "linux/#{Host.architecture || "unknown"}",
-        "tools"    => resolutions.map do |resolution|
-          {
-            "tool"       => resolution.spec.name,
-            "repository" => resolution.spec.repository,
-            "version"    => resolution.spec.version,
-            "executable" => resolution.spec.executable,
-            "source"     => resolution.source.to_s.downcase,
-            "path"       => resolution.path,
-          }
-        end,
-      }.to_json)
-    end
-  end
-
-  class ToolsInstallCommand < Command
-    def name : String
-      "install"
-    end
-
-    def summary : String
-      "Download and verify a tool into Fluxion's cache"
-    end
-
-    def usage : String
-      "fluxion tools install <tool>"
-    end
-
-    def run(arguments : Array(String)) : ExitCode
-      positional = parse(arguments)
-      selector = positional.first?
-      known = Executor::KnownTools.all
-
-      unless selector
-        raise Failure.invalid_input("Specify a tool. Known tools: #{known.map(&.name).join(", ")}")
-      end
-
-      spec = known.find { |candidate| candidate.name.compare(selector, case_insensitive: true).zero? }
-      unless spec
-        raise Failure.invalid_input(
-          "Unknown tool '#{selector}'. Known tools: #{known.map(&.name).join(", ")}")
-      end
-
-      broker = Executor::ToolBroker.new(Executor::SystemShellRunner.new)
-      resolution = broker.locate(spec)
-
-      # A tool the user manages themselves is theirs; Fluxion uses it and
-      # installs nothing.
-      if resolution.source.path?
-        puts "#{Style.green(Symbols.success)} #{spec.name} is already on PATH at #{resolution.path}"
-        return ExitCode::Success
-      end
-
-      path = broker.install(spec)
-      puts "#{Style.green(Symbols.success)} #{spec.name} #{spec.version} installed at #{path}"
-      ExitCode::Success
     end
   end
 end

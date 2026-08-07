@@ -199,9 +199,7 @@ module Fluxion::Executor
         sink.call(line)
       end
 
-      return StepResult::Success.new(item.key, Time.instant - started) if result.success?
-      StepResult::Failure.new(item.key,
-        "dotbot exited #{result.exit_code}: #{result.detail}", result.exit_code, Time.instant - started)
+      outcome(item, result, started, "dotbot")
     rescue error : Error
       StepResult::Failure.new(item.key, "failed to prepare dotbot: #{error.message}", 1)
     end
@@ -238,10 +236,7 @@ module Fluxion::Executor
           sink.call(line)
         end
 
-        return StepResult::Success.new(item.key, Time.instant - started) if result.success?
-        StepResult::Failure.new(item.key,
-          "nerd-fonts-installer exited #{result.exit_code}: #{result.detail}",
-          result.exit_code, Time.instant - started)
+        outcome(item, result, started, "nerd-fonts-installer")
       end
     rescue error : Error
       StepResult::Failure.new(item.key, "failed to prepare nerd-fonts-installer: #{error.message}", 1)
@@ -297,10 +292,7 @@ module Fluxion::Executor
       end
 
       result = runner.run(Command.new(argv, timeout: APPLY_TIMEOUT)) { |line| sink.call(line) }
-      return StepResult::Success.new(item.key, Time.instant - started) if result.success?
-
-      StepResult::Failure.new(item.key,
-        "binstaller exited #{result.exit_code}: #{result.detail}", result.exit_code, Time.instant - started)
+      outcome(item, result, started, "binstaller")
     rescue error : Error
       StepResult::Failure.new(item.key, "failed to prepare binstaller: #{error.message}", 1)
     end

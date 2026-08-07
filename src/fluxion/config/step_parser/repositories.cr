@@ -140,18 +140,35 @@ module Fluxion::Config
       nil
     end
 
-    private def rpm_repository(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
+    # The validated fields the two rpm-style repository kinds share.
+    private record RpmStyleFields,
+      id : String,
+      base_url : String,
+      repo_file : String,
+      signing_key : SigningKey?,
+      enabled : Bool,
+      gpg_check : Bool
+
+    # Parses everything the two kinds have in common, including both trust
+    # checks.
+    #
+    # The two parsers were identical apart from the repo directory, the label in
+    # the key's diagnostics, and which step they build — which meant the rule
+    # that an enabled repository must enforce `gpgCheck` existed twice. A trust
+    # rule kept in two places is a trust rule that can drift in one.
+    private def rpm_style_fields(context : Context, node : Node, name : String,
+                                 default_repo_file : String, repo_directory : String,
+                                 label : String) : RpmStyleFields
       id = context.optional_string(node["id"]) || name
       validate_repository_id(context, node["id"], id)
 
       base_url = context.https_url(node["baseUrl"]) || ""
-      repo_file = context.absolute_path(node["repoFile"], required: false) ||
-                  RpmRepositoryStep.default_repo_file(name)
-      validate_repo_file(context, node["repoFile"], repo_file, RpmRepositoryStep::REPO_DIRECTORY)
+      repo_file = context.absolute_path(node["repoFile"], required: false) || default_repo_file
+      validate_repo_file(context, node["repoFile"], repo_file, repo_directory)
 
       enabled = context.bool(node["enabled"], true)
       gpg_check = context.bool(node["gpgCheck"], true)
-      key = signing_key(context, node["gpgKeyUrl"], node["checksum"], "RPM")
+      key = signing_key(context, node["gpgKeyUrl"], node["checksum"], label)
 
       if gpg_check && key.nil?
         context.error(node["gpgKeyUrl"].path, "gpgCheck requires a signing-key URL")
@@ -160,9 +177,16 @@ module Fluxion::Config
         context.error(node["gpgCheck"].path, "enabled repositories must enforce gpgCheck")
       end
 
+      RpmStyleFields.new(id, base_url, repo_file, key, enabled, gpg_check)
+    end
+
+    private def rpm_repository(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
+      fields = rpm_style_fields(context, node, name,
+        RpmRepositoryStep.default_repo_file(name), RpmRepositoryStep::REPO_DIRECTORY, "RPM")
+
       RpmRepositoryStep.new(
-        name, id, base_url, repo_file, key,
-        enabled: enabled, gpg_check: gpg_check,
+        name, fields.id, fields.base_url, fields.repo_file, fields.signing_key,
+        enabled: fields.enabled, gpg_check: fields.gpg_check,
         description: description,
         continue_on_error: context.bool(node["continueOnError"], false),
         probe_command: probe,
@@ -170,28 +194,13 @@ module Fluxion::Config
     end
 
     private def zypper_repository(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
-      id = context.optional_string(node["id"]) || name
-      validate_repository_id(context, node["id"], id)
-
-      base_url = context.https_url(node["baseUrl"]) || ""
-      repo_file = context.absolute_path(node["repoFile"], required: false) ||
-                  ZypperRepositoryStep.default_repo_file(name)
-      validate_repo_file(context, node["repoFile"], repo_file, ZypperRepositoryStep::REPO_DIRECTORY)
-
-      enabled = context.bool(node["enabled"], true)
-      gpg_check = context.bool(node["gpgCheck"], true)
-      key = signing_key(context, node["gpgKeyUrl"], node["checksum"], "Zypper")
-
-      if gpg_check && key.nil?
-        context.error(node["gpgKeyUrl"].path, "gpgCheck requires a signing-key URL")
-      end
-      if enabled && !gpg_check
-        context.error(node["gpgCheck"].path, "enabled repositories must enforce gpgCheck")
-      end
+      fields = rpm_style_fields(context, node, name,
+        ZypperRepositoryStep.default_repo_file(name), ZypperRepositoryStep::REPO_DIRECTORY, "Zypper")
 
       ZypperRepositoryStep.new(
-        name, id, base_url, repo_file, key,
-        enabled: enabled, gpg_check: gpg_check,
+        name, fields.id, fields.base_url, fields.repo_file, fields.signing_key,
+        enabled: fields.enabled, gpg_check: fields.gpg_check,
+        # The one field only this kind has.
         auto_refresh: context.bool(node["autoRefresh"], true),
         description: description,
         continue_on_error: context.bool(node["continueOnError"], false),

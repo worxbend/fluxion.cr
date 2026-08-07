@@ -81,11 +81,7 @@ module Fluxion::Executor
 
         sink.call("refreshing apt metadata")
         result = refresh(runner, ["sudo", "apt-get", "update"], ->(line : String) { sink.call(line) })
-        return StepResult::Success.new(item.key, Time.instant - started) if result.success?
-
-        StepResult::Failure.new(item.key,
-          "apt-get update exited #{result.exit_code}: #{result.detail}",
-          result.exit_code, Time.instant - started)
+        outcome(item, result, started, "apt-get update")
       end
     rescue error : Error
       StepResult::Failure.new(item.key, error.message || error.class.name, 1)
@@ -135,11 +131,7 @@ module Fluxion::Executor
 
         sink.call("refreshing repository metadata")
         result = refresh(runner, refresh_argv(step), ->(line : String) { sink.call(line) })
-        return StepResult::Success.new(item.key, Time.instant - started) if result.success?
-
-        StepResult::Failure.new(item.key,
-          "metadata refresh exited #{result.exit_code}: #{result.detail}",
-          result.exit_code, Time.instant - started)
+        outcome(item, result, started, "metadata refresh")
       end
     rescue error : Error
       StepResult::Failure.new(item.key, error.message || error.class.name, 1)
@@ -222,11 +214,7 @@ module Fluxion::Executor
 
       sink.call("synchronising pacman databases")
       result = refresh(runner, ["sudo", "pacman", "-Sy"], ->(line : String) { sink.call(line) })
-      return StepResult::Success.new(item.key, Time.instant - started) if result.success?
-
-      StepResult::Failure.new(item.key,
-        "pacman -Sy exited #{result.exit_code}: #{result.detail}",
-        result.exit_code, Time.instant - started)
+      outcome(item, result, started, "pacman -Sy")
     rescue error : Error
       StepResult::Failure.new(item.key, error.message || error.class.name, 1)
     end
@@ -286,11 +274,7 @@ module Fluxion::Executor
         argv.concat(["remote-add", "--if-not-exists", remote.remote, descriptor])
 
         result = runner.run(Command.new(argv, timeout: 5.minutes)) { |line| sink.call(line) }
-        return StepResult::Success.new(item.key, Time.instant - started) if result.success?
-
-        StepResult::Failure.new(item.key,
-          "flatpak remote-add exited #{result.exit_code}: #{result.detail}",
-          result.exit_code, Time.instant - started)
+        outcome(item, result, started, "flatpak remote-add")
       end
     rescue error : Error
       StepResult::Failure.new(item.key, error.message || error.class.name, 1)

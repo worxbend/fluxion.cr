@@ -56,6 +56,21 @@ module Fluxion::Executor
       StepResult::DryRun.new(item.key, commands(step, item).flat_map(&.preview))
     end
 
+    # Success, or a Failure describing what the process reported.
+    #
+    # The kinds that override `execute` to run one specific tool all ended with
+    # this same three-line tail, differing only in the label — nine copies, and
+    # so nine chances to drop the elapsed time or the exit code from one of
+    # them.
+    protected def outcome(item : StepItem, result : ProcessResult,
+                          started : Time::Instant, label : String) : StepResult
+      elapsed = Time.instant - started
+      return StepResult::Success.new(item.key, elapsed) if result.success?
+
+      StepResult::Failure.new(item.key,
+        "#{label} exited #{result.exit_code}: #{result.detail}", result.exit_code, elapsed)
+    end
+
     private def failure_message(command : Command, result : ProcessResult) : String
       detail = result.detail
       summary = "#{command.preview.join(' ')} exited #{result.exit_code}"

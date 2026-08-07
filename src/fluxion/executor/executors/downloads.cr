@@ -160,10 +160,7 @@ module Fluxion::Executor
           timeout: INSTALL_TIMEOUT,
         )) { |line| sink.call(line) }
 
-        return StepResult::Success.new(item.key, Time.instant - started) if result.success?
-        StepResult::Failure.new(item.key,
-          "toolchain installer exited #{result.exit_code}: #{result.detail}",
-          result.exit_code, Time.instant - started)
+        outcome(item, result, started, "toolchain installer")
       end
     rescue error : Error
       StepResult::Failure.new(item.key, error.message || error.class.name, 1)
@@ -229,10 +226,7 @@ module Fluxion::Executor
           timeout: INSTALL_TIMEOUT,
         )) { |line| sink.call(line) }
 
-        return StepResult::Success.new(item.key, Time.instant - started) if result.success?
-        StepResult::Failure.new(item.key,
-          "oh-my-zsh installer exited #{result.exit_code}: #{result.detail}",
-          result.exit_code, Time.instant - started)
+        outcome(item, result, started, "oh-my-zsh installer")
       end
     rescue error : Error
       StepResult::Failure.new(item.key, error.message || error.class.name, 1)

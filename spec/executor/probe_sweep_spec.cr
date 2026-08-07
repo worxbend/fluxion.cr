@@ -1,11 +1,11 @@
 require "../spec_helper"
 
-private def item(key : String) : Fluxion::ModuleItem
-  Fluxion::ModuleItem.new("tools", key, Fluxion::ItemType::Package,
+private def item(key : String) : Fluxion::StepItem
+  Fluxion::StepItem.new("tools", key, Fluxion::ItemType::Package,
     package_manager: Fluxion::PackageManager::Pacman)
 end
 
-private def items(count : Int32) : Array(Fluxion::ModuleItem)
+private def items(count : Int32) : Array(Fluxion::StepItem)
   (1..count).map { |index| item("package-#{index}") }
 end
 
@@ -16,11 +16,11 @@ private class SlowProbe < Fluxion::Executor::Probe
   getter concurrent : Int32 = 0
   getter peak : Int32 = 0
 
-  def supports?(item : Fluxion::ModuleItem) : Bool
+  def supports?(item : Fluxion::StepItem) : Bool
     true
   end
 
-  def probe(item : Fluxion::ModuleItem, runner : Fluxion::Executor::ShellRunner) : Fluxion::InstallationStatus
+  def probe(item : Fluxion::StepItem, runner : Fluxion::Executor::ShellRunner) : Fluxion::InstallationStatus
     @concurrent += 1
     @peak = Math.max(@peak, @concurrent)
     Fiber.yield
@@ -30,16 +30,16 @@ private class SlowProbe < Fluxion::Executor::Probe
 end
 
 private class ExplodingProbe < Fluxion::Executor::Probe
-  def supports?(item : Fluxion::ModuleItem) : Bool
+  def supports?(item : Fluxion::StepItem) : Bool
     true
   end
 
-  def probe(item : Fluxion::ModuleItem, runner : Fluxion::Executor::ShellRunner) : Fluxion::InstallationStatus
+  def probe(item : Fluxion::StepItem, runner : Fluxion::Executor::ShellRunner) : Fluxion::InstallationStatus
     raise "probe blew up for #{item.key}"
   end
 end
 
-private def sweep(items : Array(Fluxion::ModuleItem), probe : Fluxion::Executor::Probe)
+private def sweep(items : Array(Fluxion::StepItem), probe : Fluxion::Executor::Probe)
   registry = Fluxion::Executor::ProbeRegistry.new([probe] of Fluxion::Executor::Probe)
   Fluxion::Executor::ProbeSweep.probe_all(items, registry, Fluxion::Executor::FakeShellRunner.new)
 end
@@ -90,6 +90,6 @@ describe Fluxion::Executor::ProbeSweep do
   end
 
   it "handles an empty item list" do
-    sweep([] of Fluxion::ModuleItem, SlowProbe.new).should be_empty
+    sweep([] of Fluxion::StepItem, SlowProbe.new).should be_empty
   end
 end

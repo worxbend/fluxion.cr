@@ -182,14 +182,14 @@ module Fluxion::Executor
       step.is_a?(DotbotStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       dotbot = step.as(DotbotStep)
       # The preview is dotbot's own dry run rather than an opaque command
       # string, so what is shown is dotbot's per-link plan.
       [Command.new([dotbot.binary, "-c", dotbot.config, "--dry-run"], timeout: TIMEOUT)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       dotbot = step.as(DotbotStep)
       started = Time.instant
 
@@ -220,13 +220,13 @@ module Fluxion::Executor
       step.is_a?(NerdFontsStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       fonts = step.as(NerdFontsStep)
       config = fonts.config_path || "<generated from profile>"
       [Command.new([fonts.binary, "--config", config, "--dry-run"], timeout: TIMEOUT)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       fonts = step.as(NerdFontsStep)
       started = Time.instant
       executable = ToolBroker.new(runner).resolve(KnownTools::NERD_FONTS)
@@ -277,14 +277,14 @@ module Fluxion::Executor
       step.is_a?(BinstallerProfileStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       profile = step.as(BinstallerProfileStep)
       # A preview must never be able to install anything, so it maps onto
       # binstaller's `plan`, never its `apply`.
       [Command.new(["binstaller", "plan"] + selection(profile), timeout: PLAN_TIMEOUT)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       profile = step.as(BinstallerProfileStep)
       started = Time.instant
 

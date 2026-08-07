@@ -65,7 +65,7 @@ module Fluxion::Executor
       step.is_a?(CompiledBinaryStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       binary = step.as(CompiledBinaryStep)
 
       # A pseudo-command: there is no single process that does this, and a
@@ -83,7 +83,7 @@ module Fluxion::Executor
       [Command.new(preview)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       binary = step.as(CompiledBinaryStep)
       started = Time.instant
 
@@ -128,14 +128,14 @@ module Fluxion::Executor
       step.is_a?(ToolchainStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       toolchain = step.as(ToolchainStep)
       preview = ["download", PublicUrl.from(toolchain.install_script_url),
                  "verify", toolchain.sha256.value, "run", "sh"]
       [Command.new(preview + toolchain.install_args)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       toolchain = step.as(ToolchainStep)
       started = Time.instant
 
@@ -193,12 +193,12 @@ module Fluxion::Executor
       step.is_a?(OhMyZshStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       omz = step.as(OhMyZshStep)
       [Command.new(["download", installer_url(omz), "verify", omz.sha256.value, "run", "sh"])]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       omz = step.as(OhMyZshStep)
       started = Time.instant
 
@@ -240,7 +240,7 @@ module Fluxion::Executor
       step.is_a?(FileWriteStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       file = find(step, item)
       return [] of Command unless file
 
@@ -252,7 +252,7 @@ module Fluxion::Executor
       [Command.new(preview)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &_sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &_sink : String ->) : StepResult
       file = find(step, item)
       return StepResult::Success.new(item.key) unless file
       started = Time.instant
@@ -275,7 +275,7 @@ module Fluxion::Executor
       StepResult::Failure.new(item.key, error.message || error.class.name, 1)
     end
 
-    private def find(step : Step, item : ModuleItem) : FileWriteItem?
+    private def find(step : Step, item : StepItem) : FileWriteItem?
       step.as(FileWriteStep).files.find { |file| file.item_key == item.key }
     end
   end

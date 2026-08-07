@@ -23,7 +23,7 @@ module Fluxion::Executor
     # Callers zip the result against their own item list, so completion order
     # must never leak into it — otherwise a report would reshuffle itself
     # between runs for no reason the reader could see.
-    def probe_all(items : Array(ModuleItem), probes : ProbeRegistry,
+    def probe_all(items : Array(StepItem), probes : ProbeRegistry,
                   runner : ShellRunner) : Array(InstallationStatus)
       results = Array(InstallationStatus?).new(items.size, nil)
       return [] of InstallationStatus if items.empty?
@@ -56,7 +56,7 @@ module Fluxion::Executor
     # A probe that raises is reported as unanswerable rather than allowed to
     # kill its fiber, which would leave that item with no status at all and
     # every later item on that fiber unprobed.
-    private def probe_one(item : ModuleItem, probes : ProbeRegistry,
+    private def probe_one(item : StepItem, probes : ProbeRegistry,
                           runner : ShellRunner) : InstallationStatus
       probes.probe(item, runner)
     rescue error

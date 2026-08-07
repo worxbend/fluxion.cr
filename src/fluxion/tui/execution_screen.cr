@@ -54,26 +54,39 @@ module Fluxion::TUI
 
     def on_event(event : ExecutionEvent) : Nil
       @mutex.synchronize do
+        # Exhaustive `in`, matching `CLI::Reporter`. With `when`, a new
+        # `EventKind` broke the build for the plain reporter and was silently
+        # dropped here — so the two front ends could disagree about a run
+        # without anything saying so. The kinds this screen ignores say so
+        # explicitly.
         case event.kind
-        when .phase_started?
+        in .phase_started?
           @current_phase = event.step_name
           log("▸ #{event.step_name}")
-        when .phase_failed?
+        in .phase_failed?
           log("✘ #{event.step_name} failed")
-        when .phase_blocked?
+        in .phase_blocked?
           log("⦸ #{event.step_name} blocked by #{event.item}")
-        when .restart_required?
+        in .restart_required?
           log("⚠ restart required: #{event.item}")
-        when .module_started?
+        in .step_started?
           @current_step = event.step_name
-        when .item_started?
+        in .item_started?
           upsert(event.step_name, event.item, Item::State::Running, nil)
-        when .item_output?
+        in .item_output?
           event.output_line.try { |line| log("  #{line}") }
-        when .item_completed?
+        in .item_completed?
           event.result.try { |result| complete(event, result) }
-        when .cancelled?
+        in .cancelled?
           log("⚠ stopped at your request")
+        in .phase_completed?
+          # The item list already shows the outcome of everything in the phase.
+          nil
+        in .step_completed?
+          nil
+        in .error?
+          # Already surfaced by the ItemCompleted that carries the failure.
+          nil
         end
       end
     end

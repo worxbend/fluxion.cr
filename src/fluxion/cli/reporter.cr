@@ -27,8 +27,8 @@ module Fluxion::CLI
       in .phase_failed?     then phase_failed(event)
       in .phase_blocked?    then phase_blocked(event)
       in .restart_required? then restart_required(event)
-      in .module_started?   then step_started(event)
-      in .module_completed? then nil
+      in .step_started?     then step_started(event)
+      in .step_completed?   then nil
       in .item_started?     then item_started(event)
       in .item_output?      then item_output(event)
       in .item_completed?   then item_completed(event)

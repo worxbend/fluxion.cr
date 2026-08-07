@@ -37,7 +37,7 @@ module Fluxion::Executor
       step.is_a?(AptRepositoryStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       repository = step.as(AptRepositoryStep)
       preview = [] of String
       repository.signing_key.try do |key|
@@ -48,7 +48,7 @@ module Fluxion::Executor
       [Command.new(preview)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       repository = step.as(AptRepositoryStep)
       started = Time.instant
       installer = Installer.new(runner)
@@ -106,7 +106,7 @@ module Fluxion::Executor
       step.is_a?(RpmRepositoryStep) || step.is_a?(ZypperRepositoryStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       preview = [] of String
       signing_key(step).try do |key|
         preview.concat(["download", PublicUrl.from(key.url), "verify", key.checksum.value])
@@ -115,7 +115,7 @@ module Fluxion::Executor
       [Command.new(preview)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       started = Time.instant
       installer = Installer.new(runner)
 
@@ -205,13 +205,13 @@ module Fluxion::Executor
       step.is_a?(PacmanRepositoryStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       repository = step.as(PacmanRepositoryStep)
       [Command.new(["append", "[#{repository.repository}]", "to", repository.config,
                     "then", "sudo", "pacman", "-Sy"])]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       repository = step.as(PacmanRepositoryStep)
       started = Time.instant
 
@@ -271,7 +271,7 @@ module Fluxion::Executor
       step.is_a?(FlatpakRemoteStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       remote = step.as(FlatpakRemoteStep)
       preview = ["download", PublicUrl.from(remote.url), "verify", remote.checksum.value,
                  "then", "flatpak"]
@@ -280,7 +280,7 @@ module Fluxion::Executor
       [Command.new(preview)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       remote = step.as(FlatpakRemoteStep)
       started = Time.instant
 
@@ -319,7 +319,7 @@ module Fluxion::Executor
       step.is_a?(GpgKeyStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       key = find(step, item)
       return [] of Command unless key
 
@@ -328,7 +328,7 @@ module Fluxion::Executor
       [Command.new(preview)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       key = find(step, item)
       return StepResult::Success.new(item.key) unless key
       started = Time.instant
@@ -424,7 +424,7 @@ module Fluxion::Executor
       found
     end
 
-    private def find(step : Step, item : ModuleItem) : GpgKeyEntry?
+    private def find(step : Step, item : StepItem) : GpgKeyEntry?
       step.as(GpgKeyStep).keys.find { |key| key.item_key == item.key }
     end
   end

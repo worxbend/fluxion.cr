@@ -10,11 +10,11 @@ module Fluxion
     PhaseFailed
     PhaseBlocked
     RestartRequired
-    ModuleStarted
+    StepStarted
     ItemStarted
     ItemOutput
     ItemCompleted
-    ModuleCompleted
+    StepCompleted
     Cancelled
     Error
 
@@ -74,11 +74,11 @@ module Fluxion
     end
 
     def self.step_started(step : String) : self
-      new(step, "", EventKind::ModuleStarted)
+      new(step, "", EventKind::StepStarted)
     end
 
     def self.step_completed(step : String) : self
-      new(step, "", EventKind::ModuleCompleted)
+      new(step, "", EventKind::StepCompleted)
     end
 
     def self.item_started(step : String, item : String) : self
@@ -137,7 +137,7 @@ module Fluxion
   # A single tracked unit of work as the executor sees it: the step that owns
   # it, its stable key, and enough type information to pick a probe and a state
   # entry for it.
-  struct ModuleItem
+  struct StepItem
     getter step_name : String
     getter key : String
     getter display_name : String

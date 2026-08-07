@@ -12,17 +12,17 @@ module Fluxion::Executor
 
     # The items this step tracks. Defaults to what the step itself declares;
     # overridden where execution order differs from declaration order.
-    def items(step : Step) : Array(ModuleItem)
-      step.items.map { |item| module_item(step, item) }
+    def items(step : Step) : Array(StepItem)
+      step.items.map { |item| step_item(step, item) }
     end
 
     # Commands for one item, in order. Empty means there is nothing to do.
-    abstract def commands(step : Step, item : ModuleItem) : Array(Command)
+    abstract def commands(step : Step, item : StepItem) : Array(Command)
 
     # Runs one item. The default runs each command in order and stops at the
     # first that fails, because a later command in a sequence normally assumes
     # the earlier one worked.
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       run_commands(step, item, runner) { |line| sink.call(line) }
     end
 
@@ -31,7 +31,7 @@ module Fluxion::Executor
     # Named rather than left inline in `execute` so a subclass that adds its
     # own preconditions can still reach it, without depending on where it sits
     # in the hierarchy.
-    def run_commands(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def run_commands(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       started = Time.instant
       sequence = commands(step, item)
       return StepResult::Success.new(item.key, Time.instant - started) if sequence.empty?
@@ -52,7 +52,7 @@ module Fluxion::Executor
     end
 
     # What a dry run would do.
-    def preview(step : Step, item : ModuleItem) : StepResult::DryRun
+    def preview(step : Step, item : StepItem) : StepResult::DryRun
       StepResult::DryRun.new(item.key, commands(step, item).flat_map(&.preview))
     end
 
@@ -62,8 +62,8 @@ module Fluxion::Executor
       detail.empty? ? summary : "#{summary}: #{detail}"
     end
 
-    protected def module_item(step : Step, item : ItemRef) : ModuleItem
-      ModuleItem.new(step.name, item.key, ItemTypes.for(step), item.display,
+    protected def step_item(step : Step, item : ItemRef) : StepItem
+      StepItem.new(step.name, item.key, ItemTypes.for(step), item.display,
         ItemTypes.package_manager_for(step), step)
     end
   end
@@ -133,16 +133,16 @@ module Fluxion::Executor
     # Pre-install actions run before the packages, and are tracked as their own
     # items so a failed metadata refresh is visible rather than folded into the
     # first package's failure.
-    def items(step : Step) : Array(ModuleItem)
+    def items(step : Step) : Array(StepItem)
       packages = step.as(PackagesStep)
       actions = packages.actions.map_with_index do |action, index|
-        ModuleItem.new(step.name, "action[#{index}]", ItemType::PackageAction,
+        StepItem.new(step.name, "action[#{index}]", ItemType::PackageAction,
           action.to_s, packages.package_manager, step)
       end
       actions + super
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       packages = step.as(PackagesStep)
       manager = packages.package_manager
 
@@ -167,7 +167,7 @@ module Fluxion::Executor
       step.is_a?(FlatpakStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       remote = step.as(FlatpakStep).remote
       [Command.new(["flatpak", "install", "-y", remote, item.key], timeout: INSTALL_TIMEOUT)]
     end
@@ -181,7 +181,7 @@ module Fluxion::Executor
       step.is_a?(ToolPackagesStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       tool = step.as(ToolPackagesStep)
       package = tool.packages.find { |candidate| candidate.name == item.key }
       return [] of Command unless package
@@ -190,7 +190,7 @@ module Fluxion::Executor
 
     # Checked up front so a missing backend produces an actionable message
     # instead of a bare command-not-found from each package in turn.
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       backend = step.as(ToolPackagesStep).backend
       unless runner.command_exists?(backend.command)
         return StepResult::Failure.new(item.key,
@@ -209,7 +209,7 @@ module Fluxion::Executor
       step.is_a?(SdkmanPackagesStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       sdkman = step.as(SdkmanPackagesStep)
       candidate = sdkman.candidates.find { |value| value.candidate == item.key }
       return [] of Command unless candidate
@@ -226,7 +226,7 @@ module Fluxion::Executor
       step.is_a?(SystemUpdateStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       update = step.as(SystemUpdateStep)
       manager = update.package_manager
       timeout = update.timeout
@@ -268,7 +268,7 @@ module Fluxion::Executor
       step.is_a?(UserGroupsStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       groups = step.as(UserGroupsStep)
       _, _, group = item.key.rpartition(':')
       group = item.key if group.empty?
@@ -282,7 +282,7 @@ module Fluxion::Executor
 
     # A missing group usually means a typo or an uninstalled package, and
     # quietly creating a real but useless group would hide that.
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       groups = step.as(UserGroupsStep)
       unless groups.create_missing?
         _, _, group = item.key.rpartition(':')
@@ -307,7 +307,7 @@ module Fluxion::Executor
       step.is_a?(GitConfigStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       config = step.as(GitConfigStep)
       _, _, key = item.key.partition(':')
       value = config.entries[key]?
@@ -331,7 +331,7 @@ module Fluxion::Executor
       step.is_a?(GitRepoStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       repo = step.as(GitRepoStep).repos.find { |candidate| candidate.destination == item.key }
       return [] of Command unless repo
 
@@ -359,7 +359,7 @@ module Fluxion::Executor
 
     # An existing destination is inspected, never pulled or reset: overwriting
     # a checkout the user has been working in would lose their work.
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       repo = step.as(GitRepoStep).repos.find { |candidate| candidate.destination == item.key }
       return StepResult::Success.new(item.key) unless repo
 
@@ -374,7 +374,7 @@ module Fluxion::Executor
       verify(repo, destination, item, runner)
     end
 
-    private def verify(repo : GitRepo, destination : String, item : ModuleItem, runner : ShellRunner) : StepResult
+    private def verify(repo : GitRepo, destination : String, item : StepItem, runner : ShellRunner) : StepResult
       env = {"GIT_OPTIONAL_LOCKS" => "0"}
 
       origin = runner.run(Command.new(["git", "-C", destination, "remote", "get-url", "origin"],
@@ -412,7 +412,7 @@ module Fluxion::Executor
       step.is_a?(SystemdUnitStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       units = step.as(SystemdUnitStep)
       unit = units.units.find { |candidate| candidate.qualified_name == item.key }
       return [] of Command unless unit
@@ -432,7 +432,7 @@ module Fluxion::Executor
 
     # A profile that mentions units should stay usable in a container or an
     # image build, so a missing systemd skips rather than fails.
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       unless runner.command_exists?("systemctl")
         return StepResult::Skipped.new(item.key, "systemctl is not available")
       end
@@ -454,7 +454,7 @@ module Fluxion::Executor
       step.is_a?(SystemSettingStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       setting = step.as(SystemSettingStep)
 
       argv = case item.key
@@ -489,14 +489,14 @@ module Fluxion::Executor
       step.is_a?(DefaultShellStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       shell = step.as(DefaultShellStep).shell_path
       [Command.new(["sudo", "chsh", "-s", shell, Host.target_user], timeout: TIMEOUT)]
     end
 
     # Setting a login shell that does not exist locks the user out of their own
     # account, so this is checked before the change rather than after.
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       shell = step.as(DefaultShellStep).shell_path
       info = File.info?(shell)
       unless info && info.file? && info.permissions.owner_execute?
@@ -514,11 +514,11 @@ module Fluxion::Executor
       step.is_a?(ShellReloadStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       [Command.new(step.as(ShellReloadStep).reload_argv, timeout: TIMEOUT)]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       result = run_commands(step, item, runner) { |line| sink.call(line) }
       return result unless result.is_a?(StepResult::Failure)
 
@@ -571,7 +571,7 @@ module Fluxion::Executor
       step.is_a?(ShellCommandStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       command = find(step, item)
       return [] of Command unless command
 
@@ -585,7 +585,7 @@ module Fluxion::Executor
       )]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       command = find(step, item)
       return StepResult::Success.new(item.key) unless command
 
@@ -595,7 +595,7 @@ module Fluxion::Executor
       run_commands(step, item, runner) { |line| sink.call(line) }
     end
 
-    private def find(step : Step, item : ModuleItem) : ShellCommandItem?
+    private def find(step : Step, item : StepItem) : ShellCommandItem?
       step.as(ShellCommandStep).commands.find { |command| command.name == item.key }
     end
   end
@@ -608,7 +608,7 @@ module Fluxion::Executor
       step.is_a?(ShellScriptStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       script = find(step, item)
       return [] of Command unless script
 
@@ -632,7 +632,7 @@ module Fluxion::Executor
       )]
     end
 
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       script = find(step, item)
       return StepResult::Success.new(item.key) unless script
 
@@ -664,7 +664,7 @@ module Fluxion::Executor
       first.lchop("#!").strip.split(/\s+/).first? || "/bin/bash"
     end
 
-    private def find(step : Step, item : ModuleItem) : ShellScriptItem?
+    private def find(step : Step, item : StepItem) : ShellScriptItem?
       step.as(ShellScriptStep).scripts.find { |script| script.name == item.key }
     end
   end
@@ -677,14 +677,14 @@ module Fluxion::Executor
       step.is_a?(AssertStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       assert = step.as(AssertStep)
       [Command.new(assert.argv, working_dir: assert.working_dir, timeout: TIMEOUT)]
     end
 
     # The configured message replaces the command output: it is written for
     # someone who has to go fix the machine, not for a debugging session.
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       result = run_commands(step, item, runner) { |line| sink.call(line) }
       return result unless result.is_a?(StepResult::Failure)
       StepResult::Failure.new(item.key, step.as(AssertStep).message, result.exit_code, result.elapsed)
@@ -699,7 +699,7 @@ module Fluxion::Executor
       step.is_a?(ManualStep)
     end
 
-    def commands(step : Step, item : ModuleItem) : Array(Command)
+    def commands(step : Step, item : StepItem) : Array(Command)
       probe = step.probe_command
       return [] of Command unless probe
       [Command.new(["/bin/bash", "-lc", probe], timeout: TIMEOUT)]
@@ -707,7 +707,7 @@ module Fluxion::Executor
 
     # Without a probe there is no way to know the human did the thing, so the
     # step fails with its message rather than silently passing.
-    def execute(step : Step, item : ModuleItem, runner : ShellRunner, &_sink : String ->) : StepResult
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &_sink : String ->) : StepResult
       manual = step.as(ManualStep)
       probe = manual.probe_command
       unless probe

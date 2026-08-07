@@ -74,7 +74,7 @@ module Fluxion::CLI
       # Gathered first so the whole sweep can be probed at once. Declaration
       # order is preserved through both the sweep and the zip below, so the
       # report reads in the order the profile is written.
-      items = [] of ModuleItem
+      items = [] of StepItem
       profile.steps.each do |step|
         executor = registry.for(step)
         next unless executor
@@ -109,7 +109,7 @@ module Fluxion::CLI
       "#{step}\u0000#{key}\u0000#{type}"
     end
 
-    private def self.classify(item : ModuleItem, status : InstallationStatus,
+    private def self.classify(item : StepItem, status : InstallationStatus,
                               document : State::Document) : Entry
       recorded = document.find(item.step_name, item.key, item.item_type.json_name)
 

@@ -242,13 +242,13 @@ module Fluxion::Executor
       # lookup re-reads and re-parses the whole state file on every call, so
       # asking it once per item made a run cost a file read and a JSON parse
       # per package — the same mistake buffering the writes here avoids.
-      def recorded(item : ModuleItem) : InstallationStatus::InstalledFromState?
+      def recorded(item : StepItem) : InstallationStatus::InstalledFromState?
         record = document.try(&.find(item.step_name, item.key, item.item_type.json_name))
         return unless record
         InstallationStatus::InstalledFromState.new(item.key, record.completed_at, record.version)
       end
 
-      def item_succeeded(item : ModuleItem, result : StepResult::Success) : Nil
+      def item_succeeded(item : StepItem, result : StepResult::Success) : Nil
         return unless recording?
         document.try do |state|
           state.record(State::ItemRecord.new(
@@ -418,7 +418,7 @@ module Fluxion::Executor
       any_failed
     end
 
-    private def run_item(step : Step, item : ModuleItem, executor : StepExecutor,
+    private def run_item(step : Step, item : StepItem, executor : StepExecutor,
                          options : RunOptions, listener : ExecutionListener,
                          recorder : Recorder? = nil) : StepResult
       listener.on_event(ExecutionEvent.item_started(step.name, item.key))
@@ -452,7 +452,7 @@ module Fluxion::Executor
     end
 
     # Whether this item can be skipped, and on what evidence.
-    private def skip_decision(item : ModuleItem, options : RunOptions,
+    private def skip_decision(item : StepItem, options : RunOptions,
                               recorder : Recorder?) : InstallationStatus?
       return unless options.mode.probes?
 
@@ -469,7 +469,7 @@ module Fluxion::Executor
     # `confirm` items need explicit approval. Fluxion does not prompt for them
     # in either plain or TUI mode: a run that waits for input is a run that
     # hangs unattended.
-    private def step_requires_approval?(step : Step, item : ModuleItem) : Bool
+    private def step_requires_approval?(step : Step, item : StepItem) : Bool
       case step
       when ShellCommandStep
         step.commands.any? { |command| command.name == item.key && command.confirmation_required? }

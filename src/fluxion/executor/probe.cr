@@ -10,8 +10,8 @@ module Fluxion::Executor
   # difference matters: absence of evidence would silently reinstall things,
   # and the user is told which items Fluxion could not check.
   abstract class Probe
-    abstract def supports?(item : ModuleItem) : Bool
-    abstract def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    abstract def supports?(item : StepItem) : Bool
+    abstract def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
   end
 
   # Picks the first probe that handles an item.
@@ -46,7 +46,7 @@ module Fluxion::Executor
       self
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       probe = @probes.find(&.supports?(item))
       unless probe
         return InstallationStatus::Unknown.new(item.key,
@@ -66,11 +66,11 @@ module Fluxion::Executor
 
   # System packages, via each manager's query command.
   class PackageProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       item.item_type.package? && !item.package_manager.nil?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       manager = item.package_manager.not_nil!
 
       unless runner.command_exists?(query_command(manager))
@@ -126,11 +126,11 @@ module Fluxion::Executor
 
   # Flatpak applications.
   class FlatpakProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       item.item_type.flatpak?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       return InstallationStatus::Unknown.new(item.key, "flatpak is not on PATH") unless runner.command_exists?("flatpak")
 
       result = runner.run(Command.new(
@@ -147,11 +147,11 @@ module Fluxion::Executor
 
   # Flatpak remotes.
   class FlatpakRemoteProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       item.item_type.flatpak_remote?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       return InstallationStatus::Unknown.new(item.key, "flatpak is not on PATH") unless runner.command_exists?("flatpak")
 
       result = runner.run(Command.new(["flatpak", "remotes", "--columns=name"], timeout: SLOW_PROBE_TIMEOUT))
@@ -173,11 +173,11 @@ module Fluxion::Executor
     TYPES = [ItemType::AptRepository, ItemType::RpmRepository,
              ItemType::ZypperRepository, ItemType::PacmanRepository]
 
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       TYPES.includes?(item.item_type)
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       if item.item_type.pacman_repository?
         # Pacman repositories are sections inside a shared config file, so the
         # section header is what marks presence.
@@ -200,11 +200,11 @@ module Fluxion::Executor
   class PathProbe < Probe
     TYPES = [ItemType::CompiledBinary, ItemType::FileWrite, ItemType::OhMyZsh, ItemType::GpgKey]
 
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       TYPES.includes?(item.item_type) && item.key.starts_with?('/')
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       info = File.info?(item.key)
       return InstallationStatus::NotInstalled.new(item.key) unless info
 
@@ -220,7 +220,7 @@ module Fluxion::Executor
 
     # Best-effort: a binary that does not answer `--version` is still
     # installed, so a failure here is not evidence of absence.
-    private def detect_version(item : ModuleItem, runner : ShellRunner) : String?
+    private def detect_version(item : StepItem, runner : ShellRunner) : String?
       result = runner.run(Command.new([item.key, "--version"], timeout: 3.seconds))
       return unless result.success?
       result.stdout.lines.first?.try(&.match(/(\d+\.\d+[\w.\-]*)/)).try(&.[1])
@@ -229,11 +229,11 @@ module Fluxion::Executor
 
   # The user's login shell.
   class CommandProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       item.item_type.default_shell?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       user = Host.target_user
       result = runner.run(Command.new(["getent", "passwd", user], timeout: 5.seconds))
       unless result.success?
@@ -253,11 +253,11 @@ module Fluxion::Executor
 
   # Cloned repositories, checked by origin and HEAD rather than mere presence.
   class GitRepoProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       item.item_type.git_repo?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       destination = Host.command_exists?("git") ? expand(item.key) : nil
       return InstallationStatus::Unknown.new(item.key, "git is not on PATH") unless destination
       return InstallationStatus::NotInstalled.new(item.key) unless Dir.exists?(File.join(destination, ".git"))
@@ -289,11 +289,11 @@ module Fluxion::Executor
 
   # Git configuration keys, compared by value so drift is visible.
   class GitConfigProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       item.item_type.git_config?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       scope, _, key = item.key.partition(':')
       return InstallationStatus::Unknown.new(item.key, "malformed git-config item key") if key.empty?
 
@@ -312,11 +312,11 @@ module Fluxion::Executor
 
   # systemd units, checked against the state the profile asked for.
   class SystemdUnitProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       item.item_type.systemd_unit?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       # In a container or an image build there is no systemd, and a profile
       # that mentions units should still be usable there.
       return InstallationStatus::Unknown.new(item.key, "systemctl is not available") unless runner.command_exists?("systemctl")
@@ -355,11 +355,11 @@ module Fluxion::Executor
 
   # Group membership, read from the group database.
   class UserGroupProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       item.item_type.user_group?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       user, _, group = item.key.rpartition(':')
       group = item.key if group.empty?
       target = user.presence || Host.target_user
@@ -376,11 +376,11 @@ module Fluxion::Executor
 
   # Installed font families.
   class NerdFontProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       item.item_type.nerd_font?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       return InstallationStatus::Unknown.new(item.key, "fc-list is not on PATH") unless runner.command_exists?("fc-list")
 
       result = runner.run(Command.new(["fc-list", ":", "family"], timeout: SLOW_PROBE_TIMEOUT))
@@ -400,11 +400,11 @@ module Fluxion::Executor
   # with no observable footprint — shell commands, scripts, manual checkpoints
   # — skippable at all.
   class ProbeCommandProbe < Probe
-    def supports?(item : ModuleItem) : Bool
+    def supports?(item : StepItem) : Bool
       !item.step.try(&.probe_command).nil?
     end
 
-    def probe(item : ModuleItem, runner : ShellRunner) : InstallationStatus
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       command = item.step.try(&.probe_command)
       return InstallationStatus::Unknown.new(item.key, "no probeCommand configured") unless command
 

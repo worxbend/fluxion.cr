@@ -138,9 +138,19 @@ module Fluxion::CLI
       return ExitCode::Cancelled if cancellation.cancelled?
       # A preview never pauses. Reporting 75 for one would tell a script the
       # run stopped at a checkpoint when nothing ran at all.
-      return ExitCode::Paused if summary.paused > 0 && !read_only
+      return paused_code(summary) if summary.paused > 0 && !read_only
       return ExitCode::ExternalDependencyError unless summary.ok?
       ExitCode::Success
+    end
+
+    # A checkpoint may name its own code — `interrupt.exitCode`, range-checked
+    # by the parser and documented in both the schema and the ExitCode table.
+    # Branching on a custom code is the only reason to declare one, so ignoring
+    # it made the feature look present and do nothing.
+    private def paused_code(summary : Executor::RunSummary) : ExitCode
+      declared = summary.paused_exit_code
+      return ExitCode::Paused unless declared
+      ExitCode.from_value?(declared) || ExitCode.new(declared)
     end
   end
 

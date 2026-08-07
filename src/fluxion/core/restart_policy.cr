@@ -59,5 +59,17 @@ module Fluxion
     def config_name : String
       to_s
     end
+
+    # The spelling used in JSON output.
+    #
+    # Deliberately separate from `to_s`: `plan --format json` emitted
+    # `prompt_logout` while `status`/`explain --format json` emitted the
+    # hyphenated `to_s`, so a script branching on `restartEffect` matched one
+    # command and silently never matched the other. `to_s` is left alone
+    # because `State::Fingerprint` hashes it, and changing it would make every
+    # completed phase look edited.
+    def json_name : String
+      to_s.tr("-", "_")
+    end
   end
 end

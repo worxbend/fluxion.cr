@@ -189,7 +189,7 @@ module Fluxion::CLI
           {
             "name"          => phase.name,
             "dependsOn"     => phase.depends_on,
-            "restartEffect" => restart_effect(phase.restart_policy),
+            "restartEffect" => phase.restart_policy.json_name,
             "steps"         => phase.steps.map { |step| step_json(step) },
           }
         end,
@@ -212,14 +212,6 @@ module Fluxion::CLI
           }
         end,
       }
-    end
-
-    private def restart_effect(policy : RestartPolicy) : String
-      case policy
-      when RestartPolicy::PromptLogout     then "prompt_logout"
-      when RestartPolicy::RequiresNewShell then "requires_new_shell"
-      else                                      "none"
-      end
     end
   end
 

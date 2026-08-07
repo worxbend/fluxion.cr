@@ -80,6 +80,15 @@ module Fluxion::Executor
     # Where to resume from, when the run stopped early.
     property next_phase : String?
 
+    # The exit code the checkpoint that stopped the run asked for.
+    #
+    # A profile may set `interrupt.exitCode`, and the parser range-checks it,
+    # but the value used to stop here: `RunSummary` counted pauses and nothing
+    # else, so the CLI always returned 75 and a wrapper script branching on a
+    # custom code never fired. The first checkpoint wins, because it is the one
+    # that ended the run.
+    property paused_exit_code : Int32?
+
     def initialize
     end
 
@@ -89,7 +98,9 @@ module Fluxion::Executor
       when StepResult::Failure then @failed += 1
       when StepResult::Skipped then @skipped += 1
       when StepResult::DryRun  then @dry_run += 1
-      when StepResult::Paused  then @paused += 1
+      when StepResult::Paused
+        @paused += 1
+        @paused_exit_code ||= result.exit_code
       end
     end
 

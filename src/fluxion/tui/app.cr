@@ -99,10 +99,41 @@ module Fluxion::TUI
     end
 
     # Enters the alternate screen in raw mode and always restores both.
+    # The terminal currently in the alternate screen, if any. Only ever one:
+    # screens are entered and left one at a time.
+    @@entered : CryTUI::Terminal? = nil
+    @@restore_installed = false
+
     def self.terminal(& : CryTUI::Terminal ->) : Nil
       backend = CryTUI::AnsiBackend.for_terminal(STDOUT, STDOUT)
       terminal = CryTUI::Terminal.new(backend)
-      terminal.run(STDIN) { |active| yield active }
+
+      install_emergency_restore
+      @@entered = terminal
+      begin
+        terminal.run(STDIN) { |active| yield active }
+      ensure
+        @@entered = nil
+      end
+    end
+
+    # `Terminal#run` and `IO::FileDescriptor#raw` both restore through `ensure`,
+    # which covers a normal return and an exception but not `exit` — and a
+    # second Ctrl-C during `apply` exits straight from the signal-handling
+    # fiber. That left the user in the alternate screen with echo off and the
+    # cursor hidden, having to type `reset` blind, which is exactly what this
+    # class's header comment promises never happens.
+    #
+    # Registered once per process; `Terminal#stop` and `cooked!` are both
+    # no-ops when there is nothing to undo.
+    private def self.install_emergency_restore : Nil
+      return if @@restore_installed
+      @@restore_installed = true
+
+      at_exit do
+        @@entered.try(&.stop)
+        STDIN.cooked! rescue nil
+      end
     end
 
     private def terminal(& : CryTUI::Terminal ->) : Nil

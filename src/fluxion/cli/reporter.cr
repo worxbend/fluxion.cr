@@ -50,11 +50,16 @@ module Fluxion::CLI
 
     private def phase_failed(event : ExecutionEvent) : Nil
       close_item
+      # Accumulated here rather than read from the orchestrator's summary: the
+      # Reporter builds its own, so without this the closing roll-up below
+      # could never print the lines it was written to print.
+      @summary.failed_phases << event.step_name
       @output.puts "#{Style.bold_red("[FAIL]")} phase #{event.step_name}"
     end
 
     private def phase_blocked(event : ExecutionEvent) : Nil
       close_item
+      @summary.blocked_phases << event.step_name
       @output.puts "#{Style.yellow("[BLOCK]")} #{event.step_name} #{Style.dim("waits for #{event.item}")}"
     end
 

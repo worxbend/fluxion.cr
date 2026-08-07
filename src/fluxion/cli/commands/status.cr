@@ -416,7 +416,7 @@ module Fluxion::CLI
           "kind"                => "phase",
           "name"                => phase.name,
           "dependsOn"           => phase.depends_on,
-          "restartEffect"       => phase.restart_policy.to_s,
+          "restartEffect"       => phase.restart_policy.json_name,
           "continueOnStepError" => phase.continue_on_step_error?,
           "steps"               => phase.steps.map { |step| {"name" => step.name, "type" => step.kind, "items" => step.items.size} },
         }.to_json)

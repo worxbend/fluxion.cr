@@ -321,7 +321,16 @@ module Fluxion::Config
 
     private def build_by_step_type(context : Context, spec : Node, kind : PlanKinds::Kind, name : String, description : String?, probe : String?) : Step?
       type = PlanKinds::STEP_TYPES[kind.id]?
-      return unless type
+      unless type
+        # A kind listed in `PlanKinds::ALL` but missing from `STEP_TYPES` used to
+        # return nil here, and the nil was swallowed twice on the way out — so
+        # `fluxion kinds` listed the kind, `fluxion validate` reported success,
+        # and the step simply vanished from `plan` and `apply` with nothing said.
+        # The executor side has always been loud about a missing executor; this
+        # matches it.
+        context.error(spec.path, "step kind '#{kind.id}' has no builder registered")
+        return
+      end
       StepParser.build_kind(context, spec, type, name, description, probe)
     end
 

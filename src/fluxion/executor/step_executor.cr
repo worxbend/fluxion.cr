@@ -63,55 +63,8 @@ module Fluxion::Executor
     end
 
     protected def module_item(step : Step, item : ItemRef) : ModuleItem
-      ModuleItem.new(step.name, item.key, item_type_for(step), item.display, package_manager_for(step), step)
-    end
-
-    # One branch per step kind. The mapping is intentionally a flat table: any
-    # decomposition would only hide where a kind's item type is decided.
-    #
-    # ameba:disable Metrics/CyclomaticComplexity
-    protected def item_type_for(step : Step) : ItemType
-      case step
-      when PackagesStep          then ItemType::Package
-      when FlatpakStep           then ItemType::Flatpak
-      when ToolPackagesStep      then ItemType::ToolPackage
-      when SdkmanPackagesStep    then ItemType::SdkmanPackage
-      when SystemUpdateStep      then ItemType::SystemUpdate
-      when AptRepositoryStep     then ItemType::AptRepository
-      when RpmRepositoryStep     then ItemType::RpmRepository
-      when ZypperRepositoryStep  then ItemType::ZypperRepository
-      when PacmanRepositoryStep  then ItemType::PacmanRepository
-      when FlatpakRemoteStep     then ItemType::FlatpakRemote
-      when GpgKeyStep            then ItemType::GpgKey
-      when CompiledBinaryStep    then ItemType::CompiledBinary
-      when BinstallerProfileStep then ItemType::BinstallerProfile
-      when NerdFontsStep         then ItemType::NerdFont
-      when DotbotStep            then ItemType::Dotbot
-      when ToolchainStep         then ItemType::Toolchain
-      when OhMyZshStep           then ItemType::OhMyZsh
-      when ShellScriptStep       then ItemType::ShellScript
-      when ShellCommandStep      then ItemType::ShellCommand
-      when ShellReloadStep       then ItemType::ShellReload
-      when DefaultShellStep      then ItemType::DefaultShell
-      when AssertStep            then ItemType::Assert
-      when ManualStep            then ItemType::Manual
-      when InterruptStep         then ItemType::Interrupt
-      when UserGroupsStep        then ItemType::UserGroup
-      when GitConfigStep         then ItemType::GitConfig
-      when GitRepoStep           then ItemType::GitRepo
-      when SystemdUnitStep       then ItemType::SystemdUnit
-      when SystemSettingStep     then ItemType::SystemSetting
-      when FileWriteStep         then ItemType::FileWrite
-      else                            ItemType::ShellCommand
-      end
-    end
-
-    protected def package_manager_for(step : Step) : PackageManager?
-      case step
-      when PackagesStep     then step.package_manager
-      when SystemUpdateStep then step.package_manager
-      when FlatpakStep      then PackageManager::Flatpak
-      end
+      ModuleItem.new(step.name, item.key, ItemTypes.for(step), item.display,
+        ItemTypes.package_manager_for(step), step)
     end
   end
 

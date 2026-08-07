@@ -87,20 +87,30 @@ parses every one of them, so a regression in any parser surfaces there first.
 
 ## Adding a step kind
 
-Four places, in order:
+Six places, in order:
 
 1. **`core/steps/`** — the validated data. No IO.
 2. **`config/step_parser/`** — YAML in, that type out.
 3. **`config/plan_kinds.cr`** — the kind id, its category, and its entry in
    `STEP_TYPES`. `fluxion kinds`, `validate`, the did-you-mean suggester, and
    the mapper all read that one table, so they cannot drift apart.
-4. **`executor/step_executor.cr`** or **`executor/executors/`** — the commands.
+4. **`core/item_type.cr`** and **`executor/item_types.cr`** — the `ItemType`
+   member and the arm that maps the step onto it. This is the discriminator
+   written to the state file and the key probes dispatch on, so getting it
+   wrong misreports the item rather than failing.
+5. **`executor/step_executor.cr`** or **`executor/executors/`** — the commands.
    Register it in `ExecutorRegistry.default`.
-5. **`executor/probe.cr`** — how to tell whether it is already there, if it has
+6. **`executor/probe.cr`** — how to tell whether it is already there, if it has
    an observable footprint. Register it in `ProbeRegistry.default`.
 
 Then document it in `docs/config-schema.md`, in the same order the table
 declares it.
+
+Steps 3 and 4 are the ones that used to fail silently — a kind missing from
+`STEP_TYPES` vanished from the profile while `validate` still reported success,
+and a kind missing from the `ItemType` table recorded its items under the wrong
+discriminator. Both now fail loudly, and `spec/config/kind_tables_spec.cr`
+checks the tables against each other and against every `Step` subclass.
 
 ## Adding a command
 

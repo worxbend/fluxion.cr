@@ -89,32 +89,12 @@ module Fluxion::Config
       end
 
       if source.includes?('[')
-        close = source.index(']')
-        unless close
+        options = apt_options_region(source)
+        unless options
           context.error(node.path, "has unterminated options")
           return
         end
-        open = source.index!('[')
-        options = source[(open + 1)...close].strip
-        if options.empty?
-          context.error(node.path, "options must not be empty")
-        else
-          seen = Set(String).new
-          options.split(/\s+/).each do |option|
-            key, _, value = option.partition('=')
-            if value.empty?
-              context.error(node.path, "option must use name=value syntax")
-              next
-            end
-            key = key.downcase
-            unless APT_SOURCE_OPTIONS.includes?(key)
-              context.error(node.path, "option is not allowed: #{key}",
-                "only #{APT_SOURCE_OPTIONS.join(" and ")} are accepted")
-              next
-            end
-            context.error(node.path, "option must not be repeated: #{key}") unless seen.add?(key)
-          end
-        end
+        validate_apt_options(context, node, options)
       end
 
       # The repository URI is the part that decides what gets installed, so it
@@ -129,11 +109,47 @@ module Fluxion::Config
       end
     end
 
-    private def apt_option(source : String, name : String) : String?
+    # The text between `[` and `]`, or nil when the brackets are unterminated.
+    #
+    # Shared with `apt_option` below, which parsed the same region separately —
+    # two readings of one syntax that could disagree about what an option is.
+    private def apt_options_region(source : String) : String?
       open = source.index('[')
       close = source.index(']')
       return unless open && close && close > open
-      source[(open + 1)...close].split(/\s+/).each do |option|
+      source[(open + 1)...close].strip
+    end
+
+    # Each option must be name=value, from the accepted set, and appear once.
+    private def validate_apt_options(context : Context, node : Node, options : String) : Nil
+      if options.empty?
+        context.error(node.path, "options must not be empty")
+        return
+      end
+
+      seen = Set(String).new
+      options.split(/\s+/).each do |option|
+        key, _, value = option.partition('=')
+        if value.empty?
+          context.error(node.path, "option must use name=value syntax")
+          next
+        end
+
+        key = key.downcase
+        unless APT_SOURCE_OPTIONS.includes?(key)
+          context.error(node.path, "option is not allowed: #{key}",
+            "only #{APT_SOURCE_OPTIONS.join(" and ")} are accepted")
+          next
+        end
+
+        context.error(node.path, "option must not be repeated: #{key}") unless seen.add?(key)
+      end
+    end
+
+    private def apt_option(source : String, name : String) : String?
+      region = apt_options_region(source)
+      return unless region
+      region.split(/\s+/).each do |option|
         key, _, value = option.partition('=')
         return value if key.downcase == name && !value.empty?
       end

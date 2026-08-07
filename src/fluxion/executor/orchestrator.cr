@@ -128,12 +128,33 @@ module Fluxion::Executor
       phases = select_phases(profile, options)
       recorder = Recorder.new(@state, options)
 
-      # A source setup configures a repository the packages that follow depend
-      # on, so it runs first and a failure there stops the run.
-      unless run_source_setups(profile, options, listener, summary, cancellation, recorder)
-        return summary
+      # Buffered state is flushed even when an error escapes the loop below.
+      # `Recorder` deliberately holds every successful item in memory and writes
+      # once, so without this a run that installed fifty packages and then hit
+      # an unexpected failure recorded none of them — leaving
+      # `--skip-already-installed` useless exactly when it matters most, and no
+      # resume point for a run that got most of the way through.
+      begin
+        # A source setup configures a repository the packages that follow depend
+        # on, so it runs first and a failure there stops the run.
+        unless run_source_setups(profile, options, listener, summary, cancellation, recorder)
+          return summary
+        end
+
+        run_phases(phases, options, listener, summary, cancellation, recorder)
+        recorder.resume_at(nil) if summary.next_phase.nil? && summary.ok?
+      ensure
+        recorder.flush
       end
 
+      summary
+    end
+
+    # The phase traversal proper: ordering, blocking, fingerprint skips, and
+    # what each outcome means for the rest of the run.
+    private def run_phases(phases : Array(Phase), options : RunOptions,
+                           listener : ExecutionListener, summary : RunSummary,
+                           cancellation : CancellationSignal, recorder : Recorder) : Nil
       completed = Set(String).new
 
       phases.each do |phase|
@@ -185,10 +206,6 @@ module Fluxion::Executor
           break
         end
       end
-
-      recorder.resume_at(nil) if summary.next_phase.nil? && summary.ok?
-      recorder.flush
-      summary
     end
 
     # Buffers state changes and writes them once.

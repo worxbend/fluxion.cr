@@ -16,6 +16,19 @@ private def profile(phases : Array(Fluxion::Phase))
   Fluxion::Profile.new("test", Fluxion::TargetOs.new(Fluxion::Distribution::Fedora), phases)
 end
 
+# Raises something outside the closed error set, standing in for a genuine bug
+# escaping mid-run.
+private class ExplodingRunner < Fluxion::Executor::FakeShellRunner
+  def initialize(@trigger : String)
+    super()
+  end
+
+  def run(command : Fluxion::Executor::Command, &sink : String ->) : Fluxion::ProcessResult
+    raise "unexpected" if command.argv.join(' ').includes?(@trigger)
+    super(command, &sink)
+  end
+end
+
 private def run(subject : Fluxion::Profile,
                 runner : Fluxion::Executor::FakeShellRunner = Fluxion::Executor::FakeShellRunner.new,
                 options : Fluxion::Executor::RunOptions = Fluxion::Executor::RunOptions.new,
@@ -328,5 +341,28 @@ describe "dry-run and interrupts" do
 
     summary.paused.should eq(1)
     runner.ran?("install -y curl").should be_false
+  end
+
+  it "writes what it recorded even when an error escapes the run" do
+    # `Recorder` buffers every success and writes once, so an escaping error
+    # used to discard the whole run's state: fifty installed packages recorded
+    # as none, and `--skip-already-installed` useless on the next run.
+    directory = File.tempname("fluxion-flush")
+    begin
+      store = Fluxion::State::Store.new(directory)
+      subject = profile([
+        phase("base", [packages("tools", "git", "boom")] of Fluxion::Step),
+      ])
+
+      expect_raises(Exception, "unexpected") do
+        run(subject, runner: ExplodingRunner.new("boom"), store: store)
+      end
+
+      # `git` succeeded before the explosion and must have survived it.
+      document = store.load("default")
+      document.find("tools", "git", Fluxion::ItemType::Package.json_name).should_not be_nil
+    ensure
+      FileUtils.rm_rf(directory)
+    end
   end
 end

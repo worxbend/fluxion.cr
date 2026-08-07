@@ -125,13 +125,24 @@ module Fluxion
     # noise beside the subprocess each probe spawns anyway — see
     # `Executor::ProbeSweep`, which is where that cost actually went.
     def command_exists?(command : String) : Bool
-      return false if command.empty? || command.includes?('/') || command.includes?('\\')
+      !resolve_command(command).nil?
+    end
 
-      (ENV["PATH"]? || "").split(Process::PATH_DELIMITER).any? do |directory|
-        next false if directory.empty?
-        info = File.info?(File.join(directory, command))
-        !info.nil? && info.file? && info.permissions.owner_execute?
+    # Where `command` would be found on `PATH`, or nil.
+    #
+    # One scan answering both questions: `ToolBroker` used to ask
+    # `command_exists?` and then walk `PATH` itself, so the two could disagree —
+    # and did, once the runner became substitutable.
+    def resolve_command(command : String) : String?
+      return if command.empty? || command.includes?('/') || command.includes?('\\')
+
+      (ENV["PATH"]? || "").split(Process::PATH_DELIMITER).each do |directory|
+        next if directory.empty?
+        candidate = File.join(directory, command)
+        info = File.info?(candidate)
+        return candidate if info && info.file? && info.permissions.owner_execute?
       end
+      nil
     end
 
     # The account whose home and groups Fluxion should act on.

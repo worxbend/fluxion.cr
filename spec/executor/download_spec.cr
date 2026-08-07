@@ -134,11 +134,31 @@ describe Fluxion::Executor::SignatureVerifier do
     end
   end
 
-  it "refuses a weak hash algorithm" do
+  it "refuses a weak hash algorithm, naming it" do
     # The hash algorithm is the eighth field; 2 is SHA-1.
     status = "[GNUPG:] VALIDSIG BC528686B50D79E339D3721CEB3E94ADBE1229CF 2026-08-01 1754000000 0 4 0 1 2 00 " \
              "BC528686B50D79E339D3721CEB3E94ADBE1229CF\n"
-    expect_raises(Fluxion::TrustError, /unsupported public-key or hash algorithm/) do
+    error = expect_raises(Fluxion::TrustError, /hash algorithm 2, which is not accepted/) do
+      Fluxion::Executor::SignatureVerifier.verify("a", "a.asc", signer, runner_with(status))
+    end
+    # Reported separately from the public-key case, so the reader knows which
+    # of the two was the problem.
+    error.message.to_s.should_not contain("public-key algorithm")
+  end
+
+  it "refuses an unaccepted public-key algorithm, naming it" do
+    # The seventh field is the public-key algorithm; 20 is ElGamal sign+encrypt.
+    status = "[GNUPG:] VALIDSIG BC528686B50D79E339D3721CEB3E94ADBE1229CF 2026-08-01 1754000000 0 4 0 20 8 00 " \
+             "BC528686B50D79E339D3721CEB3E94ADBE1229CF\n"
+    expect_raises(Fluxion::TrustError, /public-key algorithm 20, which is not accepted/) do
+      Fluxion::Executor::SignatureVerifier.verify("a", "a.asc", signer, runner_with(status))
+    end
+  end
+
+  it "distinguishes an unparseable algorithm field from a rejected one" do
+    status = "[GNUPG:] VALIDSIG BC528686B50D79E339D3721CEB3E94ADBE1229CF 2026-08-01 1754000000 0 4 0 x 8 00 " \
+             "BC528686B50D79E339D3721CEB3E94ADBE1229CF\n"
+    expect_raises(Fluxion::TrustError, /algorithm fields are not integers/) do
       Fluxion::Executor::SignatureVerifier.verify("a", "a.asc", signer, runner_with(status))
     end
   end

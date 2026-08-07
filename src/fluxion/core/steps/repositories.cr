@@ -76,7 +76,25 @@ module Fluxion
   end
 
   # `type: rpm-repository` — declare a Fedora DNF repository.
+  # What the two rpm-style repository kinds genuinely have in common.
+  #
+  # A module of abstract declarations rather than a shared base class, because
+  # the kinds stay distinct on purpose — see the comment on
+  # `ZypperRepositoryStep`. This names only the overlap, which is what lets
+  # `RpmStyleRepositoryExecutor` read a repository's fields directly instead of
+  # running a `step.is_a?(Rpm…) ? … : step.as(Zypper…)` test once per field.
+  module RpmStyleRepository
+    abstract def id : String
+    abstract def base_url : String
+    abstract def repo_file : String
+    abstract def signing_key : SigningKey?
+    abstract def enabled? : Bool
+    abstract def gpg_check? : Bool
+  end
+
   class RpmRepositoryStep < Step
+    include RpmStyleRepository
+
     REPO_DIRECTORY = "/etc/yum.repos.d"
 
     getter id : String
@@ -125,6 +143,8 @@ module Fluxion
   # the `autorefresh` key, and the validation messages all differ, and folding
   # them together would make every branch read "unless zypper".
   class ZypperRepositoryStep < Step
+    include RpmStyleRepository
+
     REPO_DIRECTORY = "/etc/zypp/repos.d"
 
     getter id : String

@@ -92,6 +92,14 @@ module Fluxion
     end
 
     # True when reaching this step ends the run and writes a resume point.
+    #
+    # The orchestrator deliberately branches on `is_a?(InterruptStep)` rather
+    # than on this, because it needs the narrowed type for the payload — the
+    # message and the exit code. Rewriting that branch to ask `halts?` and then
+    # `.as(InterruptStep)` would look tidier and be unsafe: the cast is only
+    # sound while exactly one kind halts, which is precisely what this
+    # predicate exists to stop being an assumption. Use `halts?` where the
+    # question is all you need; use `is_a?` where the payload is.
     def halts? : Bool
       false
     end

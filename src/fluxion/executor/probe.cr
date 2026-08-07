@@ -258,7 +258,10 @@ module Fluxion::Executor
     end
 
     def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
-      destination = Host.command_exists?("git") ? expand(item.key) : nil
+      # Through the injected runner rather than `Host` directly: this probe is
+      # handed a seam and consulting the real host anyway makes it answer from
+      # a different machine than the one a spec is describing.
+      destination = runner.command_exists?("git") ? expand(item.key) : nil
       return InstallationStatus::Unknown.new(item.key, "git is not on PATH") unless destination
       return InstallationStatus::NotInstalled.new(item.key) unless Dir.exists?(File.join(destination, ".git"))
 

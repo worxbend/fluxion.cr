@@ -690,6 +690,11 @@ module Fluxion::CLI
           "Set $EDITOR or $VISUAL to choose an editor. The file is at #{path}")
       end
 
+      # The one spawn in src/fluxion outside SystemShellRunner, and deliberately
+      # so. Every rule that seam applies is wrong here: an editor needs the real
+      # terminal rather than captured pipes, must not be killed by a timeout,
+      # and produces no output to redact. Routing it through `ShellRunner` would
+      # mean adding an interactive mode used exactly once, which buys nothing.
       status = Process.run(editor, [path], shell: true,
         input: Process::Redirect::Inherit,
         output: Process::Redirect::Inherit,

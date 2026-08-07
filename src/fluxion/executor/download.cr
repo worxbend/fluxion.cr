@@ -278,12 +278,30 @@ module Fluxion::Executor
         raise TrustError.new("Signature reported a malformed VALIDSIG status")
       end
 
+      # Three distinct causes, reported separately and naming the value seen.
+      # They shared one message, which fired at exactly the moment a real user
+      # needs to know whether the problem is their key algorithm, their digest
+      # algorithm, or a gpg that wrote something unparseable — and the numbers
+      # were already in scope.
       public_key = fields[7]?.try(&.to_i?)
       hash = fields[8]?.try(&.to_i?)
-      unless public_key && hash &&
-             ALLOWED_PUBLIC_KEY_ALGORITHMS.includes?(public_key) &&
-             ALLOWED_HASH_ALGORITHMS.includes?(hash)
-        raise TrustError.new("Signature uses an unsupported public-key or hash algorithm")
+
+      unless public_key && hash
+        raise TrustError.new(
+          "VALIDSIG algorithm fields are not integers: " \
+          "pubkey=#{fields[7]?.inspect} hash=#{fields[8]?.inspect}")
+      end
+
+      unless ALLOWED_PUBLIC_KEY_ALGORITHMS.includes?(public_key)
+        raise TrustError.new(
+          "Signature uses public-key algorithm #{public_key}, which is not accepted " \
+          "(allowed: #{ALLOWED_PUBLIC_KEY_ALGORITHMS.to_a.sort!.join(", ")})")
+      end
+
+      unless ALLOWED_HASH_ALGORITHMS.includes?(hash)
+        raise TrustError.new(
+          "Signature uses hash algorithm #{hash}, which is not accepted " \
+          "(allowed: #{ALLOWED_HASH_ALGORITHMS.to_a.sort!.join(", ")}; SHA-1 is deliberately absent)")
       end
 
       # The signing key, and the primary key it belongs to when reported.

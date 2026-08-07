@@ -19,7 +19,15 @@ module Fluxion::Executor
 
     # Whether the command exists and can be executed at all.
     def command_exists?(name : String) : Bool
-      Host.command_exists?(name)
+      !resolve_command(name).nil?
+    end
+
+    # Where the command would be found, or nil. Part of the seam so a caller
+    # that needs the path gets it from the same place as the existence check,
+    # rather than agreeing with a fake about one and the real host about the
+    # other.
+    def resolve_command(name : String) : String?
+      Host.resolve_command(name)
     end
   end
 
@@ -255,6 +263,14 @@ module Fluxion::Executor
 
     def command_exists?(name : String) : Bool
       @known_commands.includes?(name)
+    end
+
+    # A plausible location for anything `available` declared, so a caller that
+    # needs the path gets an answer consistent with `command_exists?` rather
+    # than falling through to the real `PATH`.
+    def resolve_command(name : String) : String?
+      return unless command_exists?(name)
+      File.join("/usr/bin", name)
     end
 
     def run(command : Command, &sink : String ->) : ProcessResult

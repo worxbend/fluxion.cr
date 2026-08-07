@@ -157,15 +157,12 @@ module Fluxion::Executor
       File.join(ToolBroker.cache_root, spec.name, spec.version, spec.executable)
     end
 
+    # One question, one answer. This used to ask the injected runner whether the
+    # command existed and then walk `PATH` itself, so a substituted runner could
+    # say yes while the second scan said no — the seam reporting a
+    # contradiction with itself.
     private def on_path(executable : String) : String?
-      return unless @runner.command_exists?(executable)
-      (ENV["PATH"]? || "").split(Process::PATH_DELIMITER).each do |directory|
-        next if directory.empty?
-        candidate = File.join(directory, executable)
-        info = File.info?(candidate)
-        return candidate if info && info.file? && info.permissions.owner_execute?
-      end
-      nil
+      @runner.resolve_command(executable)
     end
 
     private def usable?(path : String) : Bool

@@ -67,7 +67,8 @@ module Fluxion::Executor
 
       target_index = effect_target_index(argv)
       unless target_index
-        raise ExecutionError.new("Privileged command has no executable target")
+        raise ExecutionError.new(
+          "Privileged command has no executable target: #{argv.join(' ')}")
       end
 
       target = resolve(argv[target_index])

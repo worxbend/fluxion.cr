@@ -103,33 +103,35 @@ module Fluxion::Executor
     ZYPPER_KEY_DIRECTORY = "/etc/zypp/keys"
 
     def supports?(step : Step) : Bool
-      step.is_a?(RpmRepositoryStep) || step.is_a?(ZypperRepositoryStep)
+      step.is_a?(RpmStyleRepository)
     end
 
     def commands(step : Step, item : StepItem) : Array(Command)
+      repository = repository(step)
       preview = [] of String
-      signing_key(step).try do |key|
+      repository.signing_key.try do |key|
         preview.concat(["download", PublicUrl.from(key.url), "verify", key.checksum.value])
       end
-      preview.concat(["write", repo_file(step), "then"] + refresh_argv(step))
+      preview.concat(["write", repository.repo_file, "then"] + refresh_argv(step))
       [Command.new(preview)]
     end
 
     def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
+      repository = repository(step)
       started = Time.instant
       installer = Installer.new(runner)
 
       with_workspace do |workspace|
         key_path = nil.as(String?)
 
-        if key = signing_key(step)
+        if key = repository.signing_key
           sink.call("fetching signing key")
           source = fetch_key(key, workspace)
-          key_path = installed_key_path(key_directory(step), identifier(step))
+          key_path = installed_key_path(key_directory(step), repository.id)
           installer.install(source, key_path, "0644", Digest::SHA256.hexdigest(File.read(source)))
         end
 
-        installer.write(render(step, key_path), repo_file(step), "0644")
+        installer.write(render(step, key_path), repository.repo_file, "0644")
 
         sink.call("refreshing repository metadata")
         result = refresh(runner, refresh_argv(step), ->(line : String) { sink.call(line) })
@@ -147,41 +149,29 @@ module Fluxion::Executor
     # URL: the package manager must not be able to refetch something Fluxion
     # has not verified.
     private def render(step : Step, key_path : String?) : String
+      repository = repository(step)
       String.build do |io|
-        io << '[' << identifier(step) << "]\n"
-        io << "name=" << identifier(step) << '\n'
-        io << "baseurl=" << base_url(step) << '\n'
-        io << "enabled=" << (enabled?(step) ? 1 : 0) << '\n'
-        io << "autorefresh=" << (step.as(ZypperRepositoryStep).auto_refresh? ? 1 : 0) << '\n' if step.is_a?(ZypperRepositoryStep)
-        io << "gpgcheck=" << (gpg_check?(step) ? 1 : 0) << '\n'
+        io << '[' << repository.id << "]\n"
+        io << "name=" << repository.id << '\n'
+        io << "baseurl=" << repository.base_url << '\n'
+        io << "enabled=" << (repository.enabled? ? 1 : 0) << '\n'
+        # The one field only one of the two kinds has, so it keeps its own test.
+        io << "autorefresh=" << (step.auto_refresh? ? 1 : 0) << '\n' if step.is_a?(ZypperRepositoryStep)
+        io << "gpgcheck=" << (repository.gpg_check? ? 1 : 0) << '\n'
         io << "gpgkey=file://" << key_path << '\n' if key_path
       end
     end
 
-    private def signing_key(step : Step) : SigningKey?
-      step.is_a?(RpmRepositoryStep) ? step.signing_key : step.as(ZypperRepositoryStep).signing_key
+    # One narrowing, where six per-field type tests used to be. Their safety
+    # rested entirely on `supports?` admitting exactly two classes: adding a
+    # third rpm-style kind there — the obvious way to reuse this executor —
+    # would have made every `.as(ZypperRepositoryStep)` a crash.
+    private def repository(step : Step) : RpmStyleRepository
+      step.as(RpmStyleRepository)
     end
 
-    private def identifier(step : Step) : String
-      step.is_a?(RpmRepositoryStep) ? step.id : step.as(ZypperRepositoryStep).id
-    end
-
-    private def base_url(step : Step) : String
-      step.is_a?(RpmRepositoryStep) ? step.base_url : step.as(ZypperRepositoryStep).base_url
-    end
-
-    private def repo_file(step : Step) : String
-      step.is_a?(RpmRepositoryStep) ? step.repo_file : step.as(ZypperRepositoryStep).repo_file
-    end
-
-    private def enabled?(step : Step) : Bool
-      step.is_a?(RpmRepositoryStep) ? step.enabled? : step.as(ZypperRepositoryStep).enabled?
-    end
-
-    private def gpg_check?(step : Step) : Bool
-      step.is_a?(RpmRepositoryStep) ? step.gpg_check? : step.as(ZypperRepositoryStep).gpg_check?
-    end
-
+    # These two stay per-kind: they are the differences this executor exists to
+    # absorb, not shared fields read through a type test.
     private def key_directory(step : Step) : String
       step.is_a?(RpmRepositoryStep) ? RPM_KEY_DIRECTORY : ZYPPER_KEY_DIRECTORY
     end

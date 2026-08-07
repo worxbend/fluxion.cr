@@ -43,9 +43,16 @@ describe Fluxion::PackageManager do
     end
   end
 
-  it "rejects actions entirely for cargo and flatpak" do
-    expect_raises(Fluxion::ExecutionError, /not supported/) do
+  it "rejects actions entirely for cargo and flatpak, naming both" do
+    # The message names the manager and the action, like every other arm, so a
+    # log line says which of the two managers refused and what was asked of it.
+    error = expect_raises(Fluxion::ExecutionError, /Unsupported cargo action: update/) do
       Fluxion::PackageManager::Cargo.action_argv(Fluxion::PackageAction.new("update"))
+    end
+    error.message.to_s.should contain("cargo")
+
+    expect_raises(Fluxion::ExecutionError, /Unsupported flatpak action: update/) do
+      Fluxion::PackageManager::Flatpak.action_argv(Fluxion::PackageAction.new("update"))
     end
   end
 

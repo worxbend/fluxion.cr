@@ -102,7 +102,10 @@ module Fluxion
         else                 raise unsupported(action)
         end
       in .cargo?, .flatpak?
-        raise ExecutionError.new("Package manager action is not supported")
+        # The same helper its four siblings use, so this arm names the manager
+        # and the action rather than leaving the reader to guess which of the
+        # two it was.
+        raise unsupported(action)
       end
     end
 

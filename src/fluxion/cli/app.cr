@@ -33,6 +33,7 @@ module Fluxion::CLI
         ListCommand.new(@globals, @output, @error_output),
         GraphCommand.new(@globals, @output, @error_output),
         KindsCommand.new(@globals, @output, @error_output),
+        SpinnersCommand.new(@globals, @output, @error_output),
       ] of Command
     end
 

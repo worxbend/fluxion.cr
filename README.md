@@ -133,6 +133,7 @@ Arch — see [docs/config-schema.md](docs/config-schema.md).
 | `import` | Turn what is installed into a profile |
 | `registry` | Install profiles shared through a git repository |
 | `remote-ls` | List what a registry offers |
+| `spinners` | Preview the animations that mark work in flight |
 
 Full reference: [docs/commands.md](docs/commands.md).
 

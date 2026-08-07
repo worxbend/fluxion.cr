@@ -2,11 +2,13 @@ require "../crytui"
 require "./core"
 require "./host"
 require "./executor"
+require "./spinners"
 require "./tui/theme"
 require "./tui/selection"
 require "./tui/selector_screen"
 require "./tui/execution_screen"
 require "./tui/app"
+require "./tui/spinner_gallery"
 
 # The terminal UI.
 #

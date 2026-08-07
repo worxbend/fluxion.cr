@@ -49,6 +49,27 @@ module Fluxion::TUI
       CryTUI::Style.new(CryTUI::Color::DARK_GRAY)
     end
 
+    # The glyph for anything in flight, at the given animation tick.
+    #
+    # One frame of the configured spinner rather than a fixed arrow: a static
+    # marker beside a package install that takes two minutes is
+    # indistinguishable from a hung run.
+    def spinner_glyph(tick : Int) : String
+      CryTUI::Widgets::FluxSpinner.new(tick: tick, frames: Spinners.frames).frame
+    end
+
+    # A sweeping bar that says work is still happening, without claiming to
+    # know how much is left.
+    def activity_bar(buffer : CryTUI::Buffer, area : CryTUI::Rect, tick : Int) : Nil
+      return if area.empty?
+      CryTUI::Widgets::BarSpinner.new(
+        tick: tick,
+        motion: CryTUI::Widgets::BarMotion::Loop,
+        arc_style: running,
+        dim_style: hint
+      ).render(area, buffer)
+    end
+
     # Box drawing, so a panel is described once.
     def frame(buffer : CryTUI::Buffer, area : CryTUI::Rect, label : String, style : CryTUI::Style = dim) : CryTUI::Rect
       return area if area.width < 2 || area.height < 2

@@ -99,10 +99,14 @@ module Fluxion::TUI
     end
 
     # Enters the alternate screen in raw mode and always restores both.
-    private def terminal(& : CryTUI::Terminal ->) : Nil
+    def self.terminal(& : CryTUI::Terminal ->) : Nil
       backend = CryTUI::AnsiBackend.for_terminal(STDOUT, STDOUT)
       terminal = CryTUI::Terminal.new(backend)
       terminal.run(STDIN) { |active| yield active }
+    end
+
+    private def terminal(& : CryTUI::Terminal ->) : Nil
+      App.terminal { |active| yield active }
     end
   end
 end

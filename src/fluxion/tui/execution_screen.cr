@@ -38,6 +38,9 @@ module Fluxion::TUI
       @current_phase = ""
       @current_step = ""
       @finished = false
+      # The app redraws on a fixed interval, so one increment per frame is one
+      # animation step. The spinners derive everything else from it.
+      @tick = 0_i64
       @mutex = Mutex.new
     end
 
@@ -115,6 +118,8 @@ module Fluxion::TUI
       buffer = frame.buffer
 
       @mutex.synchronize do
+        @tick += 1
+
         header = CryTUI::Rect.new(area.x, area.y, area.width, 3)
         footer = CryTUI::Rect.new(area.x, area.bottom - 2, area.width, 2)
         body = CryTUI::Rect.new(area.x, area.y + 3, area.width, Math.max(0, area.height - 5))
@@ -137,6 +142,13 @@ module Fluxion::TUI
       Theme.line(buffer, area, area.y + 1,
         "  #{@current_phase.empty? ? "starting" : @current_phase}#{@current_step.empty? ? "" : " · #{@current_step}"}",
         Theme.dim)
+
+      # A sweeping bar rather than a percentage: the item count is not known
+      # until the run reaches each phase, so any bar claiming to be a fraction
+      # of the work would be lying. This one only says "still going", and
+      # stops the moment there is nothing left to wait for.
+      return if @finished || area.height < 3
+      Theme.activity_bar(buffer, CryTUI::Rect.new(area.x + 2, area.y + 2, Math.max(0, area.width - 4), 1), @tick)
     end
 
     private def render_items(buffer : CryTUI::Buffer, area : CryTUI::Rect) : Nil
@@ -156,7 +168,7 @@ module Fluxion::TUI
     private def glyph(state : Item::State) : String
       case state
       in Item::State::Pending   then "·"
-      in Item::State::Running   then "▸"
+      in Item::State::Running   then Theme.spinner_glyph(@tick)
       in Item::State::Succeeded then "✔"
       in Item::State::Failed    then "✘"
       in Item::State::Skipped   then "○"

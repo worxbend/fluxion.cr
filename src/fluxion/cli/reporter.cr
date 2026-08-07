@@ -17,6 +17,7 @@ module Fluxion::CLI
     def initialize(@output : IO = STDOUT, @stream_output : Bool = false)
       @summary = Executor::RunSummary.new
       @open_item = false
+      @spinner = Spinner.new(@output)
     end
 
     def on_event(event : ExecutionEvent) : Nil
@@ -71,9 +72,9 @@ module Fluxion::CLI
 
     private def item_started(event : ExecutionEvent) : Nil
       close_item
-      # Left open so the outcome lands on the same line.
-      @output.print "    #{Style.dim(Symbols.running)} #{event.item} ... "
-      @output.flush
+      # Left open so the outcome lands on the same line; the spinner animates
+      # that line in place until it does.
+      @spinner.start(event.item)
       @open_item = true
     end
 
@@ -119,6 +120,7 @@ module Fluxion::CLI
     # Prints the closing half of an open item line.
     private def finish(text : String) : Nil
       if @open_item
+        @spinner.stop
         @output.puts text
         @open_item = false
       else
@@ -128,6 +130,7 @@ module Fluxion::CLI
 
     private def close_item : Nil
       return unless @open_item
+      @spinner.stop
       @output.puts
       @open_item = false
     end

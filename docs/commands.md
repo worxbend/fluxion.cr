@@ -30,6 +30,18 @@ Colour is decided from whether stdout is a terminal, honouring `NO_COLOR` and
 `FORCE_COLOR`. Output piped into a file or a pager is plain automatically, so
 it is safe to parse without passing a flag.
 
+## Environment
+
+| Variable | Effect |
+|---|---|
+| `NO_COLOR` | Set to anything and colour goes away |
+| `FORCE_COLOR` | Colour even when the output is a pipe |
+| `FLUXION_SPINNER` | Which animation marks work in flight — see [`spinners`](#spinners) |
+
+`FLUXION_SPINNER` is read by both the plain reporter and the terminal UI, so
+they always agree. An unrecognised name falls back to the default rather than
+failing the run.
+
 ## Exit codes
 
 Scripts branch on these, so they are fixed:
@@ -230,6 +242,28 @@ fluxion kinds --format json
 Takes no config file: the answer is a property of the build. It reads the same
 registry `validate` checks against, so the documented list cannot drift from
 the accepted one.
+
+## `spinners`
+
+The animations the CLI and the TUI mark running work with.
+
+```bash
+fluxion spinners                 # animated gallery, four pages
+fluxion spinners --page bars     # open on a particular page
+fluxion spinners --list          # names and glyphs, no terminal needed
+```
+
+The gallery pages are `frames` (all twenty-one frame presets), `bars`,
+`linear`, and `rings`; `←`/`→` or space moves between them and `q` quits.
+
+Pick one with `FLUXION_SPINNER`:
+
+```bash
+FLUXION_SPINNER=moon fluxion apply
+```
+
+Off a terminal — piped, or in CI — the command prints the list instead, so it
+still answers "what can I set that to?" without a TTY.
 
 ## `state`
 

@@ -177,4 +177,5 @@ src/fluxion/
   cli/           commands, colour, the plain reporter
   tui/           screens, built on the vendored CryTUI
 src/crytui/      vendored TUI toolkit (see VENDORED.md)
+  spinner/       animated spinner widgets, ported from tui-spinner
 ```

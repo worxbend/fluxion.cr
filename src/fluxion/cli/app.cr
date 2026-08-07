@@ -63,13 +63,29 @@ module Fluxion::CLI
       command.run(arguments[1..])
     rescue HelpRequested
       ExitCode::Success
-    rescue IO::Error
+    rescue error : IO::Error
       # stdout closed early, which is what `fluxion kinds | head` looks like.
       # Reporting it would print an error the user cannot act on, to a pipe
       # that is already gone.
+      #
+      # Only that one case. `File::Error`, `Socket::*` and `IO::TimeoutError`
+      # are all `IO::Error` subclasses, so rescuing the class outright reported
+      # an unreachable host or an unreadable file as a successful run — which
+      # is what CI branches on. Anything that is not a broken pipe is re-raised
+      # and classified by `exit_code_for` like every other failure.
+      raise error unless App.broken_pipe?(error)
       ExitCode::Success
     rescue error : Exception
       report(error)
+    end
+
+    # A write that failed because the reader went away.
+    #
+    # Deliberately narrow, and deliberately public so a spec can pin it: the
+    # difference between this and `IO::Error` is the difference between exit 0
+    # and a reported failure.
+    def self.broken_pipe?(error : IO::Error) : Bool
+      error.os_error == Errno::EPIPE
     end
 
     # Prints one line, never a stack trace: a profile with a typo is a normal

@@ -162,6 +162,18 @@ module Fluxion::Executor
             declared = response.headers["Content-Length"]?.try(&.to_i64?)
             yield response.body_io, declared
           end
+        rescue error : File::Error
+          # Raised by the caller's block writing the artifact, not by the
+          # transport. Left alone so it keeps mapping to the filesystem exit
+          # code rather than being described as a fetch failure.
+          raise error
+        rescue error : IO::Error
+          # A refused connection, a DNS failure, or a read timeout. Without this
+          # the stdlib error escaped the closed error set, so it slipped past
+          # every executor's per-item `rescue error : Error` boundary, killed
+          # the whole run, and was then reported as exit 0 by the CLI.
+          raise ExecutionError.new(
+            "Could not fetch #{PublicUrl.from(current.to_s)}: #{error.message}")
         ensure
           client.close rescue nil
         end

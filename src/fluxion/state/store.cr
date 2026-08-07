@@ -195,7 +195,11 @@ module Fluxion::State
       end
 
       parse(File.read(file), profile, file)
-    rescue error : JSON::ParseException
+    rescue error : JSON::ParseException | File::Error
+      # Both shapes are translated: a malformed file and an unreadable one are
+      # equally the state layer's problem to describe. `File::Error` used to
+      # escape untranslated from `File.info`/`File.read`, and because it is an
+      # `IO::Error` subclass the CLI's top-level rescue turned it into exit 0.
       raise ExecutionError.new("Failed to read state file #{file}: #{error.message}")
     end
 
@@ -298,6 +302,8 @@ module Fluxion::State
       return false unless File.exists?(file)
       File.delete(file)
       true
+    rescue error : File::Error
+      raise ExecutionError.new("Failed to delete state file #{file}: #{error.message}")
     end
 
     # Deliberately absent: a per-item lookup that takes a profile name.

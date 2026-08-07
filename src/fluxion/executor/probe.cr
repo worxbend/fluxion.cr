@@ -31,13 +31,13 @@ module Fluxion::Executor
         FlatpakRemoteProbe.new,
         RepositoryFileProbe.new,
         PathProbe.new,
-        CommandProbe.new,
+        DefaultShellProbe.new,
         GitRepoProbe.new,
         GitConfigProbe.new,
         SystemdUnitProbe.new,
         UserGroupProbe.new,
         NerdFontProbe.new,
-        ProbeCommandProbe.new,
+        ConfiguredProbeCommand.new,
       ] of Probe)
     end
 
@@ -228,7 +228,7 @@ module Fluxion::Executor
   end
 
   # The user's login shell.
-  class CommandProbe < Probe
+  class DefaultShellProbe < Probe
     def supports?(item : StepItem) : Bool
       item.item_type.default_shell?
     end
@@ -399,7 +399,7 @@ module Fluxion::Executor
   # Registered last so a typed probe always wins, but it is what makes kinds
   # with no observable footprint — shell commands, scripts, manual checkpoints
   # — skippable at all.
-  class ProbeCommandProbe < Probe
+  class ConfiguredProbeCommand < Probe
     def supports?(item : StepItem) : Bool
       !item.step.try(&.probe_command).nil?
     end

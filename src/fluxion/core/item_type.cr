@@ -88,18 +88,4 @@ module Fluxion
       parse?(value.strip.downcase) rescue nil
     end
   end
-
-  # Outcome recorded for a manifest plan entry.
-  enum PlanEntryStatus
-    Completed
-    Interrupted
-
-    def state_name : String
-      to_s.upcase
-    end
-
-    def json_name : String
-      to_s.downcase
-    end
-  end
 end

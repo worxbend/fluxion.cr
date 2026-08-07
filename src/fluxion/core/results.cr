@@ -78,10 +78,15 @@ module Fluxion
     struct Paused < StepResult
       getter item : String
       getter message : String
-      getter next_plan_entry : String?
       getter exit_code : Int32
 
-      def initialize(@item : String, @message : String, @next_plan_entry : String? = nil, @exit_code : Int32 = 75)
+      # `next_plan_entry` used to sit here, always passed nil and never read —
+      # a third word for "phase" alongside `phase` and `step`. Where to resume
+      # is `RunSummary#next_phase`, decided by the orchestrator, which is the
+      # only thing that knows what comes next. The `nextPlanEntry` key in
+      # `State::Store` is unrelated: it is the legacy Java spelling, kept
+      # because those state files are read directly.
+      def initialize(@item : String, @message : String, @exit_code : Int32 = 75)
       end
     end
 
@@ -160,27 +165,12 @@ module Fluxion
     end
   end
 
-  # Whether an item should run, and if not, why.
-  abstract struct SkipDecision
-    abstract def item_key : String
-
-    struct Skip < SkipDecision
-      getter item_key : String
-      getter reason : InstallationStatus
-
-      def initialize(@item_key : String, @reason : InstallationStatus)
-      end
-    end
-
-    struct Run < SkipDecision
-      getter item_key : String
-
-      def initialize(@item_key : String)
-      end
-    end
-
-    def skip? : Bool
-      is_a?(Skip)
-    end
-  end
+  # Deliberately absent: a `SkipDecision` variant type pairing an item key with
+  # the `InstallationStatus` that justified skipping it.
+  #
+  # It was declared and documented here but never constructed anywhere in `src`
+  # or `spec`, while `Orchestrator#skip_decision` answered the same question
+  # with a plain nilable `InstallationStatus` — which is all the caller needs,
+  # since it already knows the item. Reintroducing the type means finding a
+  # second caller first.
 end

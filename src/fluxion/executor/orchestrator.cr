@@ -33,7 +33,7 @@ module Fluxion::Executor
       begin
         # A source setup configures a repository the packages that follow depend
         # on, so it runs first and a failure there stops the run.
-        unless run_source_setups(profile, options, listener, summary, cancellation, recorder)
+        unless source_setups_succeeded?(profile, options, listener, summary, cancellation, recorder)
           return summary
         end
 
@@ -150,11 +150,11 @@ module Fluxion::Executor
       end
 
       def phase_completed(phase : Phase, fingerprint : String) : Nil
-        record_phase(phase, "completed", fingerprint)
+        record_phase(phase, PhaseStatus::Completed, fingerprint)
       end
 
       def phase_failed(phase : Phase, fingerprint : String) : Nil
-        record_phase(phase, "failed", fingerprint)
+        record_phase(phase, PhaseStatus::Failed, fingerprint)
       end
 
       def resume_at(phase : String?) : Nil
@@ -177,10 +177,14 @@ module Fluxion::Executor
         # simply re-probes.
       end
 
-      private def record_phase(phase : Phase, status : String, fingerprint : String) : Nil
+      # Takes the enum rather than a string so the four recordable outcomes come
+      # from one place. `PhaseRecord` still stores the spelling, because the
+      # state file is a compatibility surface — the Java implementation's files
+      # are read directly — and its shape is not ours to change here.
+      private def record_phase(phase : Phase, status : PhaseStatus, fingerprint : String) : Nil
         return unless recording?
         document.try do |state|
-          state.record(State::PhaseRecord.new(phase.name, status, Time.utc, fingerprint))
+          state.record(State::PhaseRecord.new(phase.name, status.json_name, Time.utc, fingerprint))
           @dirty = true
         end
       end
@@ -229,7 +233,7 @@ module Fluxion::Executor
           return PhaseOutcome::Halted
         end
 
-        step_failed = run_step(step, options, listener, summary, cancellation, recorder)
+        step_failed = step_failed?(step, options, listener, summary, cancellation, recorder)
         failed ||= step_failed
         return PhaseOutcome::Failed if step_failed && !phase.continue_on_step_error?
       end
@@ -261,16 +265,16 @@ module Fluxion::Executor
         step.instructions.each { |instruction| io << ' ' << instruction }
       end
 
-      result = StepResult::Paused.new(step.name, message, nil, step.exit_code)
+      result = StepResult::Paused.new(step.name, message, step.exit_code)
       listener.on_event(ExecutionEvent.item_started(step.name, step.name))
       listener.on_event(ExecutionEvent.item_completed(step.name, step.name, result))
       summary.record(result)
     end
 
     # Returns true when the step should be treated as failed.
-    private def run_step(step : Step, options : RunOptions, listener : ExecutionListener,
-                         summary : RunSummary, cancellation : CancellationSignal,
-                         recorder : Recorder? = nil) : Bool
+    private def step_failed?(step : Step, options : RunOptions, listener : ExecutionListener,
+                             summary : RunSummary, cancellation : CancellationSignal,
+                             recorder : Recorder? = nil) : Bool
       executor = @executors.for(step)
       unless executor
         listener.on_event(ExecutionEvent.step_started(step.name))
@@ -390,9 +394,16 @@ module Fluxion::Executor
       phases
     end
 
-    private def run_source_setups(profile : Profile, options : RunOptions, listener : ExecutionListener,
-                                  summary : RunSummary, cancellation : CancellationSignal,
-                                  recorder : Recorder? = nil) : Bool
+    # False when a source setup failed or the run was cancelled, in which case
+    # the caller stops: the packages that follow depend on the repository these
+    # configure.
+    #
+    # Named as a predicate, and for success, because its sibling
+    # `step_failed?` returns true for the opposite outcome — two bare `Bool`s
+    # with opposite polarity and verb names read identically at the call site.
+    private def source_setups_succeeded?(profile : Profile, options : RunOptions, listener : ExecutionListener,
+                                         summary : RunSummary, cancellation : CancellationSignal,
+                                         recorder : Recorder? = nil) : Bool
       profile.source_setups.each do |setup|
         return false if cancellation.cancelled?
 
@@ -410,7 +421,7 @@ module Fluxion::Executor
           return options.read_only?
         end
 
-        return false if run_step(setup.step, options, listener, summary, cancellation, recorder) && !options.read_only?
+        return false if step_failed?(setup.step, options, listener, summary, cancellation, recorder) && !options.read_only?
       end
 
       true

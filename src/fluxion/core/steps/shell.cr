@@ -54,7 +54,11 @@ module Fluxion
       !@confirm.nil?
     end
 
-    private def self.normalize_exit_codes(codes : Array(Int32)) : Array(Int32)
+    # An empty `allowedExitCodes` means "only zero", not "any code". Both
+    # including structs normalise through this in their constructor rather than
+    # repeating the conditional, which is what the previous private class-level
+    # version was for — except nothing ever called it.
+    protected def self.normalize_exit_codes(codes : Array(Int32)) : Array(Int32)
       codes.empty? ? [0] : codes
     end
   end
@@ -88,7 +92,7 @@ module Fluxion
       @sha256 : Checksum? = nil,
       @condition : Condition? = nil,
     )
-      @allowed_exit_codes = allowed_exit_codes.empty? ? [0] : allowed_exit_codes
+      @allowed_exit_codes = ShellItemFields.normalize_exit_codes(allowed_exit_codes)
     end
 
     def remote? : Bool
@@ -131,7 +135,7 @@ module Fluxion
       @timeout : Time::Span = ShellItemFields::DEFAULT_TIMEOUT,
       @condition : Condition? = nil,
     )
-      @allowed_exit_codes = allowed_exit_codes.empty? ? [0] : allowed_exit_codes
+      @allowed_exit_codes = ShellItemFields.normalize_exit_codes(allowed_exit_codes)
     end
 
     # A convenience for the common case, where every command is a bare shell
@@ -153,12 +157,16 @@ module Fluxion
 
   # `type: shell-script` — run local or HTTPS-fetched shell scripts.
   class ShellScriptStep < Step
-    getter items : Array(ShellScriptItem)
+    # Named for what it holds, matching `ShellCommandStep#commands`. It was
+    # `@items` with a `getter items` that `Step`'s own `items` override silently
+    # shadowed, so the class had two names for one collection and one of them
+    # was unreachable.
+    getter scripts : Array(ShellScriptItem)
     getter working_dir : String?
 
     def initialize(
       name : String,
-      @items : Array(ShellScriptItem),
+      @scripts : Array(ShellScriptItem),
       @working_dir : String? = nil,
       description : String? = nil,
       continue_on_error : Bool = false,
@@ -173,15 +181,11 @@ module Fluxion
     end
 
     def items : Array(ItemRef)
-      @items.map { |script| item(script.name, "script", script.key) }
-    end
-
-    def scripts : Array(ShellScriptItem)
-      @items
+      @scripts.map { |script| item(script.name, "script", script.key) }
     end
 
     def summary : String
-      "#{@items.size} script#{"s" if @items.size != 1}"
+      "#{@scripts.size} script#{"s" if @scripts.size != 1}"
     end
   end
 

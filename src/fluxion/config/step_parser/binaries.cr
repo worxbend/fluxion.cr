@@ -1,7 +1,7 @@
 module Fluxion::Config
   # Downloaded-artifact kinds: compiled binaries and the delegated installers.
   module StepParser
-    private def compiled_binary(context, node, name, description, probe) : Step?
+    private def compiled_binary(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       binary_name = context.require_string(node["binaryName"], "binaryName")
       if binary_name.includes?('/') || binary_name.includes?('\\') || binary_name == "." || binary_name == ".."
         context.error(node["binaryName"].path, "must be a file name, not a path")
@@ -103,7 +103,7 @@ module Fluxion::Config
       value
     end
 
-    private def binstaller(context, node, name, description, probe) : Step?
+    private def binstaller(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       config_node = node["config", "configPath"]
       if config_node.mapping?
         context.error(config_node.path,
@@ -139,7 +139,7 @@ module Fluxion::Config
       )
     end
 
-    private def nerd_fonts(context, node, name, description, probe) : Step?
+    private def nerd_fonts(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       version = context.optional_string(node["installerVersion"]) ||
                 NerdFontsStep::DEFAULT_INSTALLER_VERSION
       exact_release(context, node["installerVersion"], version, "installerVersion")
@@ -191,7 +191,7 @@ module Fluxion::Config
       )
     end
 
-    private def dotbot(context, node, name, description, probe) : Step?
+    private def dotbot(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       config_node = node["config", "configPath"]
       if config_node.mapping?
         context.error(config_node.path, "must be a path string")
@@ -213,7 +213,7 @@ module Fluxion::Config
       )
     end
 
-    private def toolchain(context, node, name, description, probe) : Step?
+    private def toolchain(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       kind_node = node["kind"]
       toolchain = ToolchainKind.from_config?(kind_node.string?)
       unless toolchain
@@ -241,7 +241,7 @@ module Fluxion::Config
       )
     end
 
-    private def oh_my_zsh(context, node, name, description, probe) : Step?
+    private def oh_my_zsh(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       revision = context.require_string(node["revision"], "revision")
       unless revision.empty? || OhMyZshStep.commit?(revision)
         context.error(node["revision"].path,

@@ -32,7 +32,7 @@ module Fluxion::Config
       SigningKey.new(url, checksum)
     end
 
-    private def apt_repository(context, node, name, description, probe) : Step?
+    private def apt_repository(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       source_node = node["source"]
       source = context.require_string(source_node, "source")
       validate_apt_source(context, source_node, source) unless source.empty?
@@ -140,7 +140,7 @@ module Fluxion::Config
       nil
     end
 
-    private def rpm_repository(context, node, name, description, probe) : Step?
+    private def rpm_repository(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       id = context.optional_string(node["id"]) || name
       validate_repository_id(context, node["id"], id)
 
@@ -169,7 +169,7 @@ module Fluxion::Config
       )
     end
 
-    private def zypper_repository(context, node, name, description, probe) : Step?
+    private def zypper_repository(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       id = context.optional_string(node["id"]) || name
       validate_repository_id(context, node["id"], id)
 
@@ -199,7 +199,7 @@ module Fluxion::Config
       )
     end
 
-    private def pacman_repository(context, node, name, description, probe) : Step?
+    private def pacman_repository(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       repository = context.optional_string(node["repository"]) || name
       validate_repository_id(context, node["repository"], repository)
 
@@ -282,7 +282,7 @@ module Fluxion::Config
       end
     end
 
-    private def flatpak_remote(context, node, name, description, probe) : Step?
+    private def flatpak_remote(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       remote = context.require_string(node["remote"], "remote")
       url = context.https_url(node["url"])
 
@@ -304,7 +304,7 @@ module Fluxion::Config
       )
     end
 
-    private def gpg_key(context, node, name, description, probe) : Step?
+    private def gpg_key(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       keys_node = node["keys"]
       keys = keys_node.items.compact_map { |entry| gpg_key_entry(context, entry) }
 

@@ -1,9 +1,18 @@
 require "json"
 require "option_parser"
 
+# Every layer this one actually uses. The list doubles as this file's statement
+# of what `cli` depends on, so an omission makes the dependency graph read as
+# smaller than it is — `version`, `registry` and `state` were all reached
+# through another file's requires rather than declared here.
+require "./version"
 require "./core"
+require "./host"
+require "./paths"
 require "./config"
+require "./state"
 require "./executor"
+require "./registry"
 require "./spinners"
 require "./tui"
 require "./cli/style"

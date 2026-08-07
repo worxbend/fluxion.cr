@@ -82,7 +82,7 @@ module Fluxion::Config
       end
     end
 
-    private def tool_packages(context, node, name, description, probe) : Step?
+    private def tool_packages(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       backend_node = node["backend"]
       backend = ToolBackend.from_config?(backend_node.string?)
       unless backend
@@ -129,7 +129,7 @@ module Fluxion::Config
       ToolPackage.new(raw[0, at], raw[(at + 1)..])
     end
 
-    private def system_update(context, node, name, description, probe) : Step?
+    private def system_update(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       manager_node = node["packageManager"]
       manager = PackageManager.from_config?(manager_node.string?)
       unless manager

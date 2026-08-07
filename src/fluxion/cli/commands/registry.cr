@@ -52,6 +52,24 @@ module Fluxion::CLI
       parser.on("--registry=NAME", "Which registry to use") { |value| @registry_name = value }
     end
 
+    # The preamble every id-taking subcommand shares: read the id, refuse an
+    # empty one, and resolve the registry it applies to.
+    protected def resolve_registry(arguments : Array(String)) : {String, Registry::Source, Registry::Store}
+      positional = parse(arguments)
+      id = positional.first?
+      raise Failure.invalid_input("Specify a configuration id") unless id
+
+      target = source
+      {id, target, store(target)}
+    end
+
+    # As above, plus the configuration the id names — which is what four of the
+    # five id-taking subcommands actually want.
+    protected def resolve_entry(arguments : Array(String)) : {Registry::Source, Registry::Store, Registry::Entry}
+      id, target, catalogue = resolve_registry(arguments)
+      {target, catalogue, entry(target, id)}
+    end
+
     # Loads the manifest, telling the user to sync rather than leaving them
     # with a bare "no such file".
     protected def manifest(source : Registry::Source) : Registry::Manifest
@@ -481,13 +499,7 @@ module Fluxion::CLI
     end
 
     def run(arguments : Array(String)) : ExitCode
-      positional = parse(arguments)
-      id = positional.first?
-      raise Failure.invalid_input("Specify a configuration id") unless id
-
-      target = source
-      catalogue = store(target)
-      found = entry(target, id)
+      target, catalogue, found = resolve_entry(arguments)
       body = File.read(catalogue.source_path(found))
 
       if @format.json?
@@ -549,12 +561,7 @@ module Fluxion::CLI
     end
 
     def run(arguments : Array(String)) : ExitCode
-      positional = parse(arguments)
-      id = positional.first?
-      raise Failure.invalid_input("Specify a configuration id") unless id
-
-      target = source
-      catalogue = store(target)
+      id, target, catalogue = resolve_registry(arguments)
       parsed = manifest(target)
       found = entry(target, id)
 
@@ -632,18 +639,12 @@ module Fluxion::CLI
     end
 
     def run(arguments : Array(String)) : ExitCode
-      positional = parse(arguments)
-      id = positional.first?
-      raise Failure.invalid_input("Specify a configuration id") unless id
-
-      target = source
-      catalogue = store(target)
-      found = entry(target, id)
+      _, catalogue, found = resolve_entry(arguments)
 
       if catalogue.uninstall(found)
-        puts "#{Style.green(Symbols.success)} Removed #{Style.bold(id)}"
+        puts "#{Style.green(Symbols.success)} Removed #{Style.bold(found.id)}"
       else
-        puts Style.dim("'#{id}' was not installed")
+        puts Style.dim("'#{found.id}' was not installed")
       end
 
       ExitCode::Success
@@ -668,20 +669,14 @@ module Fluxion::CLI
     end
 
     def run(arguments : Array(String)) : ExitCode
-      positional = parse(arguments)
-      id = positional.first?
-      raise Failure.invalid_input("Specify a configuration id") unless id
-
-      target = source
-      catalogue = store(target)
-      found = entry(target, id)
+      target, catalogue, found = resolve_entry(arguments)
 
       path = catalogue.installed_path(found)
       # Editing something that is not there would create an empty file and
       # leave the user wondering where the configuration went.
       unless File.exists?(path)
         raise Failure.invalid_input(
-          "'#{id}' is not installed. Run: fluxion registry install #{id}")
+          "'#{found.id}' is not installed. Run: fluxion registry install #{found.id}")
       end
 
       editor = ENV["VISUAL"]?.presence || ENV["EDITOR"]?.presence

@@ -1,7 +1,7 @@
 module Fluxion::Config
   # Shell-driven kinds and the two human-checkpoint kinds.
   module StepParser
-    private def shell_script(context, node, name, description, probe) : Step?
+    private def shell_script(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       working_dir = context.local_path(node["workingDir"], required: false)
       scripts_node = node["scripts"]
 
@@ -79,7 +79,7 @@ module Fluxion::Config
       )
     end
 
-    private def shell_command(context, node, name, description, probe) : Step?
+    private def shell_command(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       shell = context.optional_string(node["shell"]) || ShellCommandStep::DEFAULT_SHELL
       working_dir = context.local_path(node["workingDir"], required: false)
       commands_node = node["commands"]
@@ -247,7 +247,7 @@ module Fluxion::Config
       normalized.matches?(SENSITIVE_NAME)
     end
 
-    private def shell_reload(context, node, name, description) : Step?
+    private def shell_reload(context : Context, node : Node, name : String, description : String?) : Step?
       shell = ShellKind.from_config?(node["shell"].string?)
       if node["shell"].present? && shell.nil?
         context.error(node["shell"].path, "unsupported shell", "one of zsh, bash, sh")
@@ -255,13 +255,13 @@ module Fluxion::Config
       ShellReloadStep.new(name, shell || ShellKind::Zsh, description)
     end
 
-    private def default_shell(context, node, name, description, probe) : Step?
+    private def default_shell(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       path = context.absolute_path(node["shell", "shellPath"])
       return unless path
       DefaultShellStep.new(name, path, description, probe)
     end
 
-    private def assert_step(context, node, name, description) : Step?
+    private def assert_step(context : Context, node : Node, name : String, description : String?) : Step?
       command = context.require_string(node["command"], "assert command")
       return if command.empty?
 
@@ -277,7 +277,7 @@ module Fluxion::Config
       )
     end
 
-    private def manual(context, node, name, description, probe) : Step?
+    private def manual(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       message = context.require_string(node["message"], "manual message")
       return if message.empty?
       if probe.nil?

@@ -1,7 +1,7 @@
 module Fluxion::Config
   # Host-configuration kinds.
   module StepParser
-    private def user_groups(context, node, name, description, probe) : Step?
+    private def user_groups(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       groups_node = node["groups"]
       groups = groups_node.string_list
 
@@ -36,7 +36,7 @@ module Fluxion::Config
       )
     end
 
-    private def git_config(context, node, name, description, probe) : Step?
+    private def git_config(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       entries_node = node["entries"]
       entries = entries_node.string_map
 
@@ -68,7 +68,7 @@ module Fluxion::Config
       )
     end
 
-    private def git_repo(context, node, name, description, probe) : Step?
+    private def git_repo(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       repos_node = node["repos"]
       repos = repos_node.items.compact_map { |entry| git_repo_entry(context, entry) }
 
@@ -126,7 +126,7 @@ module Fluxion::Config
       GitRepo.new(url, destination, ref, depth, context.bool(entry["submodules"], false))
     end
 
-    private def systemd_unit(context, node, name, description, probe) : Step?
+    private def systemd_unit(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       units_node = node["units"]
       units = units_node.items.compact_map { |entry| systemd_unit_entry(context, entry) }
 
@@ -177,7 +177,7 @@ module Fluxion::Config
       SystemdUnit.new(unit, masked ? false : enabled, state || SystemdState::Unchanged, masked)
     end
 
-    private def system_setting(context, node, name, description, probe) : Step?
+    private def system_setting(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       step = SystemSettingStep.new(
         name,
         local_rtc: context.bool?(node["localRtc"]),
@@ -197,7 +197,7 @@ module Fluxion::Config
       step
     end
 
-    private def file_writes(context, node, name, description, probe) : Step?
+    private def file_writes(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       files_node = node["files"]
       files_node = node["writes"] unless files_node.present?
 
@@ -264,7 +264,7 @@ module Fluxion::Config
       )
     end
 
-    private def interrupt(context, node, name, description) : Step?
+    private def interrupt(context : Context, node : Node, name : String, description : String?) : Step?
       message = context.optional_string(node["message"]) ||
                 "Execution paused by interrupt entry: #{name}"
 

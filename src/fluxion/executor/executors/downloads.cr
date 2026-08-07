@@ -16,8 +16,17 @@ module Fluxion::Executor
       end
     end
 
+    # The seam. Overridable rather than a constructor argument because
+    # `ExecutorRegistry.default` builds every executor with none — a spec
+    # subclasses the executor it is exercising and returns a
+    # `FakeHttpTransport`, which is what makes `execute` reachable without a
+    # network.
+    protected def http_transport : HttpTransport
+      SystemHttpTransport.new
+    end
+
     protected def downloader(max_bytes : Int64 = Downloader::MAX_ARTIFACT_BYTES) : Downloader
-      Downloader.new(max_bytes)
+      Downloader.new(max_bytes, http_transport)
     end
 
     # Fetches an artifact and returns its path once the profile's trust anchor

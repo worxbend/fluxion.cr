@@ -3,6 +3,69 @@ require "uri"
 require "digest/sha256"
 
 module Fluxion::Executor
+  # Performs one HTTP request. No redirect following, and no policy.
+  #
+  # An interface for the same reason `ShellRunner` is one: every rule
+  # `Downloader` enforces — the streaming size ceiling, the digest over the
+  # bytes actually written, the refusal to keep a partial file — is worth
+  # testing, and none of it could be reached without a real network while the
+  # `HTTP::Client` call was inline.
+  #
+  # Redirects are reported rather than followed, because deciding whether a hop
+  # is acceptable is policy and belongs with the rest of it.
+  abstract class HttpTransport
+    # Yields the response body and its declared length, and returns nil. For a
+    # redirect, yields nothing and returns the `Location` header instead.
+    abstract def get(uri : URI, connect_timeout : Time::Span, read_timeout : Time::Span,
+                     & : IO, Int64? ->) : String?
+  end
+
+  # The real one.
+  class SystemHttpTransport < HttpTransport
+    def get(uri : URI, connect_timeout : Time::Span, read_timeout : Time::Span,
+            & : IO, Int64? ->) : String?
+      client = HTTP::Client.new(uri)
+      client.connect_timeout = connect_timeout
+      client.read_timeout = read_timeout
+
+      redirect = nil.as(String?)
+      begin
+        client.get(uri.request_target) do |response|
+          if response.status.redirection?
+            location = response.headers["Location"]?
+            raise TrustError.new("Redirect without a Location header: #{PublicUrl.from(uri.to_s)}") unless location
+            redirect = location
+            next
+          end
+
+          unless response.status.success?
+            raise TrustError.new(
+              "Download failed with HTTP #{response.status_code} for #{PublicUrl.from(uri.to_s)}")
+          end
+
+          declared = response.headers["Content-Length"]?.try(&.to_i64?)
+          yield response.body_io, declared
+        end
+      rescue error : File::Error
+        # Raised by the caller's block writing the artifact, not by the
+        # transport. Left alone so it keeps mapping to the filesystem exit code
+        # rather than being described as a fetch failure.
+        raise error
+      rescue error : IO::Error
+        # A refused connection, a DNS failure, or a read timeout. Without this
+        # the stdlib error escaped the closed error set, so it slipped past
+        # every executor's per-item `rescue error : Error` boundary, killed the
+        # whole run, and was then reported as exit 0 by the CLI.
+        raise ExecutionError.new(
+          "Could not fetch #{PublicUrl.from(uri.to_s)}: #{error.message}")
+      ensure
+        client.close rescue nil
+      end
+
+      redirect
+    end
+  end
+
   # Fetches remote artifacts and refuses to hand back anything unverified.
   #
   # Every rule here exists because the alternative is running someone else's
@@ -30,7 +93,8 @@ module Fluxion::Executor
     # Read in chunks rather than whole so the ceiling is enforced continuously.
     CHUNK_BYTES = 64 * 1024
 
-    def initialize(@max_bytes : Int64 = MAX_ARTIFACT_BYTES)
+    def initialize(@max_bytes : Int64 = MAX_ARTIFACT_BYTES,
+                   @transport : HttpTransport = SystemHttpTransport.new)
     end
 
     # Downloads to `destination` and returns the SHA-256 of what was written.
@@ -140,46 +204,14 @@ module Fluxion::Executor
       current = uri
 
       MAX_REDIRECTS.times do
-        client = HTTP::Client.new(current)
-        client.connect_timeout = CONNECT_TIMEOUT
-        client.read_timeout = READ_TIMEOUT
-
-        redirect = nil.as(String?)
-        begin
-          client.get(current.request_target) do |response|
-            if response.status.redirection?
-              location = response.headers["Location"]?
-              raise TrustError.new("Redirect without a Location header: #{PublicUrl.from(current.to_s)}") unless location
-              redirect = current.resolve(location).to_s
-              next
-            end
-
-            unless response.status.success?
-              raise TrustError.new(
-                "Download failed with HTTP #{response.status_code} for #{PublicUrl.from(current.to_s)}")
-            end
-
-            declared = response.headers["Content-Length"]?.try(&.to_i64?)
-            yield response.body_io, declared
-          end
-        rescue error : File::Error
-          # Raised by the caller's block writing the artifact, not by the
-          # transport. Left alone so it keeps mapping to the filesystem exit
-          # code rather than being described as a fetch failure.
-          raise error
-        rescue error : IO::Error
-          # A refused connection, a DNS failure, or a read timeout. Without this
-          # the stdlib error escaped the closed error set, so it slipped past
-          # every executor's per-item `rescue error : Error` boundary, killed
-          # the whole run, and was then reported as exit 0 by the CLI.
-          raise ExecutionError.new(
-            "Could not fetch #{PublicUrl.from(current.to_s)}: #{error.message}")
-        ensure
-          client.close rescue nil
+        redirect = @transport.get(current, CONNECT_TIMEOUT, READ_TIMEOUT) do |body, declared|
+          yield body, declared
         end
-
         return unless redirect
-        current = validate(redirect.not_nil!)
+
+        # Re-validated rather than merely resolved: a redirect that downgrades
+        # to HTTP, or that grows credentials, is refused rather than followed.
+        current = validate(current.resolve(redirect).to_s)
       end
 
       raise TrustError.new("Too many redirects for #{PublicUrl.from(uri.to_s)}")
@@ -309,6 +341,57 @@ module Fluxion::Executor
     private def normalize(name : String) : String
       cleaned = name.strip.lchop('*').lchop("./")
       File.basename(cleaned)
+    end
+  end
+
+  # Replays canned responses, the way `FakeShellRunner` replays canned results.
+  #
+  # Shipped beside the real transport rather than kept in the specs because it
+  # is what makes the download-verify-install path reachable at all: without it
+  # every `execute` on a fetching executor would make a real HTTPS request, so
+  # none of them had a spec.
+  class FakeHttpTransport < HttpTransport
+    # Every URL requested, in order, including each redirect hop — which is how
+    # a spec asserts that a redirect was actually re-validated and followed.
+    getter requested : Array(String)
+
+    def initialize
+      @requested = [] of String
+      @bodies = {} of String => String
+      @redirects = {} of String => String
+      @declared = {} of String => Int64?
+    end
+
+    # Serves `body` for `url`. By default the declared length matches what is
+    # served; pass `declared` to simulate a truncated or lying response.
+    def on(url : String, body : String, declared : Int64? = nil) : self
+      @bodies[url] = body
+      @declared[url] = declared || body.bytesize.to_i64
+      self
+    end
+
+    # Serves a redirect from `url` to `location`.
+    def redirect(url : String, location : String) : self
+      @redirects[url] = location
+      self
+    end
+
+    def get(uri : URI, connect_timeout : Time::Span, read_timeout : Time::Span,
+            & : IO, Int64? ->) : String?
+      url = uri.to_s
+      @requested << url
+
+      if location = @redirects[url]?
+        return location
+      end
+
+      body = @bodies[url]?
+      unless body
+        raise TrustError.new("Download failed with HTTP 404 for #{PublicUrl.from(url)}")
+      end
+
+      yield IO::Memory.new(body), @declared[url]
+      nil
     end
   end
 end

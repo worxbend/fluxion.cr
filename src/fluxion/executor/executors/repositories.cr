@@ -381,7 +381,10 @@ module Fluxion::Executor
         return
       end
 
-      Downloader.new(Downloader::MAX_KEY_BYTES).download(url, destination)
+      # Through the shared helper rather than a direct `Downloader.new`: this
+      # class already includes `DownloadSupport`, and bypassing it meant this
+      # one fetch could not be substituted even once every other could.
+      downloader(Downloader::MAX_KEY_BYTES).download(url, destination)
     end
 
     # Reads the key without importing it, and requires exactly the fingerprint

@@ -1,11 +1,15 @@
-profile: base-arch
-os:
-  type: arch
-
-jobs:
-  - name: core
-    steps:
-      - type: packages
-        name: core-tools
-        packageManager: pacman
-        packages: [git, curl, jq, ripgrep, fd]
+apiVersion: initkit.io/v1alpha1
+kind: WorkstationProfile
+metadata:
+  name: base-arch
+spec:
+  target:
+    os:
+      distribution: arch
+  phases:
+    - name: core
+      steps:
+        - name: core-tools
+          kind: pacman-packages
+          spec:
+            packages: [git, curl, jq, ripgrep, fd]

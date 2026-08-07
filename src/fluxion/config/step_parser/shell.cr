@@ -10,7 +10,7 @@ module Fluxion::Config
                   shell_script_item(context, entry, "#{name}[#{index}]", working_dir)
                 end.compact
               else
-                # The stable schema declares a single script inline on the step.
+                # A single script may be declared inline on the step instead.
                 item = shell_script_item(context, node, name, working_dir)
                 item ? [item] : [] of ShellScriptItem
               end

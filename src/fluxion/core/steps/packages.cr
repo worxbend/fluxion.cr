@@ -11,8 +11,7 @@ module Fluxion
       @action = action.strip.downcase
     end
 
-    # The actions each manager accepts, as documented for WorkstationProfile
-    # package kinds.
+    # The actions each manager accepts, as documented for the package kinds.
     SUPPORTED = {
       PackageManager::Apt    => %w[update upgrade dist-upgrade],
       PackageManager::Dnf    => %w[check-update upgrade swap groupupdate group-update],

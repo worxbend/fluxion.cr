@@ -11,15 +11,14 @@ require "./config/step_parser/shell"
 require "./config/step_parser/system"
 require "./config/step_parser/manifest_entries"
 require "./config/plan_kinds"
-require "./config/jobs_schema"
 require "./config/interpolator"
 require "./config/manifest"
 require "./config/loader"
 
 # Reads YAML profiles and maps them onto the domain model.
 #
-# Two frontends land on one `Profile`: the stable `profile`/`os`/`jobs` DAG
-# schema, and the `WorkstationProfile` manifest. Diagnostics are collected
-# rather than raised so a profile with several mistakes takes one run to fix.
+# One frontend: the `WorkstationProfile` manifest, whose `spec.phases` become
+# the `Profile` phase DAG. Diagnostics are collected rather than raised so a
+# profile with several mistakes takes one run to fix.
 module Fluxion::Config
 end

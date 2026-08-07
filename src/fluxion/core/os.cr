@@ -1,7 +1,6 @@
 module Fluxion
-  # Distributions Fluxion knows how to bootstrap. The stable `jobs`/`steps`
-  # schema calls this `os.type`; WorkstationProfile manifests call it
-  # `spec.target.os.distribution` and additionally accept `ubuntu`.
+  # Distributions Fluxion knows how to bootstrap, declared as
+  # `spec.target.os.distribution`.
   enum Distribution
     Fedora
     Arch
@@ -117,11 +116,12 @@ module Fluxion
     end
   end
 
-  # The OS a profile declares it targets.
+  # The OS a profile declares it targets, as `spec.target.os`.
   #
-  # For the stable `jobs`/`steps` schema this drives package-manager validation.
-  # For WorkstationProfile manifests it is informational metadata only: host
-  # facts and per-entry `when` rules decide what actually runs.
+  # It does not decide what runs — host facts and per-step `when` rules do. Its
+  # one active role is catching a package manager the target could never have,
+  # and even that yields to a `when` rule that narrows the distribution, since
+  # such a step is meant for a different machine by construction.
   struct TargetOs
     getter distribution : Distribution
     getter release : String?

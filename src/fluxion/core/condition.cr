@@ -77,6 +77,17 @@ module Fluxion
       fact_checks_empty? && @required_commands.empty? && @any_commands.empty? && @branches.empty?
     end
 
+    # True when this condition restricts which distribution or family the entry
+    # runs on, directly or inside a `oneOf` branch.
+    #
+    # Such an entry is the author saying "this one is for Arch" in a profile
+    # that may target something else, so the declared target is the wrong thing
+    # to validate its package manager against — see `Manifest`.
+    def narrows_distribution? : Bool
+      return true if @distribution || @os_family
+      @branches.any?(&.narrows_distribution?)
+    end
+
     # Evaluates against detected host facts. The PATH lookup is injected so
     # `plan` can evaluate conditions without an executor and so specs can drive
     # it deterministically.

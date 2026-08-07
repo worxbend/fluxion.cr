@@ -19,18 +19,18 @@ describe Fluxion::State::Store do
     end
   end
 
-  it "round-trips items and jobs" do
+  it "round-trips items and phases" do
     with_store do |store|
       document = store.load("default")
       document.record(Fluxion::State::ItemRecord.new(
         profile: "default", step: "tools", item_key: "git", item_type: "package",
         completed_at: Time.utc, version: "2.45.2"))
-      document.record(Fluxion::State::JobRecord.new("base", "completed", Time.utc, "abc"))
+      document.record(Fluxion::State::PhaseRecord.new("base", "completed", Time.utc, "abc"))
       store.save(document)
 
       reloaded = store.load("default")
       reloaded.find("tools", "git", "package").not_nil!.version.should eq("2.45.2")
-      reloaded.jobs.first.job.should eq("base")
+      reloaded.phases.first.phase.should eq("base")
     end
   end
 
@@ -83,22 +83,22 @@ describe Fluxion::State::Store do
     end
   end
 
-  describe "job fingerprints" do
-    it "treats a job as complete only while its fingerprint matches" do
+  describe "phase fingerprints" do
+    it "treats a phase as complete only while its fingerprint matches" do
       with_store do |store|
         document = store.load("default")
-        document.record(Fluxion::State::JobRecord.new("base", "completed", Time.utc, "abc"))
+        document.record(Fluxion::State::PhaseRecord.new("base", "completed", Time.utc, "abc"))
 
-        document.job_completed?("base", "abc").should be_true
-        document.job_completed?("base", "different").should be_false
+        document.phase_completed?("base", "abc").should be_true
+        document.phase_completed?("base", "different").should be_false
       end
     end
 
-    it "does not treat a failed job as complete" do
+    it "does not treat a failed phase as complete" do
       with_store do |store|
         document = store.load("default")
-        document.record(Fluxion::State::JobRecord.new("base", "failed", Time.utc, "abc"))
-        document.job_completed?("base", "abc").should be_false
+        document.record(Fluxion::State::PhaseRecord.new("base", "failed", Time.utc, "abc"))
+        document.phase_completed?("base", "abc").should be_false
       end
     end
 
@@ -107,8 +107,8 @@ describe Fluxion::State::Store do
       # and skipping on that basis could miss work the user has since added.
       with_store do |store|
         document = store.load("default")
-        document.record(Fluxion::State::JobRecord.new("base", "completed", Time.utc, nil))
-        document.job_completed?("base", "abc").should be_false
+        document.record(Fluxion::State::PhaseRecord.new("base", "completed", Time.utc, nil))
+        document.phase_completed?("base", "abc").should be_false
       end
     end
   end
@@ -140,13 +140,13 @@ describe Fluxion::State::Store do
       end
     end
 
-    it "removes a job" do
+    it "removes a phase" do
       with_store do |store|
         document = store.load("default")
-        document.record(Fluxion::State::JobRecord.new("base", "completed", Time.utc, "abc"))
+        document.record(Fluxion::State::PhaseRecord.new("base", "completed", Time.utc, "abc"))
 
-        document.forget_job("base").should be_true
-        document.forget_job("base").should be_false
+        document.forget_phase("base").should be_true
+        document.forget_phase("base").should be_false
       end
     end
   end
@@ -187,7 +187,7 @@ describe Fluxion::State::Store do
       with_store do |store|
         document = store.parse(legacy, "default")
         document.profile_name.should eq("default")
-        document.next_job.should eq("desktop")
+        document.next_phase.should eq("desktop")
       end
     end
 
@@ -205,12 +205,12 @@ describe Fluxion::State::Store do
       end
     end
 
-    it "carries job records across the rename from phases to jobs" do
+    it "carries phase records the Java version wrote" do
       with_store do |store|
-        job = store.parse(legacy, "default").jobs.first
-        job.job.should eq("base")
-        job.completed?.should be_true
-        job.fingerprint.should eq("41fb3f8c")
+        phase = store.parse(legacy, "default").phases.first
+        phase.phase.should eq("base")
+        phase.completed?.should be_true
+        phase.fingerprint.should eq("41fb3f8c")
       end
     end
 
@@ -224,7 +224,7 @@ describe Fluxion::State::Store do
       with_store do |store|
         document = store.parse(%({"schemaVersion": 7, "profileName": "default"}), "default")
         document.items.should be_empty
-        document.jobs.should be_empty
+        document.phases.should be_empty
       end
     end
   end

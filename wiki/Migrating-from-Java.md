@@ -1,26 +1,13 @@
 # Migrating from the Java version
 
-The Crystal implementation is the same product: same profile schemas, same
-command surface, same trust rules.
-
-## Your profiles work unchanged
-
-Both frontends are supported exactly as documented — the stable
-`profile`/`os`/`jobs` schema including the `phases` and `modules` aliases, and
-`WorkstationProfile` manifests with `apiVersion: initkit.io/v1alpha1`.
-
-Check before switching:
-
-```bash
-fluxion validate -c your-profile.yaml
-fluxion dry-run  -c your-profile.yaml
-```
+The Crystal implementation is the same product: same command surface, same trust
+rules, same recorded state. The profile is written differently.
 
 ## Your state carries over
 
-State files written by the Java version are read directly. The vocabulary
-changed internally — phases became jobs, modules became steps — but the
-recorded work is the same work, so it maps across.
+State files written by the Java version are read directly. The vocabulary the
+file uses is the vocabulary Fluxion still uses — phases and their modules map
+onto phases and their steps — so the recorded work is the same work.
 
 ```bash
 fluxion state show
@@ -28,14 +15,92 @@ fluxion state show
 
 You should see what previous runs recorded. Nothing needs reinstalling.
 
-## What changed
+## Your profile needs rewriting
 
-**`--phase` is now `--job`.** The old name is not accepted; the docs and the
-error messages agree on one word.
+Fluxion reads one document: a `WorkstationProfile` with an `apiVersion`/`kind`
+header and `spec.phases[].steps[]`. The Java `profile`/`os`/`phases` YAML is not
+accepted, and `fluxion validate` says so at the header rather than half way
+down.
+
+The rewrite is mechanical. Before:
+
+```yaml
+profile: workstation
+os:
+  type: fedora
+  release: "44"
+
+phases:
+  - name: base
+    continueOnModuleError: true
+    modules:
+      - type: packages
+        name: core-tools
+        packageManager: dnf
+        packages: [git, curl]
+```
+
+After:
+
+```yaml
+apiVersion: initkit.io/v1alpha1
+kind: WorkstationProfile
+metadata:
+  name: workstation
+spec:
+  target:
+    os:
+      distribution: fedora
+      release: "44"
+  phases:
+    - name: base
+      execution:
+        continueOnError: true
+      steps:
+        - name: core-tools
+          kind: dnf-packages
+          spec:
+            packages: [git, curl]
+```
+
+| Java | Fluxion |
+|---|---|
+| `profile:` | `metadata.name` |
+| `os.type` | `spec.target.os.distribution` |
+| `os.release` | `spec.target.os.release` (Debian and Ubuntu prefer `codename`) |
+| `phases[]` | `spec.phases[]` |
+| `phases[].modules[]` | `spec.phases[].steps[]` |
+| `continueOnModuleError` | `phases[].execution.continueOnError` |
+| `type:` on a module | `kind:` on a step, from the kind table |
+| the module's own fields | `spec:` on the step |
+
+`name`, `description`, and `when` stay on the step itself; everything else the
+module declared moves inside `spec:`, `probeCommand` included.
+
+Module types that changed name: `packages` became the six per-manager kinds
+(`dnf-packages`, `apt-packages`, `pacman-packages`, `zypper-packages`,
+`aur-packages`, `cargo-packages`), so the manager comes from the kind rather
+than a field. `shell-script` became `shell-scripts`, `shell-command` became
+`commands`, `compiled-binary` became `binary-downloads`, `dotbot` became
+`dotfiles-apply`, and `flatpak` became `flatpak-packages`. Everything else keeps
+its name.
+
+The full list is in the
+[config schema reference](https://github.com/worxbend/fluxion.cr/blob/main/docs/config-schema.md),
+and `fluxion kinds` prints it from the table the parser actually uses.
+
+Check the result before running it:
+
+```bash
+fluxion validate -c your-profile.yaml
+fluxion dry-run  -c your-profile.yaml
+```
+
+## What else changed
 
 **`import` produces a complete profile.** The Java version emitted a bare
 fragment that could not be validated or previewed without hand-editing a header
-onto it. The job inside still lifts straight into an existing profile.
+onto it. The phase inside it still lifts straight into an existing profile.
 
 **Colour is automatic.** Output piped into a file or a pager is plain without
 passing a flag, and `NO_COLOR` is honoured.

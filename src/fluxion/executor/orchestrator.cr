@@ -36,11 +36,11 @@ module Fluxion::Executor
     # interactively — a run that pauses for input is a run that hangs in CI.
     getter? approved : Bool
 
-    # Restrict the run to these jobs.
-    getter only_jobs : Array(String)
+    # Restrict the run to these phases.
+    getter only_phases : Array(String)
 
-    # Skip every job before this one.
-    getter from_job : String?
+    # Skip every phase before this one.
+    getter from_phase : String?
 
     getter profile_name : String
 
@@ -49,8 +49,8 @@ module Fluxion::Executor
       @dry_run : Bool = false,
       @probe_only : Bool = false,
       @approved : Bool = false,
-      @only_jobs : Array(String) = [] of String,
-      @from_job : String? = nil,
+      @only_phases : Array(String) = [] of String,
+      @from_phase : String? = nil,
       @profile_name : String = "default",
     )
     end
@@ -63,7 +63,7 @@ module Fluxion::Executor
 
   # What a finished run amounted to.
   #
-  # A class rather than a struct: it is threaded through job and step execution
+  # A class rather than a struct: it is threaded through phase and step execution
   # and mutated there, and a struct would be copied at each call so every
   # increment would be lost.
   class RunSummary
@@ -73,12 +73,12 @@ module Fluxion::Executor
     property dry_run = 0
     property paused = 0
 
-    # Jobs that failed, and jobs blocked by a failed dependency.
-    property failed_jobs = [] of String
-    property blocked_jobs = [] of String
+    # Phases that failed, and phases blocked by a failed dependency.
+    property failed_phases = [] of String
+    property blocked_phases = [] of String
 
     # Where to resume from, when the run stopped early.
-    property next_job : String?
+    property next_phase : String?
 
     def initialize
     end
@@ -94,7 +94,7 @@ module Fluxion::Executor
     end
 
     def ok? : Bool
-      @failed.zero? && @failed_jobs.empty?
+      @failed.zero? && @failed_phases.empty?
     end
 
     def to_s(io : IO) : Nil
@@ -125,7 +125,7 @@ module Fluxion::Executor
     def run(profile : Profile, options : RunOptions, listener : ExecutionListener,
             cancellation : CancellationSignal = CancellationSignal.new) : RunSummary
       summary = RunSummary.new
-      jobs = select_jobs(profile, options)
+      phases = select_phases(profile, options)
       recorder = Recorder.new(@state, options)
 
       # A source setup configures a repository the packages that follow depend
@@ -136,57 +136,57 @@ module Fluxion::Executor
 
       completed = Set(String).new
 
-      jobs.each do |job|
+      phases.each do |phase|
         if cancellation.cancelled?
-          summary.next_job = job.name
-          listener.on_event(ExecutionEvent.cancelled(job.name, job.name))
+          summary.next_phase = phase.name
+          listener.on_event(ExecutionEvent.cancelled(phase.name, phase.name))
           break
         end
 
-        blocked_by = job.depends_on.find { |dependency| summary.failed_jobs.includes?(dependency) || summary.blocked_jobs.includes?(dependency) }
+        blocked_by = phase.depends_on.find { |dependency| summary.failed_phases.includes?(dependency) || summary.blocked_phases.includes?(dependency) }
         if blocked_by
-          summary.blocked_jobs << job.name
-          listener.on_event(ExecutionEvent.phase_blocked(job.name, blocked_by))
+          summary.blocked_phases << phase.name
+          listener.on_event(ExecutionEvent.phase_blocked(phase.name, blocked_by))
           next
         end
 
-        fingerprint = State::Fingerprint.of(job)
-        if recorder.already_completed?(job, fingerprint)
-          # A completed job is only skipped while its fingerprint still
+        fingerprint = State::Fingerprint.of(phase)
+        if recorder.already_completed?(phase, fingerprint)
+          # A completed phase is only skipped while its fingerprint still
           # matches, so editing a package list makes it run again rather than
           # being silently considered done.
-          listener.on_event(ExecutionEvent.phase_started(job.name))
-          listener.on_event(ExecutionEvent.phase_completed(job.name))
-          completed << job.name
+          listener.on_event(ExecutionEvent.phase_started(phase.name))
+          listener.on_event(ExecutionEvent.phase_completed(phase.name))
+          completed << phase.name
           next
         end
 
-        outcome = run_job(job, options, listener, summary, cancellation, recorder)
-        completed << job.name
+        outcome = run_phase(phase, options, listener, summary, cancellation, recorder)
+        completed << phase.name
 
         case outcome
-        in JobOutcome::Completed
-          recorder.job_completed(job, fingerprint)
+        in PhaseOutcome::Completed
+          recorder.phase_completed(phase, fingerprint)
           next
-        in JobOutcome::Failed
-          recorder.job_failed(job, fingerprint)
-          summary.failed_jobs << job.name
-          listener.on_event(ExecutionEvent.phase_failed(job.name))
+        in PhaseOutcome::Failed
+          recorder.phase_failed(phase, fingerprint)
+          summary.failed_phases << phase.name
+          listener.on_event(ExecutionEvent.phase_failed(phase.name))
           next
-        in JobOutcome::Halted
+        in PhaseOutcome::Halted
           # A logout checkpoint or an interrupt: state is written and a resume
           # point recorded, then the run stops cleanly.
-          summary.next_job = jobs[(jobs.index(job) || 0) + 1]?.try(&.name)
-          recorder.resume_at(summary.next_job)
+          summary.next_phase = phases[(phases.index(phase) || 0) + 1]?.try(&.name)
+          recorder.resume_at(summary.next_phase)
           break
-        in JobOutcome::Cancelled
-          summary.next_job = job.name
-          recorder.resume_at(job.name)
+        in PhaseOutcome::Cancelled
+          summary.next_phase = phase.name
+          recorder.resume_at(phase.name)
           break
         end
       end
 
-      recorder.resume_at(nil) if summary.next_job.nil? && summary.ok?
+      recorder.resume_at(nil) if summary.next_phase.nil? && summary.ok?
       recorder.flush
       summary
     end
@@ -203,9 +203,21 @@ module Fluxion::Executor
         @dirty = false
       end
 
-      def already_completed?(job : Job, fingerprint : String) : Bool
+      def already_completed?(phase : Phase, fingerprint : String) : Bool
         return false unless @options.mode.trusts_state?
-        document.try(&.job_completed?(job.name, fingerprint)) || false
+        document.try(&.phase_completed?(phase.name, fingerprint)) || false
+      end
+
+      # What a prior run recorded about this item, if anything.
+      #
+      # Answered from the document the recorder already holds. The store's own
+      # lookup re-reads and re-parses the whole state file on every call, so
+      # asking it once per item made a run cost a file read and a JSON parse
+      # per package — the same mistake buffering the writes here avoids.
+      def recorded(item : ModuleItem) : InstallationStatus::InstalledFromState?
+        record = document.try(&.find(item.step_name, item.key, item.item_type.json_name))
+        return unless record
+        InstallationStatus::InstalledFromState.new(item.key, record.completed_at, record.version)
       end
 
       def item_succeeded(item : ModuleItem, result : StepResult::Success) : Nil
@@ -224,18 +236,18 @@ module Fluxion::Executor
         end
       end
 
-      def job_completed(job : Job, fingerprint : String) : Nil
-        record_job(job, "completed", fingerprint)
+      def phase_completed(phase : Phase, fingerprint : String) : Nil
+        record_phase(phase, "completed", fingerprint)
       end
 
-      def job_failed(job : Job, fingerprint : String) : Nil
-        record_job(job, "failed", fingerprint)
+      def phase_failed(phase : Phase, fingerprint : String) : Nil
+        record_phase(phase, "failed", fingerprint)
       end
 
-      def resume_at(job : String?) : Nil
+      def resume_at(phase : String?) : Nil
         return unless recording?
         document.try do |state|
-          state.next_job = job
+          state.next_phase = phase
           @dirty = true
         end
       end
@@ -252,10 +264,10 @@ module Fluxion::Executor
         # simply re-probes.
       end
 
-      private def record_job(job : Job, status : String, fingerprint : String) : Nil
+      private def record_phase(phase : Phase, status : String, fingerprint : String) : Nil
         return unless recording?
         document.try do |state|
-          state.record(State::JobRecord.new(job.name, status, Time.utc, fingerprint))
+          state.record(State::PhaseRecord.new(phase.name, status, Time.utc, fingerprint))
           @dirty = true
         end
       end
@@ -276,21 +288,21 @@ module Fluxion::Executor
       end
     end
 
-    private enum JobOutcome
+    private enum PhaseOutcome
       Completed
       Failed
       Halted
       Cancelled
     end
 
-    private def run_job(job : Job, options : RunOptions, listener : ExecutionListener,
-                        summary : RunSummary, cancellation : CancellationSignal,
-                        recorder : Recorder) : JobOutcome
-      listener.on_event(ExecutionEvent.phase_started(job.name))
+    private def run_phase(phase : Phase, options : RunOptions, listener : ExecutionListener,
+                          summary : RunSummary, cancellation : CancellationSignal,
+                          recorder : Recorder) : PhaseOutcome
+      listener.on_event(ExecutionEvent.phase_started(phase.name))
       failed = false
 
-      job.steps.each do |step|
-        return JobOutcome::Cancelled if cancellation.cancelled?
+      phase.steps.each do |step|
+        return PhaseOutcome::Cancelled if cancellation.cancelled?
 
         # An interrupt is a control step, not work: it records where to resume
         # and stops, rather than running anything.
@@ -301,25 +313,25 @@ module Fluxion::Executor
         if step.is_a?(InterruptStep)
           next preview_interrupt(step, listener, summary) if options.read_only?
           halt(step, listener, summary)
-          return JobOutcome::Halted
+          return PhaseOutcome::Halted
         end
 
         step_failed = run_step(step, options, listener, summary, cancellation, recorder)
         failed ||= step_failed
-        return JobOutcome::Failed if step_failed && !job.continue_on_step_error?
+        return PhaseOutcome::Failed if step_failed && !phase.continue_on_step_error?
       end
 
-      return JobOutcome::Failed if failed
+      return PhaseOutcome::Failed if failed
 
-      listener.on_event(ExecutionEvent.phase_completed(job.name))
+      listener.on_event(ExecutionEvent.phase_completed(phase.name))
 
-      policy = job.restart_policy
+      policy = phase.restart_policy
       if policy.is_a?(RestartPolicy::PromptLogout)
-        listener.on_event(ExecutionEvent.restart_required(job.name, policy.message))
-        return JobOutcome::Halted
+        listener.on_event(ExecutionEvent.restart_required(phase.name, policy.message))
+        return PhaseOutcome::Halted
       end
 
-      JobOutcome::Completed
+      PhaseOutcome::Completed
     end
 
     private def preview_interrupt(step : InterruptStep, listener : ExecutionListener, summary : RunSummary) : Nil
@@ -363,7 +375,7 @@ module Fluxion::Executor
         executor.items(step).each do |item|
           break if cancellation.cancelled?
 
-          result = run_item(step, item, executor, options, listener)
+          result = run_item(step, item, executor, options, listener, recorder)
           summary.record(result)
           recorder.try(&.item_succeeded(item, result)) if result.is_a?(StepResult::Success)
           next unless result.is_a?(StepResult::Failure)
@@ -379,10 +391,11 @@ module Fluxion::Executor
     end
 
     private def run_item(step : Step, item : ModuleItem, executor : StepExecutor,
-                         options : RunOptions, listener : ExecutionListener) : StepResult
+                         options : RunOptions, listener : ExecutionListener,
+                         recorder : Recorder? = nil) : StepResult
       listener.on_event(ExecutionEvent.item_started(step.name, item.key))
 
-      if decision = skip_decision(item, options)
+      if decision = skip_decision(item, options, recorder)
         result = StepResult::Skipped.new(item.key, decision.to_s)
         listener.on_event(ExecutionEvent.item_completed(step.name, item.key, result))
         return result
@@ -411,11 +424,12 @@ module Fluxion::Executor
     end
 
     # Whether this item can be skipped, and on what evidence.
-    private def skip_decision(item : ModuleItem, options : RunOptions) : InstallationStatus?
+    private def skip_decision(item : ModuleItem, options : RunOptions,
+                              recorder : Recorder?) : InstallationStatus?
       return unless options.mode.probes?
 
       if options.mode.trusts_state?
-        if recorded = @state.try(&.find(options.profile_name, item))
+        if recorded = recorder.try(&.recorded(item))
           return recorded
         end
       end
@@ -438,29 +452,29 @@ module Fluxion::Executor
       end
     end
 
-    private def select_jobs(profile : Profile, options : RunOptions) : Array(Job)
-      jobs = profile.ordered_jobs
+    private def select_phases(profile : Profile, options : RunOptions) : Array(Phase)
+      phases = profile.ordered_phases
 
-      unless options.only_jobs.empty?
-        unknown = options.only_jobs.reject { |name| profile.job?(name) }
+      unless options.only_phases.empty?
+        unknown = options.only_phases.reject { |name| profile.phase?(name) }
         unless unknown.empty?
           raise ExecutionError.new(
-            "Unknown job#{"s" if unknown.size != 1}: #{unknown.join(", ")}. " \
-            "Valid jobs: #{profile.jobs.map(&.name).join(", ")}")
+            "Unknown phase#{"s" if unknown.size != 1}: #{unknown.join(", ")}. " \
+            "Valid phases: #{profile.phases.map(&.name).join(", ")}")
         end
-        return jobs.select { |job| options.only_jobs.includes?(job.name) }
+        return phases.select { |phase| options.only_phases.includes?(phase.name) }
       end
 
-      if from = options.from_job
-        index = jobs.index { |job| job.name == from }
+      if from = options.from_phase
+        index = phases.index { |phase| phase.name == from }
         unless index
           raise ExecutionError.new(
-            "Unknown job: #{from}. Valid jobs: #{profile.jobs.map(&.name).join(", ")}")
+            "Unknown phase: #{from}. Valid phases: #{profile.phases.map(&.name).join(", ")}")
         end
-        return jobs[index..]
+        return phases[index..]
       end
 
-      jobs
+      phases
     end
 
     private def run_source_setups(profile : Profile, options : RunOptions, listener : ExecutionListener,

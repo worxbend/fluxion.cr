@@ -106,8 +106,8 @@ everything.
 
 **One profile with `when` rules.** Better when the difference is a handful of
 package names — see the
-[WorkstationProfile manifest](https://github.com/worxbend/fluxion.cr/blob/main/docs/workstation-profile.md),
-which selects per-entry work from host facts. Leave `distributions` off the
+[config schema](https://github.com/worxbend/fluxion.cr/blob/main/docs/config-schema.md),
+which selects each phase and step from host facts. Leave `distributions` off the
 registry entry so it is offered everywhere.
 
 ## Where things live

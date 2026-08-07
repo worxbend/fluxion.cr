@@ -14,7 +14,7 @@ module Fluxion::CLI
     end
 
     def usage : String
-      "fluxion apply [-c FILE] [--dry-run] [--job NAME] [--yes]"
+      "fluxion apply [-c FILE] [--dry-run] [--phase NAME] [--yes]"
     end
 
     # Runs with mutation disabled regardless of flags.
@@ -26,16 +26,16 @@ module Fluxion::CLI
     @reprobe = false
     @approved = false
     @stream_output = false
-    @only_jobs = [] of String
-    @from_job : String?
+    @only_phases = [] of String
+    @from_phase : String?
     @profile_name = "default"
 
     def register(parser : OptionParser) : Nil
       parser.on("--dry-run", "Show what would happen without changing anything") { @dry_run = true }
-      parser.on("--job=NAME", "Run only these jobs (repeatable, or comma-separated)") do |value|
-        @only_jobs.concat(value.split(',').map(&.strip).reject(&.empty?))
+      parser.on("--phase=NAME", "Run only these phases (repeatable, or comma-separated)") do |value|
+        @only_phases.concat(value.split(',').map(&.strip).reject(&.empty?))
       end
-      parser.on("--from-job=NAME", "Start from this job, skipping earlier ones") { |value| @from_job = value }
+      parser.on("--from-phase=NAME", "Start from this phase, skipping earlier ones") { |value| @from_phase = value }
       parser.on("-y", "--yes", "Approve items that declared confirm") { @approved = true }
       parser.on("--skip-already-installed", "Skip work state or a probe says is done") { @skip_installed = true }
       parser.on("--re-probe", "Ignore saved state and trust only live probes") { @reprobe = true }
@@ -54,8 +54,8 @@ module Fluxion::CLI
         dry_run: dry_run,
         probe_only: @probe_only,
         approved: @approved,
-        only_jobs: @only_jobs,
-        from_job: @from_job,
+        only_phases: @only_phases,
+        from_phase: @from_phase,
         profile_name: @profile_name,
       )
 

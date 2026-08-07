@@ -18,7 +18,8 @@ module Fluxion
 
     getter severity : Severity
 
-    # Dotted path into the config document, e.g. `jobs[1].steps[0].packages[2]`.
+    # Dotted path into the config document, e.g.
+    # `spec.phases[1].steps[0].spec.packages[2]`.
     getter path : String
 
     getter message : String

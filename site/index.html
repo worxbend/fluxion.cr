@@ -327,17 +327,21 @@ footer .spacer { margin-left: auto; }
           cannot describe something other than what executes.
         </p>
 
-        <pre class="code"><span class="k">profile</span>: my-laptop
-<span class="k">os</span>:
-  <span class="k">type</span>: arch
-
-<span class="k">jobs</span>:
-  - <span class="k">name</span>: system-foundation
-    <span class="k">steps</span>:
-      - <span class="k">type</span>: packages
-        <span class="k">name</span>: core-cli-tools
-        <span class="k">packageManager</span>: pacman
-        <span class="k">packages</span>: [<span class="s">git</span>, <span class="s">curl</span>, <span class="s">ripgrep</span>, <span class="s">zsh</span>]</pre>
+        <pre class="code"><span class="k">apiVersion</span>: initkit.io/v1alpha1
+<span class="k">kind</span>: WorkstationProfile
+<span class="k">metadata</span>:
+  <span class="k">name</span>: my-laptop
+<span class="k">spec</span>:
+  <span class="k">target</span>:
+    <span class="k">os</span>:
+      <span class="k">distribution</span>: arch
+  <span class="k">phases</span>:
+    - <span class="k">name</span>: system-foundation
+      <span class="k">steps</span>:
+        - <span class="k">name</span>: core-cli-tools
+          <span class="k">kind</span>: pacman-packages
+          <span class="k">spec</span>:
+            <span class="k">packages</span>: [<span class="s">git</span>, <span class="s">curl</span>, <span class="s">ripgrep</span>, <span class="s">zsh</span>]</pre>
 
         <div class="flow">
           <div class="step"><code>fluxion validate</code><span>Is this profile sound?</span></div>
@@ -354,7 +358,7 @@ footer .spacer { margin-left: auto; }
 <pre><span class="b">Fluxion · arch-workstation · dry-run</span>
 <span class="d">Target: arch   Host: CachyOS (amd64)</span>
 
-<span class="c">[JOB]</span> <span class="b">system-foundation</span>
+<span class="c">[PHASE]</span> <span class="b">system-foundation</span>
   core-cli-tools
     <span class="c">▸</span> git <span class="d">...</span> <span class="y">would run</span>
         <span class="d">$ sudo pacman -S --noconfirm git</span>
@@ -364,7 +368,7 @@ footer .spacer { margin-left: auto; }
         <span class="d">$ sudo pacman -S --noconfirm zsh</span>
 <span class="g">[DONE]</span> system-foundation
 
-<span class="c">[JOB]</span> <span class="b">shell</span>
+<span class="c">[PHASE]</span> <span class="b">shell</span>
   oh-my-zsh
     <span class="c">▸</span> ~/.oh-my-zsh <span class="d">...</span> <span class="y">would run</span>
         <span class="d">$ download https://raw.githubusercontent.com/…/install.sh</span>
@@ -438,9 +442,9 @@ Summary: <span class="g">0 ok</span> · <span class="r">0 failed</span> · <span
     <div class="kicker">Reruns</div>
     <h2>Running it twice is cheap</h2>
     <p class="sub">
-      Fluxion records what worked — versions, checksums — and fingerprints each job's
-      configuration. A completed job is skipped only while that fingerprint still matches,
-      so editing a package list makes the job run again rather than being quietly
+      Fluxion records what worked — versions, checksums — and fingerprints each phase's
+      configuration. A completed phase is skipped only while that fingerprint still matches,
+      so editing a package list makes the phase run again rather than being quietly
       considered done.
     </p>
     <div class="cards">
@@ -454,7 +458,7 @@ Summary: <span class="g">0 ok</span> · <span class="r">0 failed</span> · <span
       </div>
       <div class="card reveal">
         <span class="mark">fluxion explain --item git</span>
-        <p>Why one job or item would run or skip, in the orchestrator's own terms.</p>
+        <p>Why one phase or item would run or skip, in the orchestrator's own terms.</p>
       </div>
     </div>
   </div>
@@ -513,26 +517,26 @@ Summary: <span class="g">0 ok</span> · <span class="r">0 failed</span> · <span
 
 <section>
   <div class="wrap">
-    <div class="kicker">Two schemas</div>
-    <h2>An explicit graph, or one ordered plan</h2>
+    <div class="kicker">One schema</div>
+    <h2>A graph of phases, selected by the host</h2>
     <div class="cards">
       <div class="card reveal">
-        <span class="mark">jobs / steps</span>
+        <span class="mark">spec.phases</span>
         <p>
-          The stable schema. Jobs declare dependencies, so ordering is a graph you can
-          read and render — <code>fluxion graph</code> emits Mermaid, DOT, or JSON.
+          Phases declare dependencies, so ordering is a graph you can read and render —
+          <code>fluxion graph</code> emits Mermaid, DOT, or JSON.
         </p>
       </div>
       <div class="card reveal">
-        <span class="mark">WorkstationProfile</span>
+        <span class="mark">when</span>
         <p>
-          One ordered plan, selected by host facts and per-entry <code>when</code> rules.
-          The same profile does the right thing on Fedora and on Arch.
+          Every phase and step can be selected by host facts. The same profile does the
+          right thing on Fedora and on Arch, and says what it skipped.
         </p>
       </div>
     </div>
     <p style="margin-top:1.4rem;color:var(--text-faint);font-size:.92rem">
-      Both land on the same domain model, so every command works with either.
+      One document shape, one validation path, one page describing it.
     </p>
   </div>
 </section>
@@ -548,7 +552,7 @@ Summary: <span class="g">0 ok</span> · <span class="r">0 failed</span> · <span
       <tr><td>lint</td><td>Profile quality and safety advice</td></tr>
       <tr><td>doctor</td><td>Is this host ready for this profile?</td></tr>
       <tr><td>plan</td><td>The execution plan — text, table, tree, or JSON</td></tr>
-      <tr><td>graph</td><td>The job dependency graph (Mermaid, DOT, JSON)</td></tr>
+      <tr><td>graph</td><td>The phase dependency graph (Mermaid, DOT, JSON)</td></tr>
       <tr><td>status · diff · explain</td><td>What is installed, what differs, and why</td></tr>
       <tr><td>dry-run</td><td>The real traversal with mutation switched off</td></tr>
       <tr><td>apply</td><td>Do it</td></tr>
@@ -565,7 +569,7 @@ Summary: <span class="g">0 ok</span> · <span class="r">0 failed</span> · <span
     <h2>Everything is written down</h2>
     <div class="cards">
       <div class="card reveal"><span class="mark">docs/commands.md</span><p><a href="https://github.com/worxbend/fluxion.cr/blob/main/docs/commands.md" style="color:var(--text-dim)">Every command, flag, and exit code.</a></p></div>
-      <div class="card reveal"><span class="mark">docs/config-schema.md</span><p><a href="https://github.com/worxbend/fluxion.cr/blob/main/docs/config-schema.md" style="color:var(--text-dim)">The jobs/steps schema in full.</a></p></div>
+      <div class="card reveal"><span class="mark">docs/config-schema.md</span><p><a href="https://github.com/worxbend/fluxion.cr/blob/main/docs/config-schema.md" style="color:var(--text-dim)">The profile schema in full.</a></p></div>
       <div class="card reveal"><span class="mark">docs/registry.md</span><p><a href="https://github.com/worxbend/fluxion.cr/blob/main/docs/registry.md" style="color:var(--text-dim)">The registry manifest format.</a></p></div>
       <div class="card reveal"><span class="mark">docs/architecture.md</span><p><a href="https://github.com/worxbend/fluxion.cr/blob/main/docs/architecture.md" style="color:var(--text-dim)">Layers, trust boundaries, failure model.</a></p></div>
       <div class="card reveal"><span class="mark">wiki</span><p><a href="https://github.com/worxbend/fluxion.cr/wiki" style="color:var(--text-dim)">Recipes, troubleshooting, design decisions.</a></p></div>
@@ -580,7 +584,7 @@ Summary: <span class="g">0 ok</span> · <span class="r">0 failed</span> · <span
     <h2>Upgrading from the Java version</h2>
     <p class="sub" style="margin-bottom:0">
       Fluxion was a Java 25 / GraalVM project. This is a ground-up Crystal reimplementation
-      of the same product: same schemas, same commands, same trust rules. State files
+      of the same product: same commands, same trust rules. State files
       written by the Java version are read directly, so upgrading does not mean
       reinstalling everything you already have.
     </p>

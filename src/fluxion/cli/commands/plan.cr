@@ -2,8 +2,8 @@ module Fluxion::CLI
   # `fluxion plan` — the phase-ordered execution plan, without touching the
   # host.
   #
-  # Shares job ordering and item expansion with `apply`, so what it prints is
-  # what would run rather than a separate description that can drift.
+  # Shares phase ordering and item expansion with `apply`, so what it prints
+  # is what would run rather than a separate description that can drift.
   class PlanCommand < Command
     def name : String
       "plan"
@@ -54,22 +54,22 @@ module Fluxion::CLI
         puts
       end
 
-      profile.ordered_jobs.each_with_index do |job, index|
-        dependencies = job.depends_on.empty? ? Style.dim("no deps") : Style.dim("after: #{job.depends_on.join(", ")}")
-        puts "#{Style.bold_blue("Job #{index + 1}:")} #{Style.bold(job.name)} [#{dependencies}]"
+      profile.ordered_phases.each_with_index do |phase, index|
+        dependencies = phase.depends_on.empty? ? Style.dim("no deps") : Style.dim("after: #{phase.depends_on.join(", ")}")
+        puts "#{Style.bold_blue("Phase #{index + 1}:")} #{Style.bold(phase.name)} [#{dependencies}]"
 
-        job.steps.each do |step|
+        phase.steps.each do |step|
           puts "  #{Style.cyan(step.kind)} #{Style.dim("—")} #{step.name}"
           step.items.each do |item|
             puts "    #{Style.dim(Symbols.bullet)} #{item.label}  #{Style.dim("would run")}"
           end
         end
 
-        case policy = job.restart_policy
+        case policy = phase.restart_policy
         when RestartPolicy::PromptLogout
-          puts "  #{Style.bold_yellow("#{Symbols.arrow} After this job: RESTART REQUIRED")}"
+          puts "  #{Style.bold_yellow("#{Symbols.arrow} After this phase: RESTART REQUIRED")}"
         when RestartPolicy::RequiresNewShell
-          puts "  #{Style.yellow("#{Symbols.arrow} After this job: new-shell wrapper (#{policy.shell})")}"
+          puts "  #{Style.yellow("#{Symbols.arrow} After this phase: new-shell wrapper (#{policy.shell})")}"
         end
         puts
       end
@@ -113,14 +113,16 @@ module Fluxion::CLI
         setup.items.each { |item| rows << {"source-setup", setup.name, item.label, "would run"} }
       end
 
-      profile.ordered_jobs.each do |job|
-        job.steps.each do |step|
-          step.items.each { |item| rows << {job.name, step.name, item.label, "would run"} }
+      profile.ordered_phases.each do |phase|
+        phase.steps.each do |step|
+          step.items.each { |item| rows << {phase.name, step.name, item.label, "would run"} }
         end
       end
 
+      # A skipped entry has no phase column to fill: the phase it was declared
+      # in is exactly what the reason names when a phase-level `when` is unmet.
       profile.skipped_plan_entries.each do |entry|
-        rows << {"manifest-plan", entry.name, entry.kind, "skipped: #{entry.reason}"}
+        rows << {"(skipped)", entry.name, entry.kind, "skipped: #{entry.reason}"}
       end
 
       if rows.empty?
@@ -135,14 +137,14 @@ module Fluxion::CLI
       }
 
       puts Style.bold(
-        "#{"JOB".ljust(widths[0])}  #{"STEP".ljust(widths[1])}  " \
+        "#{"PHASE".ljust(widths[0])}  #{"STEP".ljust(widths[1])}  " \
         "#{"ITEM".ljust(widths[2])}  STATUS"
       )
       puts Style.dim("-" * (widths[0] + widths[1] + widths[2] + 6 + 20))
 
-      rows.each do |job, step, item, status|
+      rows.each do |phase, step, item, status|
         colour = status.starts_with?("skipped") ? Style.yellow(status) : Style.dim(status)
-        puts "#{job.ljust(widths[0])}  #{Style.cyan(step.ljust(widths[1]))}  " \
+        puts "#{phase.ljust(widths[0])}  #{Style.cyan(step.ljust(widths[1]))}  " \
              "#{Style.truncate(item, widths[2]).ljust(widths[2])}  #{colour}"
       end
     end
@@ -160,10 +162,10 @@ module Fluxion::CLI
         end
       end
 
-      profile.ordered_jobs.each do |job|
-        dependencies = job.depends_on.empty? ? "no deps" : "after: #{job.depends_on.join(", ")}"
-        puts "#{Symbols.branch} #{Style.bold(job.name)} #{Style.dim("[#{dependencies}]")}"
-        job.steps.each do |step|
+      profile.ordered_phases.each do |phase|
+        dependencies = phase.depends_on.empty? ? "no deps" : "after: #{phase.depends_on.join(", ")}"
+        puts "#{Symbols.branch} #{Style.bold(phase.name)} #{Style.dim("[#{dependencies}]")}"
+        phase.steps.each do |step|
           puts "   #{Symbols.branch} #{Style.cyan(step.name)} #{Style.dim("(#{step.kind})")}"
           step.items.each { |item| puts "      #{Symbols.branch} #{item.label}" }
         end
@@ -183,12 +185,12 @@ module Fluxion::CLI
         "profileName"  => profile.name,
         "target"       => profile.target.to_s,
         "sourceSetups" => profile.source_setups.map { |setup| step_json(setup.step) },
-        "jobs"         => profile.ordered_jobs.map do |job|
+        "phases"       => profile.ordered_phases.map do |phase|
           {
-            "name"          => job.name,
-            "dependsOn"     => job.depends_on,
-            "restartEffect" => restart_effect(job.restart_policy),
-            "steps"         => job.steps.map { |step| step_json(step) },
+            "name"          => phase.name,
+            "dependsOn"     => phase.depends_on,
+            "restartEffect" => restart_effect(phase.restart_policy),
+            "steps"         => phase.steps.map { |step| step_json(step) },
           }
         end,
         "skippedEntries" => profile.skipped_plan_entries.map do |entry|
@@ -221,14 +223,14 @@ module Fluxion::CLI
     end
   end
 
-  # `fluxion graph` — the job dependency graph, for pasting into a renderer.
+  # `fluxion graph` — the phase dependency graph, for pasting into a renderer.
   class GraphCommand < Command
     def name : String
       "graph"
     end
 
     def summary : String
-      "Render the job dependency graph"
+      "Render the phase dependency graph"
     end
 
     def usage : String
@@ -258,34 +260,34 @@ module Fluxion::CLI
       # Nodes first, then edges: Mermaid accepts either, but grouping them
       # keeps a hand-edited diagram readable.
       puts "flowchart TD"
-      profile.jobs.each { |job| puts %(  #{node_id(job.name)}["#{escape(job.name)}"]) }
-      profile.jobs.each do |job|
-        job.depends_on.each { |dependency| puts "  #{node_id(dependency)} --> #{node_id(job.name)}" }
+      profile.phases.each { |phase| puts %(  #{node_id(phase.name)}["#{escape(phase.name)}"]) }
+      profile.phases.each do |phase|
+        phase.depends_on.each { |dependency| puts "  #{node_id(dependency)} --> #{node_id(phase.name)}" }
       end
     end
 
     private def render_dot(profile : Profile) : Nil
       puts "digraph fluxion {"
       puts "  rankdir=LR;"
-      profile.jobs.each { |job| puts %(  "#{escape(job.name)}";) }
-      profile.jobs.each do |job|
-        job.depends_on.each { |dependency| puts %(  "#{escape(dependency)}" -> "#{escape(job.name)}";) }
+      profile.phases.each { |phase| puts %(  "#{escape(phase.name)}";) }
+      profile.phases.each do |phase|
+        phase.depends_on.each { |dependency| puts %(  "#{escape(dependency)}" -> "#{escape(phase.name)}";) }
       end
       puts "}"
     end
 
     private def render_json(profile : Profile) : Nil
-      edges = profile.jobs.flat_map do |job|
-        job.depends_on.map { |dependency| {"from" => dependency, "to" => job.name} }
+      edges = profile.phases.flat_map do |phase|
+        phase.depends_on.map { |dependency| {"from" => dependency, "to" => phase.name} }
       end
 
       puts({
         "profileName" => profile.name,
-        "jobs"        => profile.jobs.map do |job|
+        "phases"      => profile.phases.map do |phase|
           {
-            "name"      => job.name,
-            "dependsOn" => job.depends_on,
-            "stepCount" => job.steps.size,
+            "name"      => phase.name,
+            "dependsOn" => phase.depends_on,
+            "stepCount" => phase.steps.size,
           }
         end,
         "edges" => edges,
@@ -295,7 +297,7 @@ module Fluxion::CLI
     # Mermaid identifiers cannot contain punctuation, so the name is sanitized
     # for the node id and kept verbatim in the label.
     private def node_id(name : String) : String
-      "j_#{name.gsub(/[^A-Za-z0-9_]/, "_")}"
+      "p_#{name.gsub(/[^A-Za-z0-9_]/, "_")}"
     end
 
     private def escape(text : String) : String

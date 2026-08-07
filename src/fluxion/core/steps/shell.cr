@@ -134,7 +134,7 @@ module Fluxion
       @allowed_exit_codes = allowed_exit_codes.empty? ? [0] : allowed_exit_codes
     end
 
-    # A convenience for the stable schema, where every command is a bare shell
+    # A convenience for the common case, where every command is a bare shell
     # string and the item name is the command itself.
     def self.shell(command : String, shell : String = "/bin/bash", working_dir : String? = nil) : self
       new(name: command, shell_command: command, shell: shell, working_dir: working_dir)

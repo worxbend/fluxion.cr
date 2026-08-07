@@ -56,17 +56,42 @@ module RegistryHelpers
 
   def profile(name : String, package : String = "git") : String
     <<-YAML
-      profile: #{name}
-      os:
-        type: arch
+      apiVersion: initkit.io/v1alpha1
+      kind: WorkstationProfile
 
-      jobs:
-        - name: #{name}-job
-          steps:
-            - type: packages
-              name: #{name}-packages
-              packageManager: pacman
-              packages: [#{package}]
+      metadata:
+        name: #{name}
+
+      spec:
+        target:
+          os:
+            distribution: arch
+        phases:
+          - name: #{name}-phase
+            steps:
+              - name: #{name}-packages
+                kind: pacman-packages
+                spec:
+                  packages: [#{package}]
+      YAML
+  end
+
+  # A document Fluxion recognises as a profile but refuses: it carries the
+  # header, so the failure is validation rather than "this is not a profile
+  # at all", which is what the install and stage guards are about.
+  def invalid_profile : String
+    <<-YAML
+      apiVersion: initkit.io/v1alpha1
+      kind: WorkstationProfile
+
+      metadata:
+        name: broken
+
+      spec:
+        target:
+          os:
+            distribution: arch
+        phases: []
       YAML
   end
 

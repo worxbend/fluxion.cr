@@ -1,115 +1,134 @@
-profile: opensuse-workstation
-os:
-  type: opensuse
-  release: "15.6"
-
-jobs:
-  - name: system-foundation
-    description: "Refresh openSUSE and install base packages"
-    restartPolicy:
-      type: none
-    continueOnModuleError: true
-    steps:
-      - type: system-update
-        name: refresh-system
-        packageManager: zypper
-        distUpgrade: false
-        refreshOnly: false
-        continueOnError: false
-
-      - type: packages
-        name: core-cli-tools
-        packageManager: zypper
+apiVersion: initkit.io/v1alpha1
+kind: WorkstationProfile
+metadata:
+  name: opensuse-workstation
+  labels:
+    distro: opensuse
+spec:
+  target:
+    os:
+      distribution: opensuse
+      release: "15.6"
+  phases:
+    - name: system-foundation
+      description: "Refresh openSUSE and install base packages"
+      restartPolicy:
+        type: none
+      execution:
         continueOnError: true
-        packages:
-          - git
-          - curl
-          - wget
-          - htop
-          - ripgrep
-          - fd
-          - bat
-          - zsh
-          - tmux
-          - neovim
-          - fzf
-          - jq
-          - tree
+      steps:
+        - name: refresh-system
+          kind: system-update
+          execution:
+            continueOnError: false
+          spec:
+            packageManager: zypper
+            distUpgrade: false
+            refreshOnly: false
 
-  - name: development
-    description: "Install compiler, language, and container packages"
-    dependsOn:
-      - system-foundation
-    restartPolicy:
-      type: none
-    continueOnModuleError: true
-    steps:
-      - type: packages
-        name: dev-tools
-        packageManager: zypper
+        - name: core-cli-tools
+          kind: zypper-packages
+          execution:
+            continueOnError: true
+          spec:
+            packages:
+              - git
+              - curl
+              - wget
+              - htop
+              - ripgrep
+              - fd
+              - bat
+              - zsh
+              - tmux
+              - neovim
+              - fzf
+              - jq
+              - tree
+
+    - name: development
+      description: "Install compiler, language, and container packages"
+      dependsOn:
+        - system-foundation
+      restartPolicy:
+        type: none
+      execution:
         continueOnError: true
-        packages:
-          - gcc
-          - gcc-c++
-          - clang
-          - cmake
-          - make
-          - java-21-openjdk-devel
-          - nodejs22
-          - go
-          - python3
-          - python3-pip
+      steps:
+        - name: dev-tools
+          kind: zypper-packages
+          execution:
+            continueOnError: true
+          spec:
+            packages:
+              - gcc
+              - gcc-c++
+              - clang
+              - cmake
+              - make
+              - java-21-openjdk-devel
+              - nodejs22
+              - go
+              - python3
+              - python3-pip
 
-      - type: packages
-        name: container-tools
-        packageManager: zypper
+        - name: container-tools
+          kind: zypper-packages
+          execution:
+            continueOnError: false
+          spec:
+            packages:
+              - podman
+              - buildah
+              - skopeo
+
+    - name: shell
+      description: "Switch to zsh and install Oh My Zsh"
+      dependsOn:
+        - system-foundation
+      restartPolicy:
+        type: prompt-logout
+        message: "Default shell changed to zsh. Log out and back in, then re-run fluxion."
+      execution:
         continueOnError: false
-        packages:
-          - podman
-          - buildah
-          - skopeo
+      steps:
+        - name: zsh-default
+          kind: default-shell
+          spec:
+            shellPath: /bin/zsh
+            probeCommand: "getent passwd $USER | cut -d: -f7 | grep -q zsh"
 
-  - name: shell
-    description: "Switch to zsh and install Oh My Zsh"
-    dependsOn:
-      - system-foundation
-    restartPolicy:
-      type: prompt-logout
-      message: "Default shell changed to zsh. Log out and back in, then re-run fluxion."
-    continueOnModuleError: false
-    steps:
-      - type: default-shell
-        name: zsh-default
-        shellPath: /bin/zsh
-        probeCommand: "getent passwd $USER | cut -d: -f7 | grep -q zsh"
+        - name: oh-my-zsh
+          kind: oh-my-zsh
+          spec:
+            installDir: "~/.oh-my-zsh"
+            revision: c5ba74cf02cce4c342153f79089100194f30940f
+            sha256: 95118b50d062198597e2b73d3a57b609fd95ca68cdc86faf4460d955f0172b61
+            probeCommand: "test -d ~/.oh-my-zsh"
 
-      - type: oh-my-zsh
-        name: oh-my-zsh
-        installDir: "~/.oh-my-zsh"
-        revision: c5ba74cf02cce4c342153f79089100194f30940f
-        sha256: 95118b50d062198597e2b73d3a57b609fd95ca68cdc86faf4460d955f0172b61
-        probeCommand: "test -d ~/.oh-my-zsh"
+    - name: desktop-apps
+      description: "Install desktop applications from Flathub"
+      dependsOn:
+        - system-foundation
+      restartPolicy:
+        type: none
+      execution:
+        continueOnError: true
+      steps:
+        - name: flathub-remote
+          kind: flatpak-remote
+          spec:
+            remote: flathub
+            url: https://flathub.org/repo/flathub.flatpakrepo
+            checksum:
+              algorithm: sha256
+              value: 3371dd250e61d9e1633630073fefda153cd4426f72f4afa0c3373ae2e8fea03a
 
-  - name: desktop-apps
-    description: "Install desktop applications from Flathub"
-    dependsOn:
-      - system-foundation
-    restartPolicy:
-      type: none
-    continueOnModuleError: true
-    steps:
-      - type: flatpak-remote
-        name: flathub-remote
-        remote: flathub
-        url: https://flathub.org/repo/flathub.flatpakrepo
-        checksum:
-          algorithm: sha256
-          value: 3371dd250e61d9e1633630073fefda153cd4426f72f4afa0c3373ae2e8fea03a
-
-      - type: flatpak
-        name: desktop-flatpaks
-        remote: flathub
-        appIds:
-          - com.spotify.Client
-          - org.telegram.desktop
-          - com.obsproject.Studio
+        - name: desktop-flatpaks
+          kind: flatpak-packages
+          spec:
+            remote: flathub
+            appIds:
+              - com.spotify.Client
+              - org.telegram.desktop
+              - com.obsproject.Studio

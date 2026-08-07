@@ -17,7 +17,19 @@ module Fluxion
 
     OS_RELEASE_PATH = "/etc/os-release"
 
+    # Cached because the answer cannot change while Fluxion runs, and several
+    # commands ask for it repeatedly — `generate` alone asks four times, each
+    # re-reading and re-parsing `/etc/os-release`. Only the real file is
+    # cached: specs pass an explicit path to describe a host they are not
+    # running on, and caching those would leak one spec's fixture into the next.
+    @@facts : HostFacts? = nil
+
     def facts(os_release_path : String = OS_RELEASE_PATH) : HostFacts
+      return read_facts(os_release_path) unless os_release_path == OS_RELEASE_PATH
+      @@facts ||= read_facts(os_release_path)
+    end
+
+    private def read_facts(os_release_path : String) : HostFacts
       release = read_os_release(os_release_path)
       id = release["ID"]?.try(&.strip.downcase)
       distribution = Distribution.from_config?(id)
@@ -105,6 +117,13 @@ module Fluxion
     # PATH lookup for `when.commands` and `when.commandExists`. A name
     # containing a separator is refused rather than resolved: `when` asks
     # whether a command is available, not whether a specific file exists.
+    # Deliberately uncached, though a probe sweep asks the same question once
+    # per item. A process-wide cache was tried and reverted: PATH is ambient
+    # state that a step can change by installing something, so the cache needs
+    # invalidating mid-run, and as module-level state it leaked between spec
+    # examples and broke four of them. The stat-per-PATH-entry it saves is
+    # noise beside the subprocess each probe spawns anyway — see
+    # `Executor::ProbeSweep`, which is where that cost actually went.
     def command_exists?(command : String) : Bool
       return false if command.empty? || command.includes?('/') || command.includes?('\\')
 

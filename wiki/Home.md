@@ -7,7 +7,6 @@ The reference lives in the repository:
 
 - [Command reference](https://github.com/worxbend/fluxion.cr/blob/main/docs/commands.md)
 - [Config schema](https://github.com/worxbend/fluxion.cr/blob/main/docs/config-schema.md)
-- [WorkstationProfile manifests](https://github.com/worxbend/fluxion.cr/blob/main/docs/workstation-profile.md)
 - [Registries](https://github.com/worxbend/fluxion.cr/blob/main/docs/registry.md)
 - [Architecture](https://github.com/worxbend/fluxion.cr/blob/main/docs/architecture.md)
 

@@ -61,6 +61,11 @@ module CryTUI
 
     def initialize(@backend : Backend)
       @previous = Buffer.new(@backend.size)
+      # The back buffer is kept and reused rather than rebuilt each frame. A
+      # Cell is a class, so a fresh Buffer heap-allocates width * height
+      # objects — 10,000 of them on an ordinary terminal, every frame, all
+      # becoming garbage as soon as the next frame swaps them out.
+      @spare = Buffer.new(@backend.size)
       @active = false
       @force_full_redraw = false
     end
@@ -101,10 +106,18 @@ module CryTUI
     def draw(& : Frame ->) : Nil
       refresh_size
       area = @backend.size
-      current = Buffer.new(area)
+
+      # Cleared in place and swapped with the front buffer, so a steady-state
+      # redraw allocates no cells at all. `synchronize_area` is what keeps both
+      # buffers matching the terminal, so by here they always agree.
+      current = @spare
+      current.reset
       yield Frame.new(area, current)
+
       changes = @force_full_redraw ? all_cells(current) : @previous.diff(current)
       @backend.draw(changes)
+
+      @spare = @previous
       @previous = current
       @force_full_redraw = false
     end
@@ -113,8 +126,12 @@ module CryTUI
       area = @backend.size
       return if @previous.area == area
 
+      # Both buffers are replaced together: `diff` refuses to compare buffers
+      # whose areas differ, and they are swapped on every frame, so letting
+      # only one follow the resize would raise on the very next draw.
       @backend.clear
       @previous = Buffer.new(area)
+      @spare = Buffer.new(area)
       @force_full_redraw = true
     end
 

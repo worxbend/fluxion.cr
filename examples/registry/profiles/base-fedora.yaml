@@ -1,11 +1,15 @@
-profile: base-fedora
-os:
-  type: fedora
-
-jobs:
-  - name: core
-    steps:
-      - type: packages
-        name: core-tools
-        packageManager: dnf
-        packages: [git, curl, jq, ripgrep, fd-find]
+apiVersion: initkit.io/v1alpha1
+kind: WorkstationProfile
+metadata:
+  name: base-fedora
+spec:
+  target:
+    os:
+      distribution: fedora
+  phases:
+    - name: core
+      steps:
+        - name: core-tools
+          kind: dnf-packages
+          spec:
+            packages: [git, curl, jq, ripgrep, fd-find]

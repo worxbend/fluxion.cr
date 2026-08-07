@@ -71,38 +71,43 @@ Requires Crystal 1.21 or newer.
 ## A small profile
 
 ```yaml
-profile: my-laptop
-os:
-  type: fedora
-  release: "44"
+apiVersion: initkit.io/v1alpha1
+kind: WorkstationProfile
+metadata:
+  name: my-laptop
+spec:
+  target:
+    os:
+      distribution: fedora
+      release: "44"
+  phases:
+    - name: base
+      steps:
+        - name: core-tools
+          kind: dnf-packages
+          spec:
+            packages: [git, curl, jq, zsh]
 
-jobs:
-  - name: base
-    steps:
-      - type: packages
-        name: core-tools
-        packageManager: dnf
-        packages: [git, curl, jq, zsh]
-
-  - name: development
-    dependsOn: [base]
-    steps:
-      - type: compiled-binary
-        name: kubectl
-        binaryName: kubectl
-        url: https://dl.k8s.io/release/v1.30.2/bin/linux/amd64/kubectl
-        checksum:
-          algorithm: sha256
-          value: c6e9c45ce3f82c90663e3c30db3b27c167e8b19d83ed4048b61c1013f6a7c66e
-        installPath: /usr/local/bin/kubectl
+    - name: development
+      dependsOn: [base]
+      steps:
+        - name: kubectl
+          kind: binary-downloads
+          spec:
+            binaryName: kubectl
+            url: https://dl.k8s.io/release/v1.30.2/bin/linux/amd64/kubectl
+            checksum:
+              algorithm: sha256
+              value: c6e9c45ce3f82c90663e3c30db3b27c167e8b19d83ed4048b61c1013f6a7c66e
+            installPath: /usr/local/bin/kubectl
 ```
 
 Packages install one process each, so one bad name never loses the rest of the
-list. Jobs run in dependency order, and a job whose dependency failed is
+list. Phases run in dependency order, and a phase whose dependency failed is
 reported as blocked rather than silently skipped.
 
-There is a second frontend for ordered, host-selected plans — see
-[docs/workstation-profile.md](docs/workstation-profile.md).
+Steps carry `when` rules, so one profile can do the right thing on Fedora and on
+Arch — see [docs/config-schema.md](docs/config-schema.md).
 
 ## Commands
 
@@ -113,13 +118,13 @@ There is a second frontend for ordered, host-selected plans — see
 | `plan` | The execution plan, as text, table, tree, or JSON |
 | `status` | What is installed, missing, unknown, or drifted |
 | `diff` | Only what differs from this host |
-| `explain` | Why one job or item would run or skip |
+| `explain` | Why one phase or item would run or skip |
 | `doctor` | Is this host ready for this profile? |
 | `lint` | Profile quality and safety advice |
 | `validate` | Would this profile run at all? |
 | `list` | The steps a profile declares |
-| `graph` | The job dependency graph (Mermaid, DOT, JSON) |
-| `kinds` | The plan kinds a manifest may use |
+| `graph` | The phase dependency graph (Mermaid, DOT, JSON) |
+| `kinds` | The kinds a phase step may declare |
 | `state` | Inspect and edit what previous runs recorded |
 | `report` | Render a report from that state |
 | `tools` | The external tools Fluxion delegates to |
@@ -169,7 +174,6 @@ These are deliberate, and each has a reason:
 
 - [Command reference](docs/commands.md)
 - [Config schema](docs/config-schema.md)
-- [WorkstationProfile manifests](docs/workstation-profile.md)
 - [Registries](docs/registry.md)
 - [Architecture](docs/architecture.md)
 - [Development](docs/development.md)
@@ -179,11 +183,14 @@ Example profiles live in [`examples/`](examples).
 ## Relationship to the Java implementation
 
 Fluxion began as a Java 25 / Mill / GraalVM project. This is a ground-up
-Crystal reimplementation of the same product: same profile schemas, same
-command surface, same trust rules.
+Crystal reimplementation of the same product: the same command surface, the same
+trust rules, and the same idea of what a profile describes.
 
 State files written by the Java version are read directly, so upgrading does
-not mean reinstalling everything you already have.
+not mean reinstalling everything you already have. Profiles are written
+differently — the [migration
+page](https://github.com/worxbend/fluxion.cr/wiki/Migrating-from-Java) maps the
+old fields onto the current ones.
 
 ## Contributing
 

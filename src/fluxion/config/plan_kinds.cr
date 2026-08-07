@@ -1,5 +1,5 @@
 module Fluxion::Config
-  # The plan kinds a WorkstationProfile manifest may use.
+  # The kinds a phase step may declare.
   #
   # One table, read by the manifest mapper, by `validate`, and by
   # `fluxion kinds`. Keeping it single-sourced is what stops the documented
@@ -68,8 +68,21 @@ module Fluxion::Config
       Kind.new("system-update", "Refresh package metadata or upgrade every installed package.", Category::Installer),
       Kind.new("gpg-key", "Import repository signing keys into a keyring.", Category::Installer),
       Kind.new("tool-packages", "Install via a language tool: cargo-binstall, pipx, snap, uv, npm, go.", Category::Installer),
+      Kind.new("toolchain", "Install a language toolchain from its official installer script.", Category::Installer),
+      Kind.new("oh-my-zsh", "Install Oh My Zsh at a pinned commit.", Category::Installer),
+      Kind.new("default-shell", "Change the user's login shell.", Category::Installer),
+      # The repository kinds are also reachable through `spec.sources`. Having
+      # them as step kinds too lets a profile place a repository exactly where
+      # it is needed when the sources prelude runs too early.
+      Kind.new("apt-repository", "Add an apt repository, with its signing key.", Category::Installer),
+      Kind.new("rpm-repository", "Add a dnf/yum repository, with its signing key.", Category::Installer),
       Kind.new("zypper-repository", "Add an openSUSE repository, with its signing key.", Category::Installer),
+      Kind.new("pacman-repository", "Add a pacman repository to pacman.conf.", Category::Installer),
+      Kind.new("flatpak-remote", "Add a Flatpak remote from a verified descriptor.", Category::Installer),
       Kind.new("interrupt", "Write a resumable checkpoint and stop cleanly.", Category::Control),
+      Kind.new("shell-reload", "Re-exec the shell so earlier environment changes take effect.", Category::Control),
+      Kind.new("assert", "Fail the run unless a command succeeds.", Category::Control),
+      Kind.new("manual", "Describe a step the user has to carry out by hand.", Category::Control),
     ]
 
     def ids : Array(String)
@@ -99,8 +112,9 @@ module Fluxion::Config
       best.try { |match| "Did you mean '#{match}'?" }
     end
 
-    # The step `type` each plan kind maps onto. Package and control kinds are
-    # handled directly by the manifest mapper and are absent here.
+    # The internal step type each kind maps onto. Only the kinds whose spec
+    # shape differs from their builder's — the package family, `file-writes`,
+    # and `interrupt` — are absent, because the mapper handles those directly.
     STEP_TYPES = {
       "binary-downloads"   => "compiled-binary",
       "shell-scripts"      => "shell-script",
@@ -116,7 +130,17 @@ module Fluxion::Config
       "system-update"      => "system-update",
       "gpg-key"            => "gpg-key",
       "tool-packages"      => "tool-packages",
+      "toolchain"          => "toolchain",
+      "oh-my-zsh"          => "oh-my-zsh",
+      "default-shell"      => "default-shell",
+      "apt-repository"     => "apt-repository",
+      "rpm-repository"     => "rpm-repository",
       "zypper-repository"  => "zypper-repository",
+      "pacman-repository"  => "pacman-repository",
+      "flatpak-remote"     => "flatpak-remote",
+      "shell-reload"       => "shell-reload",
+      "assert"             => "assert",
+      "manual"             => "manual",
     }
   end
 end

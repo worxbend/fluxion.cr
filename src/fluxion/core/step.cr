@@ -52,13 +52,12 @@ module Fluxion
     # Runs under `/bin/bash -lc`; exit 0 means done.
     getter probe_command : String?
 
-    # Manifest-level `when` guard. Nil for the stable jobs/steps schema, which
-    # has no per-step conditions.
+    # The step's `when` guard. Nil when the step declared none.
     #
-    # Settable because a manifest plan entry carries its `when` and
-    # `execution.continueOnError` alongside the spec the step is built from,
-    # and threading both through every kind's constructor would add two
-    # parameters to twenty-seven signatures for no gain.
+    # Settable because a step carries its `when` and `execution.continueOnError`
+    # alongside the `spec` it is built from, and threading both through every
+    # kind's constructor would add two parameters to twenty-seven signatures
+    # for no gain.
     property condition : Condition?
 
     setter continue_on_error : Bool
@@ -72,7 +71,9 @@ module Fluxion
     )
     end
 
-    # The config `type` (stable schema) that produces this step.
+    # The internal step type. Several config kinds share one type — the six
+    # package kinds all produce `packages` — so this is not the `kind:` a
+    # profile writes; `Config::PlanKinds::STEP_TYPES` maps between the two.
     abstract def kind : String
 
     # Everything this step installs, in declaration order.

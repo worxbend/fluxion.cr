@@ -35,24 +35,24 @@ module Fluxion::State
     end
   end
 
-  # What a prior run recorded about one job.
-  struct JobRecord
+  # What a prior run recorded about one phase.
+  struct PhaseRecord
     include JSON::Serializable
 
-    getter job : String
+    getter phase : String
     getter status : String
 
     @[JSON::Field(key: "completedAt")]
     getter completed_at : Time
 
-    # Digest of the job's configuration at the time it completed. A completed
-    # job is only skipped while this still matches, so editing a package list
-    # makes the job run again rather than being silently considered done.
+    # Digest of the phase's configuration at the time it completed. A completed
+    # phase is only skipped while this still matches, so editing a package list
+    # makes the phase run again rather than being silently considered done.
     getter fingerprint : String?
 
     getter reason : String?
 
-    def initialize(@job, @status, @completed_at, @fingerprint = nil, @reason = nil)
+    def initialize(@phase, @status, @completed_at, @fingerprint = nil, @reason = nil)
     end
 
     def completed? : Bool
@@ -89,19 +89,19 @@ module Fluxion::State
     property fluxion_version : String
 
     property items : Array(ItemRecord)
-    property jobs : Array(JobRecord)
+    property phases : Array(PhaseRecord)
 
     # Where a stopped run should pick up.
-    @[JSON::Field(key: "nextJob")]
-    property next_job : String?
+    @[JSON::Field(key: "nextPhase")]
+    property next_phase : String?
 
     def initialize(@profile_name : String,
                    @schema_version : Int32 = SCHEMA_VERSION,
                    @last_run_at : Time = Time.utc,
                    @fluxion_version : String = VERSION,
                    @items : Array(ItemRecord) = [] of ItemRecord,
-                   @jobs : Array(JobRecord) = [] of JobRecord,
-                   @next_job : String? = nil)
+                   @phases : Array(PhaseRecord) = [] of PhaseRecord,
+                   @next_phase : String? = nil)
     end
 
     def find(step : String, key : String, type : String) : ItemRecord?
@@ -113,15 +113,15 @@ module Fluxion::State
       @items << item
     end
 
-    def record(job : JobRecord) : Nil
-      @jobs.reject! { |existing| existing.job == job.job }
-      @jobs << job
+    def record(phase : PhaseRecord) : Nil
+      @phases.reject! { |existing| existing.phase == phase.phase }
+      @phases << phase
     end
 
-    def job_completed?(name : String, fingerprint : String?) : Bool
-      record = @jobs.find { |job| job.job == name }
+    def phase_completed?(name : String, fingerprint : String?) : Bool
+      record = @phases.find { |phase| phase.phase == name }
       return false unless record && record.completed?
-      # No fingerprint recorded means the job predates fingerprinting, and
+      # No fingerprint recorded means the phase predates fingerprinting, and
       # trusting it would risk skipping work the user has since changed.
       return false unless recorded = record.fingerprint
       recorded == fingerprint
@@ -138,14 +138,14 @@ module Fluxion::State
       before - @items.size
     end
 
-    def forget_job(name : String) : Bool
-      before = @jobs.size
-      @jobs.reject! { |job| job.job == name }
-      before != @jobs.size
+    def forget_phase(name : String) : Bool
+      before = @phases.size
+      @phases.reject! { |phase| phase.phase == name }
+      before != @phases.size
     end
 
     def any_recorded? : Bool
-      !@items.empty? || !@jobs.empty? || !@next_job.nil?
+      !@items.empty? || !@phases.empty? || !@next_phase.nil?
     end
   end
 
@@ -215,10 +215,10 @@ module Fluxion::State
 
     # Maps the Java layout onto this one.
     #
-    # The vocabulary changed (`phases` became `jobs`, `modules` became `steps`)
-    # but the meaning did not, so the records carry over. `sysbootVersion` is
-    # kept as the recorded version: it says which build did the work, and
-    # rewriting it would lose that.
+    # The vocabulary changed (`modules` became `steps`) but the meaning did
+    # not, so the records carry over. `sysbootVersion` is kept as the recorded
+    # version: it says which build did the work, and rewriting it would lose
+    # that.
     private def migrate(raw : JSON::Any, profile : String) : Document
       items = (raw["entries"]?.try(&.as_a?) || [] of JSON::Any).compact_map do |entry|
         key = entry["itemKey"]?.try(&.as_s?)
@@ -235,11 +235,11 @@ module Fluxion::State
         )
       end
 
-      jobs = (raw["phaseEntries"]?.try(&.as_a?) || [] of JSON::Any).compact_map do |entry|
+      phases = (raw["phaseEntries"]?.try(&.as_a?) || [] of JSON::Any).compact_map do |entry|
         name = entry["phaseName"]?.try(&.as_s?)
         next unless name
-        JobRecord.new(
-          job: name,
+        PhaseRecord.new(
+          phase: name,
           status: (entry["status"]?.try(&.as_s?) || "").downcase,
           completed_at: timestamp(entry["completedAt"]?),
           fingerprint: entry["fingerprint"]?.try(&.as_s?),
@@ -252,8 +252,8 @@ module Fluxion::State
         last_run_at: timestamp(raw["lastRunAt"]?),
         fluxion_version: raw["sysbootVersion"]?.try(&.as_s?) || "unknown",
         items: items,
-        jobs: jobs,
-        next_job: raw["nextPlanEntry"]?.try(&.as_s?),
+        phases: phases,
+        next_phase: raw["nextPlanEntry"]?.try(&.as_s?),
       )
     end
 
@@ -300,18 +300,12 @@ module Fluxion::State
       true
     end
 
-    # What a prior run recorded about this item, if anything.
-    def find(profile : String, item : ModuleItem) : InstallationStatus::InstalledFromState?
-      document = load(profile)
-      record = document.find(item.step_name, item.key, item.item_type.json_name)
-      return unless record
-      InstallationStatus::InstalledFromState.new(item.key, record.completed_at, record.version)
-    rescue ExecutionError
-      # A state file that cannot be read is not evidence that work was done, so
-      # the run falls back to live probes rather than failing outright.
-      nil
-    end
-
+    # Deliberately absent: a per-item lookup that takes a profile name.
+    #
+    # Such a method has to `load` before it can answer, so calling it once per
+    # item costs a file read and a JSON parse per package — quadratic in the
+    # size of the state file over a run. Callers load a `Document` once and use
+    # `Document#find`, which is the same answer without the re-read.
     private def prepare_directory : Nil
       return if Dir.exists?(@root)
       Dir.mkdir_p(@root, DIRECTORY_MODE)
@@ -326,22 +320,22 @@ module Fluxion::State
     end
   end
 
-  # Digests a job's configuration so a completed job is only skipped while it
-  # still describes the same work.
+  # Digests a phase's configuration so a completed phase is only skipped while
+  # it still describes the same work.
   #
   # Every field that changes what runs contributes. Values are length-prefixed
   # so that `["a", "bc"]` and `["ab", "c"]` cannot collide.
   module Fingerprint
     extend self
 
-    def of(job : Job) : String
+    def of(phase : Phase) : String
       digest = Digest::SHA256.new
-      append(digest, "job", job.name)
-      append(digest, "continueOnStepError", job.continue_on_step_error?.to_s)
-      job.depends_on.each { |dependency| append(digest, "dependsOn", dependency) }
-      append(digest, "restart", job.restart_policy.to_s)
+      append(digest, "phase", phase.name)
+      append(digest, "continueOnStepError", phase.continue_on_step_error?.to_s)
+      phase.depends_on.each { |dependency| append(digest, "dependsOn", dependency) }
+      append(digest, "restart", phase.restart_policy.to_s)
 
-      job.steps.each do |step|
+      phase.steps.each do |step|
         append(digest, "step", step.name)
         append(digest, "kind", step.kind)
         append(digest, "continueOnError", step.continue_on_error?.to_s)

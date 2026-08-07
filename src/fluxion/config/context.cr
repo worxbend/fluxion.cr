@@ -243,8 +243,8 @@ module Fluxion::Config
       value
     end
 
-    # Durations accept both the ISO-8601 form the stable schema documents and
-    # the compact forms manifests use (`30m`, `90s`, `500ms`, `120`).
+    # Durations accept the ISO-8601 form as well as the compact ones
+    # (`30m`, `90s`, `500ms`, `120`), because profiles use both.
     def duration(node : Node, default : Time::Span) : Time::Span
       raw = node.string?
       return default if raw.nil? || raw.strip.empty?

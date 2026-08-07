@@ -152,7 +152,7 @@ describe "fluxion registry" do
       result.success?.should be_true
       result.stdout.should contain("Base tools")
       result.stdout.should contain("profiles/base.yaml")
-      result.stdout.should contain("packageManager: pacman")
+      result.stdout.should contain("kind: pacman-packages")
     end
   end
 

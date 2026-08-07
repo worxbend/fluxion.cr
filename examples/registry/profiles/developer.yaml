@@ -1,19 +1,24 @@
-profile: developer
-os:
-  type: fedora
+apiVersion: initkit.io/v1alpha1
+kind: WorkstationProfile
+metadata:
+  name: developer
+spec:
+  target:
+    os:
+      distribution: fedora
+  phases:
+    - name: editors
+      steps:
+        - name: editors
+          kind: dnf-packages
+          spec:
+            packages: [neovim, helix]
 
-jobs:
-  - name: editors
-    steps:
-      - type: packages
-        name: editors
-        packageManager: dnf
-        packages: [neovim, helix]
-
-  - name: desktop
-    dependsOn: [editors]
-    steps:
-      - type: flatpak
-        name: apps
-        appIds:
-          - com.github.tchx84.Flatseal
+    - name: desktop
+      dependsOn: [editors]
+      steps:
+        - name: apps
+          kind: flatpak-packages
+          spec:
+            appIds:
+              - com.github.tchx84.Flatseal

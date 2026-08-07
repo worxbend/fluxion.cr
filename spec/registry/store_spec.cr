@@ -53,7 +53,7 @@ describe Fluxion::Registry::Store do
     # cannot be parsed is refused before it lands rather than at the first run.
     it "refuses a profile that does not validate" do
       RegistryHelpers.with_sandbox do |sandbox|
-        sandbox.publish_upstream("profiles/base.yaml", "profile: broken\njobs: [{}]\n")
+        sandbox.publish_upstream("profiles/base.yaml", RegistryHelpers.invalid_profile)
         store = sandbox.store
         entry = store.manifest!.entry?("base").not_nil!
 
@@ -205,7 +205,7 @@ describe Fluxion::Registry::Store do
         store = sandbox.store
         entry = store.manifest!.entry?("base").not_nil!
         store.install(entry)
-        File.write(sandbox.installed_file("base"), "profile: broken\njobs: [{}]\n")
+        File.write(sandbox.installed_file("base"), RegistryHelpers.invalid_profile)
 
         expect_raises(Fluxion::ExecutionError, /not a valid profile/) { store.stage(entry) }
       end

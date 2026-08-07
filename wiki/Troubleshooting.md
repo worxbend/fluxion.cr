@@ -50,10 +50,11 @@ Unknown is not missing. Fluxion will not reinstall on the strength of a failed
 check. Add a `probeCommand` to make it answerable:
 
 ```yaml
-- type: shell-command
-  name: cargo-tools
-  commands: ["cargo install --locked eza"]
-  probeCommand: "command -v eza"
+- name: cargo-tools
+  kind: commands
+  spec:
+    commands: ["cargo install --locked eza"]
+    probeCommand: "command -v eza"
 ```
 
 `fluxion lint` flags steps that need one.
@@ -63,16 +64,16 @@ check. Add a `probeCommand` to make it answerable:
 The profile uses a step kind this build does not implement. Check `fluxion
 kinds` and your Fluxion version.
 
-## A job is "blocked"
+## A phase is "blocked"
 
-One of its dependencies failed. Fluxion does not run a job whose prerequisites
+One of its dependencies failed. Fluxion does not run a phase whose prerequisites
 did not complete, because the result would be misleading.
 
 ```bash
 fluxion status --failed
 ```
 
-Fix the failing job, then rerun with `--skip-already-installed`; the work that
+Fix the failing phase, then rerun with `--skip-already-installed`; the work that
 succeeded is not repeated.
 
 ## The TUI does not appear

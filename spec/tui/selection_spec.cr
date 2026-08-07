@@ -9,8 +9,8 @@ private def sample_profile
     "test",
     Fluxion::TargetOs.new(Fluxion::Distribution::Fedora),
     [
-      Fluxion::Job.new("base", [step("tools", "git", "curl"), step("extras", "jq")] of Fluxion::Step),
-      Fluxion::Job.new("desktop", [step("apps", "firefox")] of Fluxion::Step, ["base"]),
+      Fluxion::Phase.new("base", [step("tools", "git", "curl"), step("extras", "jq")] of Fluxion::Step),
+      Fluxion::Phase.new("desktop", [step("apps", "firefox")] of Fluxion::Step, ["base"]),
     ],
   )
 end
@@ -29,37 +29,37 @@ describe Fluxion::TUI::Selection do
     selection.selected_items.should eq(4)
   end
 
-  it "takes a job's steps with it when toggled off" do
+  it "takes a phase's steps with it when toggled off" do
     profile = sample_profile
     selection = Fluxion::TUI::Selection.new(profile)
-    selection.toggle_job(profile.jobs.first)
+    selection.toggle_phase(profile.phases.first)
 
-    selection.job?("base").should be_false
+    selection.phase?("base").should be_false
     selection.step?("tools").should be_false
     selection.step?("extras").should be_false
     selection.step?("apps").should be_true
   end
 
-  it "deselects a job once its last step goes" do
+  it "deselects a phase once its last step goes" do
     profile = sample_profile
     selection = Fluxion::TUI::Selection.new(profile)
-    base = profile.jobs.first
+    base = profile.phases.first
 
     selection.toggle_step(base, base.steps[0])
-    selection.job?("base").should be_true
+    selection.phase?("base").should be_true
 
     selection.toggle_step(base, base.steps[1])
-    selection.job?("base").should be_false
+    selection.phase?("base").should be_false
   end
 
-  it "reselects a job when a step comes back" do
+  it "reselects a phase when a step comes back" do
     profile = sample_profile
     selection = Fluxion::TUI::Selection.new(profile)
-    base = profile.jobs.first
+    base = profile.phases.first
 
-    selection.toggle_job(base)
+    selection.toggle_phase(base)
     selection.toggle_step(base, base.steps.first)
-    selection.job?("base").should be_true
+    selection.phase?("base").should be_true
   end
 
   it "reports nothing selected once everything is off" do
@@ -73,30 +73,30 @@ describe Fluxion::TUI::Selection do
     it "keeps only the selected steps" do
       profile = sample_profile
       selection = Fluxion::TUI::Selection.new(profile)
-      selection.toggle_step(profile.jobs.first, profile.jobs.first.steps[1])
+      selection.toggle_step(profile.phases.first, profile.phases.first.steps[1])
 
       applied = selection.apply
       applied.steps.map(&.name).should eq(%w[tools apps])
     end
 
-    it "drops a job whose every step was deselected" do
+    it "drops a phase whose every step was deselected" do
       profile = sample_profile
       selection = Fluxion::TUI::Selection.new(profile)
-      selection.toggle_job(profile.jobs.first)
+      selection.toggle_phase(profile.phases.first)
 
       applied = selection.apply
-      applied.jobs.map(&.name).should eq(["desktop"])
+      applied.phases.map(&.name).should eq(["desktop"])
     end
 
-    it "narrows dependencies to jobs that survived" do
-      # A kept job must not wait forever on one the user removed.
+    it "narrows dependencies to phases that survived" do
+      # A kept phase must not wait forever on one the user removed.
       profile = sample_profile
       selection = Fluxion::TUI::Selection.new(profile)
-      selection.toggle_job(profile.jobs.first)
+      selection.toggle_phase(profile.phases.first)
 
       applied = selection.apply
-      applied.jobs.first.depends_on.should be_empty
-      applied.ordered_jobs.map(&.name).should eq(["desktop"])
+      applied.phases.first.depends_on.should be_empty
+      applied.ordered_phases.map(&.name).should eq(["desktop"])
     end
 
     it "carries the profile's identity and policy across" do
@@ -116,19 +116,19 @@ describe Fluxion::TUI::SelectorScreen do
     screen = Fluxion::TUI::SelectorScreen.new(selection)
 
     screen.handle(key(' '))
-    selection.job?("base").should be_false
+    selection.phase?("base").should be_false
   end
 
   it "moves with both arrows and vi keys" do
     selection = Fluxion::TUI::Selection.new(sample_profile)
     screen = Fluxion::TUI::SelectorScreen.new(selection)
 
-    # Row 0 is the base job; row 1 is its first step.
+    # Row 0 is the base phase; row 1 is its first step.
     screen.handle(key('j'))
     screen.handle(key(' '))
 
     selection.step?("tools").should be_false
-    selection.job?("base").should be_true
+    selection.phase?("base").should be_true
   end
 
   it "runs on enter when something is selected" do
@@ -169,7 +169,7 @@ describe Fluxion::TUI::SelectorScreen do
     selection.selected_steps.should eq(3)
   end
 
-  it "renders every job and step into the buffer" do
+  it "renders every phase and step into the buffer" do
     selection = Fluxion::TUI::Selection.new(sample_profile)
     screen = Fluxion::TUI::SelectorScreen.new(selection)
 
@@ -187,7 +187,7 @@ describe Fluxion::TUI::SelectorScreen do
   it "keeps the cursor on screen in a list taller than the terminal" do
     steps = (1..40).map { |index| step("step-#{index}", "package") }.to_a.map(&.as(Fluxion::Step))
     tall = Fluxion::Profile.new("tall", Fluxion::TargetOs.new(Fluxion::Distribution::Fedora),
-      [Fluxion::Job.new("base", steps)])
+      [Fluxion::Phase.new("base", steps)])
 
     screen = Fluxion::TUI::SelectorScreen.new(Fluxion::TUI::Selection.new(tall))
     40.times { screen.handle(key('j')) }

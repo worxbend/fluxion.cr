@@ -33,9 +33,9 @@ fluxion dry-run    # what would it do?
 `validate` reports every problem at once, each anchored to the exact line:
 
 ```
-error jobs[0].steps[0].packages[2]: package name contains unsafe shell characters: bad name
-error jobs[0].steps[1].type: unsupported step type 'package'
-        Did you mean 'packages'?
+error spec.phases[0].steps[0].spec.packages[2]: package name contains unsafe shell characters: bad name
+error spec.phases[0].steps[1].kind: unsupported step kind 'dnf-package'
+        Did you mean 'dnf-packages'?
 ```
 
 When the dry run says what you expect:
@@ -52,8 +52,8 @@ Fluxion records what worked. The second run is cheap:
 fluxion apply --skip-already-installed
 ```
 
-A completed job is skipped only while its configuration is unchanged. Add a
-package and that job runs again — it is not marked done forever.
+A completed phase is skipped only while its configuration is unchanged. Add a
+package and that phase runs again — it is not marked done forever.
 
 ## Seeing where you are
 

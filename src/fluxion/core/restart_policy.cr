@@ -1,5 +1,5 @@
 module Fluxion
-  # What has to happen to the user's session before a job's effects are
+  # What has to happen to the user's session before a phase's effects are
   # actually usable.
   #
   # This exists because several kinds of setup exit 0 while the running session
@@ -7,7 +7,7 @@ module Fluxion
   # Modelling it lets Fluxion stop cleanly and print a resume command instead of
   # letting later steps fail for reasons the user cannot diagnose.
   abstract struct RestartPolicy
-    # Nothing special; the job's effects are live as soon as it finishes.
+    # Nothing special; the phase's effects are live as soon as it finishes.
     struct None < RestartPolicy
       def to_s(io : IO) : Nil
         io << "none"
@@ -51,7 +51,7 @@ module Fluxion
     TYPES = %w[none prompt-logout requires-new-shell]
 
     # True when reaching this policy ends the run rather than continuing to the
-    # next job.
+    # next phase.
     def halts? : Bool
       is_a?(PromptLogout)
     end

@@ -1,13 +1,13 @@
 module Fluxion::Config
-  # Entry points the manifest mapper uses.
+  # Entry points the phase-step mapper uses.
   #
-  # Most plan kinds have the same spec fields as their stable-schema
-  # counterpart, so they go through `build_kind` and reuse one parser. Only the
-  # kinds whose shape genuinely differs — the package family, where the manager
-  # comes from the kind id rather than a field — get their own function here.
+  # Most kinds name their step type in `PlanKinds::STEP_TYPES` and go through
+  # `build_kind`. Only the kinds whose shape genuinely differs — the package
+  # family, where the manager comes from the kind id rather than a field — get
+  # their own function here.
   module StepParser
-    # Builds a step from a plan entry's `spec` node using the stable schema's
-    # parser for that `type`.
+    # Builds a step from a step's `spec` node using the parser for that
+    # internal step type.
     def build_kind(context : Context, spec : Node, type : String, name : String, description : String?, probe : String?) : Step?
       build(context, spec, type, name, description, probe)
     end
@@ -27,6 +27,7 @@ module Fluxion::Config
       packages.each_with_index do |package, index|
         validate_package_name(context, "#{packages_node.path}[#{index}]", package)
       end
+      report_duplicates(context, packages_node.path, packages, "package")
 
       PackagesStep.new(
         name, manager, packages,
@@ -57,8 +58,8 @@ module Fluxion::Config
     end
 
     def manifest_flatpak(context : Context, spec : Node, name : String, description : String?, probe : String?) : Step?
-      # `apps` is the manifest spelling; `appIds` matches the stable schema and
-      # is accepted so a fragment can be moved between the two.
+      # `apps` is the documented spelling; `appIds` is accepted because the
+      # Flatpak CLI and most published fragments use that name.
       ids_node = spec["apps"]
       ids_node = spec["appIds"] unless ids_node.present?
       app_ids = ids_node.string_list

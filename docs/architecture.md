@@ -33,15 +33,16 @@ from `executor` because `plan` needs it without constructing one.
 
 ### `config` — YAML in, domain model out
 
-Two frontends land on one `Profile`:
-
-- the stable `profile` / `os` / `jobs` DAG schema
-- the `WorkstationProfile` manifest, an ordered plan selected by host facts
+One document shape lands on one `Profile`: a `WorkstationProfile` manifest whose
+`spec.phases[]` is the phase DAG and whose steps are selected by host facts and
+`when` rules. There is one schema on purpose: a second document shape would mean
+a second vocabulary for the same concept and a second validation path to keep in
+agreement with the first.
 
 The document is walked by hand rather than deserialized into DTOs. That buys
 two things worth the extra code: every diagnostic names the exact config path
-that caused it (`jobs[1].steps[0].packages[2]`), and one field can accept the
-several shapes the schema allows without a separate type per shape.
+that caused it (`spec.phases[1].steps[0].spec.packages[2]`), and one field can
+accept the several shapes the schema allows without a separate type per shape.
 
 Diagnostics accumulate rather than raising, so a profile with five mistakes
 takes one run to fix.
@@ -67,12 +68,12 @@ Processes, the filesystem, the network, and the trust checks that guard them.
 
 ### `state` — what previous runs recorded
 
-Successful items with their versions and checksums, completed jobs with a
+Successful items with their versions and checksums, completed phases with a
 fingerprint of their configuration, and where to resume.
 
-A completed job is skipped only while its fingerprint still matches, so editing
-a package list makes the job run again rather than being silently considered
-done.
+A completed phase is skipped only while its fingerprint still matches, so
+editing a package list makes the phase run again rather than being silently
+considered done.
 
 ### `registry` — profiles shared through a git repository
 

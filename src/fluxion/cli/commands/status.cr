@@ -69,18 +69,25 @@ module Fluxion::CLI
         State::Document.new(profile_name)
       end
 
-      entries = [] of Entry
-      seen = Set(String).new
       registry = Executor::ExecutorRegistry.default
 
+      # Gathered first so the whole sweep can be probed at once. Declaration
+      # order is preserved through both the sweep and the zip below, so the
+      # report reads in the order the profile is written.
+      items = [] of ModuleItem
       profile.steps.each do |step|
         executor = registry.for(step)
         next unless executor
+        executor.items(step).each { |item| items << item }
+      end
 
-        executor.items(step).each do |item|
-          seen << identity(item.step_name, item.key, item.item_type.json_name)
-          entries << classify(item, document, probes, runner, profile_name)
-        end
+      statuses = Executor::ProbeSweep.probe_all(items, probes, runner)
+
+      entries = [] of Entry
+      seen = Set(String).new
+      items.each_with_index do |item, index|
+        seen << identity(item.step_name, item.key, item.item_type.json_name)
+        entries << classify(item, statuses[index], document)
       end
 
       # Anything state remembers that the profile no longer declares. Worth
@@ -102,11 +109,9 @@ module Fluxion::CLI
       "#{step}\u0000#{key}\u0000#{type}"
     end
 
-    private def self.classify(item : ModuleItem, document : State::Document,
-                              probes : Executor::ProbeRegistry, runner : Executor::ShellRunner,
-                              profile_name : String) : Entry
+    private def self.classify(item : ModuleItem, status : InstallationStatus,
+                              document : State::Document) : Entry
       recorded = document.find(item.step_name, item.key, item.item_type.json_name)
-      status = probes.probe(item, runner)
 
       classification, detail, live = case status
                                      when InstallationStatus::InstalledByProbe
@@ -362,69 +367,69 @@ module Fluxion::CLI
     end
   end
 
-  # `fluxion explain` — why one job or item would run or skip.
+  # `fluxion explain` — why one phase or item would run or skip.
   class ExplainCommand < ReportingCommand
     def name : String
       "explain"
     end
 
     def summary : String
-      "Explain why a job or item would run or skip"
+      "Explain why a phase or item would run or skip"
     end
 
     def usage : String
-      "fluxion explain [-c FILE] (--job NAME | --item KEY) [--format text|json]"
+      "fluxion explain [-c FILE] (--phase NAME | --item KEY) [--format text|json]"
     end
 
-    @job : String?
+    @phase : String?
     @item : String?
 
     def register(parser : OptionParser) : Nil
       super
-      parser.on("--job=NAME", "Job to explain") { |value| @job = value }
+      parser.on("--phase=NAME", "Phase to explain") { |value| @phase = value }
       parser.on("--item=KEY", "Item key or display name to explain") { |value| @item = value }
     end
 
     def run(arguments : Array(String)) : ExitCode
       parse(arguments)
 
-      job = @job.presence
+      phase = @phase.presence
       item = @item.presence
       # Both would be two questions; neither would be none.
-      if job.nil? == item.nil?
-        raise Failure.invalid_input("Specify exactly one of --job or --item")
+      if phase.nil? == item.nil?
+        raise Failure.invalid_input("Specify exactly one of --phase or --item")
       end
 
-      job ? explain_job(job) : explain_item(item.not_nil!)
+      phase ? explain_phase(phase) : explain_item(item.not_nil!)
     end
 
-    private def explain_job(name : String) : ExitCode
+    private def explain_phase(name : String) : ExitCode
       profile = load_profile
-      job = profile.job?(name)
-      unless job
+      phase = profile.phase?(name)
+      unless phase
         raise Failure.invalid_input(
-          "Unknown job '#{name}'. Valid jobs: #{profile.jobs.map(&.name).join(", ")}")
+          "Unknown phase '#{name}'. Valid phases: #{profile.phases.map(&.name).join(", ")}")
       end
 
       if @format.json?
         puts({
-          "kind"                => "job",
-          "name"                => job.name,
-          "dependsOn"           => job.depends_on,
-          "restartEffect"       => job.restart_policy.to_s,
-          "continueOnStepError" => job.continue_on_step_error?,
-          "steps"               => job.steps.map { |step| {"name" => step.name, "type" => step.kind, "items" => step.items.size} },
+          "kind"                => "phase",
+          "name"                => phase.name,
+          "dependsOn"           => phase.depends_on,
+          "restartEffect"       => phase.restart_policy.to_s,
+          "continueOnStepError" => phase.continue_on_step_error?,
+          "steps"               => phase.steps.map { |step| {"name" => step.name, "type" => step.kind, "items" => step.items.size} },
         }.to_json)
         return ExitCode::Success
       end
 
-      puts "#{Style.bold("Job:")} #{Style.bold(job.name)}"
-      puts "#{Style.dim("Depends on:")}   #{job.depends_on.empty? ? "(none)" : job.depends_on.join(", ")}"
-      puts "#{Style.dim("Restart:")}      #{job.restart_policy}"
-      puts "#{Style.dim("On failure:")}   #{job.continue_on_step_error? ? "continue" : "stop and block dependents"}"
+      puts "#{Style.bold("Phase:")} #{Style.bold(phase.name)}"
+      puts "#{Style.dim("Depends on:")}   #{phase.depends_on.empty? ? "(none)" : phase.depends_on.join(", ")}"
+      puts "#{Style.dim("Restart:")}      #{phase.restart_policy}"
+      puts "#{Style.dim("On failure:")}   #{phase.continue_on_step_error? ? "continue" : "stop and block dependents"}"
       puts
       puts Style.bold("Steps:")
-      job.steps.each do |step|
+      phase.steps.each do |step|
         puts "  #{Style.cyan(step.name)} #{Style.dim("(#{step.kind})")} — #{step.summary}"
       end
       ExitCode::Success
@@ -440,15 +445,15 @@ module Fluxion::CLI
       end
 
       profile = report.profile
-      job = profile.jobs.find { |candidate| candidate.steps.any?(&.name.== entry.step) }
+      phase = profile.phases.find { |candidate| candidate.steps.any?(&.name.== entry.step) }
 
       if @format.json?
-        puts(entry_json(entry).merge({"job" => job.try(&.name)}).to_json)
+        puts(entry_json(entry).merge({"phase" => phase.try(&.name)}).to_json)
         return ExitCode::Success
       end
 
       puts "#{Style.bold("Item:")} #{Style.bold(entry.display)}"
-      puts "#{Style.dim("Job:")}    #{job.try(&.name) || "(unknown)"}"
+      puts "#{Style.dim("Phase:")}  #{phase.try(&.name) || "(unknown)"}"
       puts "#{Style.dim("Step:")}   #{entry.step}"
       puts "#{Style.dim("Type:")}   #{entry.type}"
       puts "#{Style.dim("Status:")} #{colour_for(entry.classification, entry.classification.label)}"

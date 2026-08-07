@@ -53,14 +53,14 @@ Executes a profile.
 
 ```bash
 fluxion apply -c workstation.yaml
-fluxion apply --job base --job desktop
-fluxion apply --from-job development --skip-already-installed
+fluxion apply --phase base --phase desktop
+fluxion apply --from-phase development --skip-already-installed
 ```
 
 ```text
 --dry-run                 Show what would happen, change nothing
---job=NAME                Run only these jobs (repeatable, or comma-separated)
---from-job=NAME           Start from this job, skipping earlier ones
+--phase=NAME              Run only these phases (repeatable, or comma-separated)
+--from-phase=NAME         Start from this phase, skipping earlier ones
 -y, --yes                 Approve items that declared confirm
 --skip-already-installed  Skip work state or a probe says is done
 --re-probe                Ignore saved state; trust only live probes
@@ -98,7 +98,7 @@ The execution plan, without touching the host.
 
 ```bash
 fluxion plan --format tree
-fluxion plan --format json | jq '.jobs[].name'
+fluxion plan --format json | jq '.phases[].name'
 ```
 
 ```text
@@ -143,14 +143,14 @@ fluxion diff --format json
 
 ## `explain`
 
-Why one job or item would run or skip.
+Why one phase or item would run or skip.
 
 ```bash
-fluxion explain --job development
+fluxion explain --phase development
 fluxion explain --item git
 ```
 
-Exactly one of `--job` or `--item`. Items match on either their key or their
+Exactly one of `--phase` or `--item`. Items match on either their key or their
 display name, so whichever one another command printed will work.
 
 ## `doctor`
@@ -209,18 +209,18 @@ fluxion list --format json
 
 ## `graph`
 
-The job dependency graph.
+The phase dependency graph.
 
 ```bash
 fluxion graph                    # Mermaid, for pasting into Markdown
-fluxion graph --format dot | dot -Tpng > jobs.png
+fluxion graph --format dot | dot -Tpng > phases.png
 fluxion graph --format json
 ```
 
 ## `kinds`
 
-The plan kinds a `WorkstationProfile` manifest may use, with the pre-install
-actions each package kind accepts.
+The kinds a phase step may declare, with the pre-install actions each package
+kind accepts.
 
 ```bash
 fluxion kinds
@@ -241,7 +241,7 @@ fluxion state show --format json
 fluxion state path
 fluxion state reset --force
 fluxion state forget --item git --step core-tools --type package
-fluxion state forget --job base
+fluxion state forget --phase base
 ```
 
 `forget` refuses an ambiguous key rather than deleting several entries; qualify
@@ -322,7 +322,7 @@ fluxion import flatpaks --from-host --output flatpaks.yaml
 ```
 
 The output is a complete, valid profile — so it can be validated and previewed
-immediately — and the job inside it lifts straight into an existing profile.
+immediately — and the phase inside it lifts straight into an existing profile.
 
 Review it before applying. On Arch it lists explicitly installed packages only,
 because a fragment enumerating every transitive dependency is unusable.

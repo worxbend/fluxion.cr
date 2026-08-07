@@ -2,7 +2,7 @@ module Fluxion::Executor
   # Removes secrets and terminal control sequences from anything Fluxion is
   # about to show, log, or persist.
   #
-  # Two independent jobs, both mandatory:
+  # Two independent responsibilities, both mandatory:
   #
   # * Secrets must not reach the terminal, the state file, or a plan. A profile
   #   legitimately carries tokens in `env`, and package managers echo URLs, so
@@ -54,11 +54,19 @@ module Fluxion::Executor
       PATTERNS.reduce(text) { |result, (pattern, replacement)| result.gsub(pattern, replacement) }
     end
 
+    # Hoisted out of `sensitive_name?` because a regex literal with
+    # interpolation is rebuilt — and so recompiled by PCRE2 — on every
+    # evaluation, which measured 28x the cost of matching against a constant.
+    # `sensitive_name?` runs once per argv element, so that recompilation was
+    # dominating the check it exists to perform.
+    private CAMEL_BOUNDARY         = /([a-z0-9])([A-Z])/
+    private SENSITIVE_NAME_PATTERN = /(^|[^a-z0-9])#{SENSITIVE_NAME}($|[^a-z0-9])/
+
     # True when a name suggests its value is a secret. Splits camelCase first
     # so `githubToken` is caught as well as `GITHUB_TOKEN`.
     def sensitive_name?(name : String) : Bool
-      normalized = name.gsub(/([a-z0-9])([A-Z])/, "\\1_\\2").downcase
-      normalized.matches?(/(^|[^a-z0-9])#{SENSITIVE_NAME}($|[^a-z0-9])/)
+      normalized = name.gsub(CAMEL_BOUNDARY, "\\1_\\2").downcase
+      normalized.matches?(SENSITIVE_NAME_PATTERN)
     end
 
     # Strips everything that could steer the terminal.
@@ -67,6 +75,14 @@ module Fluxion::Executor
     # introduced by ESC — because an OSC payload can legitimately contain bytes
     # that look like the start of a CSI sequence.
     def strip_controls(text : String, preserve_newlines : Bool = false) : String
+      # Command output is overwhelmingly plain printable ASCII, and for such a
+      # string every branch below is the identity: ESC, newline, backspace and
+      # every control byte are all under 0x20, and the format characters and
+      # line separators are all multi-byte. Checking that up front skips three
+      # regex scans plus a per-character rebuild, which measured 64x faster on
+      # a typical line and, more importantly, allocates nothing at all.
+      return text if plain_ascii?(text)
+
       stripped = text
         .gsub(/\e\][^\a\e]*(?:\a|\e\\)/, "") # OSC (window title, hyperlinks)
         .gsub(/\e\[[0-?]*[ -\/]*[@-~]/, "")  # CSI (colour, cursor movement)
@@ -96,6 +112,14 @@ module Fluxion::Executor
         end
       end
       output.join
+    end
+
+    # Every byte printable ASCII, so nothing `strip_controls` removes can be
+    # present. Deliberately byte-wise rather than character-wise: a multi-byte
+    # codepoint has every byte >= 0x80 and so fails the test, which sends the
+    # string down the full path where the format characters are handled.
+    private def plain_ascii?(text : String) : Bool
+      text.to_slice.all? { |byte| byte >= 0x20 && byte < 0x7F }
     end
 
     # Unicode format characters, notably the bidi overrides.
@@ -181,8 +205,13 @@ module Fluxion::Executor
     MIN_MASKABLE_SECRET = 4
 
     # Full treatment for a line of command output.
+    #
+    # `redact` rather than `sanitize_line` on the way out: the text has already
+    # been stripped, and `mask_values` only ever substitutes MASK, which
+    # contains no control characters. Stripping a second time was provably a
+    # no-op that cost three regex scans and a rebuild on every line of output.
     def redact_output(text : String, environment : Enumerable(ShellEnvironmentVariable)) : String
-      sanitize_line(mask_values(strip_controls(text, preserve_newlines: false), environment))
+      redact(mask_values(strip_controls(text, preserve_newlines: false), environment))
     end
 
     def redact_command(command : Array(String), environment : Enumerable(ShellEnvironmentVariable)) : Array(String)
@@ -240,7 +269,16 @@ module Fluxion::Executor
       end
 
       # The longest suffix that could still turn into a BEGIN marker.
+      #
+      # Every proper prefix of the marker ends in one of these, so a line
+      # ending in anything else cannot be a split marker. Checking that first
+      # costs one character comparison and spares the common line the handful
+      # of substring allocations the search below would otherwise make.
+      MARKER_TAILS = {'-', 'B', 'E', 'G', 'I'}
+
       private def partial_marker(text : String) : String?
+        return if text.empty? || !MARKER_TAILS.includes?(text[-1])
+
         marker = "-----BEGIN"
         (1...Math.min(marker.size, Math.min(text.size, MAX_CARRY))).reverse_each do |length|
           suffix = text[(text.size - length)..]

@@ -1,10 +1,10 @@
 module Fluxion::Config
-  # The `WorkstationProfile` manifest frontend.
+  # The `WorkstationProfile` document.
   #
-  # One ordered plan, selected by host facts and per-entry `when` rules, rather
-  # than the stable schema's job DAG. `spec.target.os` is informational: it is
-  # mapped so validation, state, and reports have a declared target, but it
-  # never decides what runs.
+  # `spec.phases[]` becomes the profile's phase DAG and each phase's `steps[]`
+  # its steps. `spec.target.os` is informational: it is mapped so validation,
+  # state, and reports have a declared target, but host facts and `when` rules
+  # decide what actually runs.
   module Manifest
     extend self
 
@@ -23,23 +23,17 @@ module Fluxion::Config
       target = parse_target(context, spec["target"])
       policy = parse_policy(context, spec["policy"])
 
-      selection = select_plan_entries(context, spec["plan"])
-      steps = selection.selected.compact_map { |entry| plan_step(context, entry) }
-      sources, skipped_sources = parse_sources(context, spec["sources"], steps)
+      phases, skipped = parse_phases(context, spec["phases"], target)
+      validate_graph(context, phases)
+
+      sources, skipped_sources = parse_sources(context, spec["sources"], phases.flat_map(&.steps))
 
       Profile.new(
         name,
         target,
-        [Job.new(
-          Profile::MANIFEST_JOB_NAME,
-          steps,
-          description: "WorkstationProfile plan",
-          # A manifest is an ordered plan the user wrote as a sequence; if an
-          # entry fails, later entries usually depend on it.
-          continue_on_step_error: false,
-        )],
+        phases,
         policy: policy,
-        skipped_plan_entries: selection.skipped + skipped_sources,
+        skipped_plan_entries: skipped + skipped_sources,
         source_setups: sources,
         base_dir: context.base_dir,
       )
@@ -72,6 +66,9 @@ module Fluxion::Config
         context.error(metadata["name"].path, "must not be blank")
         return "workstation"
       end
+      if name.includes?(' ')
+        context.error(metadata["name"].path, "must not contain spaces")
+      end
       name
     end
 
@@ -90,10 +87,14 @@ module Fluxion::Config
       distribution = Distribution.from_config?(os["distribution"].string?)
       unless distribution
         raw = os["distribution"].string?
+        # The accepted list is derived rather than written out, so adding a
+        # distribution cannot leave this hint naming an outdated set.
+        accepted = "one of #{Distribution.values.map(&.config_name).join(", ")}"
         if raw.nil? || raw.strip.empty?
-          context.error(os["distribution"].path, "is required")
+          context.error(os["distribution"].path, "is required", accepted)
         else
-          context.error(os["distribution"].path, "unsupported target OS distribution: #{raw.strip}")
+          context.error(os["distribution"].path,
+            "unsupported target OS distribution: #{raw.strip}", accepted)
         end
         distribution = Distribution::Fedora
       end
@@ -126,84 +127,180 @@ module Fluxion::Config
       )
     end
 
-    # -- plan selection -----------------------------------------------------
+    # -- phases -------------------------------------------------------------
 
-    private record Selection,
-      selected : Array(Node),
-      skipped : Array(SkippedPlanEntry)
+    # Names are tracked as name => declaring path so a duplicate can point at
+    # the first occurrence, which is the one the user has to look at.
+    private record Names,
+      phases : Hash(String, String) = {} of String => String,
+      steps : Hash(String, String) = {} of String => String
 
-    private def select_plan_entries(context : Context, plan : Node) : Selection
-      selected = [] of Node
+    private def parse_phases(context : Context, node : Node, target : TargetOs) : {Array(Phase), Array(SkippedPlanEntry)}
+      phases = [] of Phase
       skipped = [] of SkippedPlanEntry
-      seen = {} of String => String
 
-      plan.each_item do |entry, _|
-        name = context.optional_string(entry["name"])
-        if name.nil?
-          context.error(entry["name"].path, "must not be blank")
-        elsif previous = seen[name]?
-          context.error(entry["name"].path,
-            "duplicates plan entry '#{name}' first declared at #{previous}")
-        else
-          seen[name] = entry["name"].path
-        end
-
-        kind_node = entry["kind"]
-        raw_kind = kind_node.string?
-        if raw_kind.nil? || raw_kind.strip.empty?
-          context.error(kind_node.path, raw_kind.nil? ? "is required" : "must not be blank")
-          next
-        end
-
-        kind = raw_kind.strip.downcase
-        unless PlanKinds.find(kind)
-          context.error(kind_node.path, "unsupported plan kind '#{raw_kind.strip}'",
-            PlanKinds.suggestion_for(kind))
-          next
-        end
-
-        condition = ConditionParser.parse(context, entry["when"])
-        reason = condition.try(&.unmet_reason(context.host) { |command| Host.command_exists?(command) })
-        if reason
-          skipped << SkippedPlanEntry.new(name || "<unnamed>", kind, "when.#{reason}")
-          next
-        end
-
-        selected << entry
+      if node.items.empty?
+        context.error(node.path, "at least one phase is required")
+        return {phases, skipped}
       end
 
-      Selection.new(selected, skipped)
+      names = Names.new
+      node.each_item do |entry, _|
+        phases << parse_phase(context, entry, target, names, skipped)
+      end
+
+      {phases, skipped}
     end
 
-    # -- plan entries -------------------------------------------------------
+    private def parse_phase(context : Context, entry : Node, target : TargetOs,
+                            names : Names, skipped : Array(SkippedPlanEntry)) : Phase
+      name = context.optional_string(entry["name"])
+      if name.nil?
+        context.error(entry["name"].path, "must not be blank")
+      elsif previous = names.phases[name]?
+        context.error(entry["name"].path, "duplicates phase '#{name}' first declared at #{previous}")
+      else
+        names.phases[name] = entry["name"].path
+      end
+      label = name || "<unnamed>"
 
-    private def plan_step(context : Context, entry : Node) : Step?
-      name = context.optional_string(entry["name"]) || "<unnamed>"
-      kind_id = entry["kind"].string?.not_nil!.strip.downcase
-      kind = PlanKinds.find(kind_id).not_nil!
+      # A phase whose `when` is unmet contributes no steps, but every one of
+      # them is still recorded as skipped: a step that vanishes from `plan`
+      # looks like it was never in the profile.
+      condition = ConditionParser.parse(context, entry["when"])
+      unmet = condition.try(&.unmet_reason(context.host) { |command| Host.command_exists?(command) })
+
+      steps_node = entry["steps"]
+      context.error(steps_node.path, "at least one step is required") if steps_node.items.empty?
+
+      steps = [] of Step
+      steps_node.each_item do |step_node, _|
+        step = parse_step(context, step_node, target, names, skipped, label, unmet)
+        steps << step if step
+      end
+
+      # The policy is still parsed when the phase is skipped, so a malformed
+      # one is reported, but it is not carried: a phase that ran nothing has
+      # nothing for the user to log out of.
+      restart_policy = parse_restart_policy(context, entry["restartPolicy"])
+      restart_policy = RestartPolicy::None.new if unmet
+
+      Phase.new(
+        label,
+        steps,
+        depends_on: entry["dependsOn"].string_list,
+        restart_policy: restart_policy,
+        continue_on_step_error: context.bool(entry["execution"]["continueOnError"], true),
+        description: context.optional_string(entry["description"]) || "",
+      )
+    end
+
+    private def parse_restart_policy(context : Context, node : Node) : RestartPolicy
+      return RestartPolicy::None.new unless node.present?
+
+      type_node = node["type"]
+      case type_node.string?.try(&.strip.downcase)
+      when "none", nil
+        RestartPolicy::None.new
+      when "prompt-logout"
+        RestartPolicy::PromptLogout.new(
+          context.optional_string(node["message"]) || RestartPolicy::PromptLogout::DEFAULT_MESSAGE)
+      when "requires-new-shell"
+        shell = ShellKind.from_config?(node["shell"].string?)
+        if node["shell"].present? && shell.nil?
+          context.error(node["shell"].path, "unsupported shell", "one of zsh, bash, sh")
+        end
+        RestartPolicy::RequiresNewShell.new(shell || ShellKind::Zsh)
+      else
+        context.error(type_node.path,
+          "unsupported restart policy '#{type_node.string?}'",
+          "one of #{RestartPolicy::TYPES.join(", ")}")
+        RestartPolicy::None.new
+      end
+    end
+
+    # -- steps --------------------------------------------------------------
+
+    private def parse_step(context : Context, entry : Node, target : TargetOs, names : Names,
+                           skipped : Array(SkippedPlanEntry), phase : String, phase_unmet : String?) : Step?
+      name = context.optional_string(entry["name"])
+      if name.nil?
+        context.error(entry["name"].path, "must not be blank")
+      elsif previous = names.steps[name]?
+        # Step names are the handle for `state forget`, `explain --item`, and
+        # the TUI selector, so they are unique across the whole profile rather
+        # than only within a phase.
+        context.error(entry["name"].path, "duplicates step '#{name}' first declared at #{previous}")
+      else
+        names.steps[name] = entry["name"].path
+      end
+      label = name || "<unnamed>"
+
+      kind = step_kind(context, entry)
+      return unless kind
+
+      if phase_unmet
+        skipped << SkippedPlanEntry.new(label, kind.id, "phase #{phase} when.#{phase_unmet}")
+        return
+      end
+
+      condition = ConditionParser.parse(context, entry["when"])
+      reason = condition.try(&.unmet_reason(context.host) { |command| Host.command_exists?(command) })
+      if reason
+        skipped << SkippedPlanEntry.new(label, kind.id, "when.#{reason}")
+        return
+      end
+
+      build_step(context, entry, kind, label, condition, target)
+    end
+
+    private def step_kind(context : Context, entry : Node) : PlanKinds::Kind?
+      node = entry["kind"]
+      raw = node.string?
+      if raw.nil? || raw.strip.empty?
+        context.error(node.path, raw.nil? ? "is required" : "must not be blank")
+        return
+      end
+
+      id = raw.strip.downcase
+      kind = PlanKinds.find(id)
+      unless kind
+        context.error(node.path, "unsupported step kind '#{raw.strip}'", PlanKinds.suggestion_for(id))
+        return
+      end
+      kind
+    end
+
+    private def build_step(context : Context, entry : Node, kind : PlanKinds::Kind,
+                           name : String, condition : Condition?, target : TargetOs) : Step?
       spec = entry["spec"]
       description = context.optional_string(entry["description"])
       probe = context.optional_string(spec["probeCommand"])
-      condition = ConditionParser.parse(context, entry["when"])
 
+      # Control kinds describe an interaction rather than an installation, so
+      # they are allowed to carry nothing but a name.
       if kind.category.installer? && !spec.present?
-        context.error(entry.path, "spec is required for plan entry '#{name}'")
+        context.error(entry.path, "spec is required for step '#{name}'")
         return
       end
 
       continue_on_error = context.bool?(entry["execution"]["continueOnError"])
       continue_on_error = context.bool?(spec["continueOnError"]) if continue_on_error.nil?
 
-      step = build_plan_step(context, spec, kind, name, description, probe)
+      step = build_kind_step(context, spec, kind, name, description, probe)
       return unless step
+
+      validate_package_manager(context, step, entry, target, condition)
 
       # `execution.continueOnError` overrides whatever the step kind defaults
       # to, so it is applied after construction rather than threaded through
       # every parser.
-      apply_entry_overrides(step, condition, continue_on_error)
+      step.condition = condition if condition
+      step.continue_on_error = continue_on_error unless continue_on_error.nil?
+      step
     end
 
-    private def build_plan_step(context : Context, spec : Node, kind : PlanKinds::Kind, name : String, description : String?, probe : String?) : Step?
+    private def build_kind_step(context : Context, spec : Node, kind : PlanKinds::Kind, name : String, description : String?, probe : String?) : Step?
       case kind.category
       in PlanKinds::Category::Packages
         StepParser.manifest_packages(context, spec, kind, name, description, probe)
@@ -212,19 +309,73 @@ module Fluxion::Config
       in PlanKinds::Category::Sdkman
         StepParser.manifest_sdkman(context, spec, name, description, probe)
       in PlanKinds::Category::Control
-        StepParser.manifest_interrupt(context, spec, name, description)
+        # `interrupt` is the one control kind with no step type behind it; the
+        # rest share the ordinary builders.
+        return StepParser.manifest_interrupt(context, spec, name, description) if kind.id == "interrupt"
+        build_by_step_type(context, spec, kind, name, description, probe)
       in PlanKinds::Category::Installer
-        type = PlanKinds::STEP_TYPES[kind.id]?
         return StepParser.manifest_file_writes(context, spec, name, description, probe) if kind.id == "file-writes"
-        return unless type
-        StepParser.build_kind(context, spec, type, name, description, probe)
+        build_by_step_type(context, spec, kind, name, description, probe)
       end
     end
 
-    private def apply_entry_overrides(step : Step, condition : Condition?, continue_on_error : Bool?) : Step
-      step.condition = condition if condition
-      step.continue_on_error = continue_on_error unless continue_on_error.nil?
-      step
+    private def build_by_step_type(context : Context, spec : Node, kind : PlanKinds::Kind, name : String, description : String?, probe : String?) : Step?
+      type = PlanKinds::STEP_TYPES[kind.id]?
+      return unless type
+      StepParser.build_kind(context, spec, type, name, description, probe)
+    end
+
+    # A profile that targets Fedora but installs with apt fails late and
+    # confusingly. Catching it at parse time costs nothing.
+    private def validate_package_manager(context : Context, step : Step, entry : Node,
+                                         target : TargetOs, condition : Condition?) : Nil
+      manager = case step
+                when PackagesStep     then step.package_manager
+                when SystemUpdateStep then step.package_manager
+                end
+      return unless manager
+
+      # Cargo owns its own tree rather than the distribution's, so no target
+      # rules it out; only the managers a distribution actually ships are
+      # worth checking against one.
+      return unless Distribution.values.any?(&.package_managers.includes?(manager))
+
+      # A step guarded by a distribution rule is deliberately for a machine
+      # other than the declared target — the whole point of one profile that
+      # bootstraps several distributions. Checking it against the target would
+      # reject the pattern the schema exists to support, and only on the hosts
+      # where that branch is actually selected.
+      return if condition.try(&.narrows_distribution?)
+
+      expected = target.distribution.package_managers
+      return if expected.includes?(manager)
+
+      context.error("#{entry.path}.kind",
+        "package manager #{manager} is not valid for target #{target.distribution}",
+        "expected #{expected.join(" or ")}")
+    end
+
+    # Every dependency must name a declared phase, otherwise the execution
+    # order is undefined rather than merely surprising.
+    private def validate_graph(context : Context, phases : Array(Phase)) : Nil
+      names = phases.map(&.name).to_set
+      phases.each_with_index do |phase, index|
+        phase.depends_on.each do |dependency|
+          next if names.includes?(dependency)
+          context.error("spec.phases[#{index}].dependsOn",
+            "phase '#{phase.name}' declares dependency on unknown phase '#{dependency}'")
+        end
+      end
+
+      # A cycle can only be looked for once the graph is otherwise sound; a
+      # missing or duplicated name would report as a cycle and mislead.
+      return if context.diagnostics.errors?
+
+      begin
+        Profile.new("graph-check", TargetOs.new(Distribution::Fedora), phases).ordered_phases
+      rescue error : ConfigError
+        context.error("spec.phases", error.message || "cycle in phase dependency graph")
+      end
     end
 
     # -- sources ------------------------------------------------------------

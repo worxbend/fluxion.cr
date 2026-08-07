@@ -1,85 +1,12 @@
 module Fluxion::Config
-  # Turns one `steps[]` / `modules[]` entry into a `Step`.
+  # Turns one `spec:` payload into a `Step`.
   #
-  # Dispatch is a single table keyed by the `type` discriminator so the set of
-  # supported kinds cannot drift between what `validate` accepts, what `kinds`
-  # lists, and what the executor can actually run.
+  # The entry point is `build_kind`, reached from the kind a step declared.
+  # Dispatch is a single table so the set of supported kinds cannot drift
+  # between what `validate` accepts, what `kinds` lists, and what the executor
+  # can actually run.
   module StepParser
     extend self
-
-    # Every `type` the stable jobs/steps schema accepts, in the order the
-    # documentation lists them. `kinds` and the did-you-mean suggester both
-    # read this, so adding a kind here is the only edit needed.
-    KINDS = %w[
-      packages
-      apt-repository
-      rpm-repository
-      pacman-repository
-      flatpak
-      flatpak-remote
-      shell-script
-      compiled-binary
-      dotbot
-      default-shell
-      oh-my-zsh
-      toolchain
-      nerd-fonts
-      shell-reload
-      shell-command
-      assert
-      manual
-      binstaller-profile
-      user-groups
-      git-config
-      git-repo
-      systemd-unit
-      system-setting
-      system-update
-      gpg-key
-      tool-packages
-      zypper-repository
-    ]
-
-    def parse(context : Context, node : Node) : Step?
-      type_node = node["type"]
-      raw_type = type_node.string?
-      if raw_type.nil? || raw_type.strip.empty?
-        context.error(type_node.path, "step type is required")
-        return
-      end
-
-      kind = raw_type.strip.downcase
-      unless KINDS.includes?(kind)
-        context.error(type_node.path, "unsupported step type '#{raw_type.strip}'", suggestion_for(kind))
-        return
-      end
-
-      name = context.require_string(node["name"], "step name")
-      return if name.empty?
-
-      build(context, node, kind, name,
-        context.optional_string(node["description"]),
-        context.optional_string(node["probeCommand"]))
-    end
-
-    # Levenshtein against the known kinds, with a budget that scales with the
-    # input so a short typo does not match everything. Ties resolve to the
-    # first kind in declaration order.
-    def suggestion_for(kind : String) : String?
-      return if kind.empty?
-      budget = Math.max(2, kind.size // 3)
-      best : String? = nil
-      best_distance = Int32::MAX
-
-      KINDS.each do |candidate|
-        distance = levenshtein(kind, candidate)
-        next if distance > budget || distance >= best_distance
-        best = candidate
-        best_distance = distance
-      end
-
-      best.try { |match| "Did you mean '#{match}'?" }
-    end
 
     def levenshtein(a : String, b : String) : Int32
       previous = (0..b.size).to_a
@@ -97,17 +24,12 @@ module Fluxion::Config
       previous[b.size]
     end
 
-    # Shared by both frontends: the stable schema passes the step node, a
-    # manifest passes the plan entry's `spec` node, and everything below reads
-    # the same field names from whichever it is given.
-    # One branch per supported kind. Splitting the table would only relocate
-    # the branching somewhere less obvious to read.
+    # One branch per supported step type. Splitting the table would only
+    # relocate the branching somewhere less obvious to read.
     #
     # ameba:disable Metrics/CyclomaticComplexity
     protected def build(context : Context, node : Node, kind : String, name : String, description : String?, probe : String?) : Step?
       case kind
-      when "packages"           then packages(context, node, name, description, probe)
-      when "flatpak"            then flatpak(context, node, name, description, probe)
       when "tool-packages"      then tool_packages(context, node, name, description, probe)
       when "system-update"      then system_update(context, node, name, description, probe)
       when "apt-repository"     then apt_repository(context, node, name, description, probe)
@@ -138,39 +60,6 @@ module Fluxion::Config
 
     # -- package kinds ------------------------------------------------------
 
-    private def packages(context, node, name, description, probe) : Step?
-      manager_node = node["packageManager"]
-      manager = PackageManager.from_config?(manager_node.string?)
-      unless manager
-        raw = manager_node.string?
-        if raw.nil? || raw.strip.empty?
-          context.error(manager_node.path, "packageManager is required")
-        else
-          context.error(manager_node.path, "unsupported package manager '#{raw.strip}'")
-        end
-        return
-      end
-
-      packages_node = node["packages"]
-      packages = packages_node.string_list
-      if packages.empty?
-        context.error(packages_node.path, "must contain at least one package")
-      end
-      packages.each_with_index do |package, index|
-        validate_package_name(context, "#{packages_node.path}[#{index}]", package)
-      end
-
-      report_duplicates(context, packages_node.path, packages, "package")
-
-      PackagesStep.new(
-        name, manager, packages,
-        actions: package_actions(context, node["actions"], manager),
-        description: description,
-        continue_on_error: context.bool(node["continueOnError"], true),
-        probe_command: probe,
-      )
-    end
-
     private def package_actions(context : Context, node : Node, manager : PackageManager) : Array(PackageAction)
       return [] of PackageAction unless node.present?
 
@@ -192,34 +81,6 @@ module Fluxion::Config
         PackageAction.new(action_name, args)
       end
     end
-
-    private def flatpak(context, node, name, description, probe) : Step?
-      ids_node = node["appIds", "apps"]
-      app_ids = ids_node.string_list
-      if app_ids.empty?
-        context.error(ids_node.path, "must contain at least one app ID")
-      end
-      app_ids.each_with_index do |app_id, index|
-        unless FLATPAK_APP_ID.matches?(app_id)
-          context.error("#{ids_node.path}[#{index}]",
-            "must be a reverse-DNS Flatpak application ID", "for example com.spotify.Client")
-        end
-      end
-      report_duplicates(context, ids_node.path, app_ids, "app ID")
-
-      # A blank remote is a common way of writing "the default"; treating it as
-      # flathub is friendlier than failing on an empty string.
-      remote = context.optional_string(node["remote"]) || FlatpakStep::DEFAULT_REMOTE
-
-      FlatpakStep.new(
-        name, app_ids, remote,
-        description: description,
-        continue_on_error: context.bool(node["continueOnError"], true),
-        probe_command: probe,
-      )
-    end
-
-    FLATPAK_APP_ID = /\A[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*){2,}\z/
 
     private def tool_packages(context, node, name, description, probe) : Step?
       backend_node = node["backend"]

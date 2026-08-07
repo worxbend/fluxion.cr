@@ -47,9 +47,9 @@ module Fluxion::CLI
       diagnostics.each { |diagnostic| puts format_diagnostic(diagnostic) }
       puts unless diagnostics.empty?
 
-      jobs = profile.jobs.size
+      phases = profile.phases.size
       steps = profile.steps.size
-      shape = "profile #{Style.bold(profile.name)} with #{pluralize(jobs, "job")}, #{pluralize(steps, "step")}"
+      shape = "profile #{Style.bold(profile.name)} with #{pluralize(phases, "phase")}, #{pluralize(steps, "step")}"
 
       if failed
         puts "#{Style.red(Symbols.failure)} Config has #{pluralize(diagnostics.size, "issue")}: #{shape}"
@@ -74,7 +74,7 @@ module Fluxion::CLI
     private def render_json(profile : Profile, diagnostics : Array(Diagnostic), failed : Bool) : Nil
       puts({
         "profileName" => profile.name,
-        "jobCount"    => profile.jobs.size,
+        "phaseCount"  => profile.phases.size,
         "stepCount"   => profile.steps.size,
         # Reflects errors only. `--strict` changes the exit code, not whether
         # the profile is structurally valid.
@@ -96,7 +96,7 @@ module Fluxion::CLI
     end
   end
 
-  # `fluxion kinds` — list the plan kinds a manifest may use.
+  # `fluxion kinds` — list the step kinds a profile may use.
   #
   # Takes no config file: the answer is a property of the build, not of any
   # profile. Reading the same registry `validate` checks against is what stops
@@ -107,7 +107,7 @@ module Fluxion::CLI
     end
 
     def summary : String
-      "List the plan kinds a WorkstationProfile can use"
+      "List the step kinds a profile can use"
     end
 
     def usage : String
@@ -144,7 +144,7 @@ module Fluxion::CLI
       end
 
       puts
-      puts Style.dim("Reference: docs/workstation-profile.md")
+      puts Style.dim("Reference: docs/config-schema.md")
     end
 
     private def render_json : Nil
@@ -201,8 +201,8 @@ module Fluxion::CLI
       profile.source_setups.each do |setup|
         rows << {setup.name, "source setup", setup.items.size.to_s, setup.step.summary}
       end
-      profile.jobs.each do |job|
-        job.steps.each { |step| rows << {step.name, step.kind, step.items.size.to_s, step.summary} }
+      profile.phases.each do |phase|
+        phase.steps.each { |step| rows << {step.name, step.kind, step.items.size.to_s, step.summary} }
       end
 
       if rows.empty?

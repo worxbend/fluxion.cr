@@ -100,7 +100,7 @@ module Fluxion::CLI
 
       unless store.exists?(profile)
         if @format.json?
-          puts({"profileName" => profile, "lastRunAt" => nil, "jobs" => [] of String, "items" => [] of String}.to_json)
+          puts({"profileName" => profile, "lastRunAt" => nil, "phases" => [] of String, "items" => [] of String}.to_json)
         else
           puts Style.dim("No state recorded for profile: #{profile}")
         end
@@ -114,17 +114,17 @@ module Fluxion::CLI
 
     private def render_text(document : State::Document) : Nil
       puts "Profile: #{Style.bold(document.profile_name)}  #{Style.dim("(last run: #{document.last_run_at})")}"
-      document.next_job.try { |job| puts "#{Style.yellow("Next job:")} #{job}" }
+      document.next_phase.try { |phase| puts "#{Style.yellow("Next phase:")} #{phase}" }
       puts
 
-      puts Style.bold("Jobs:")
-      if document.jobs.empty?
+      puts Style.bold("Phases:")
+      if document.phases.empty?
         puts "  #{Style.dim("(none)")}"
       else
-        width = document.jobs.max_of(&.job.size)
-        document.jobs.each do |job|
-          colour = job.completed? ? Style.green(job.status) : Style.red(job.status)
-          puts "  #{Style.pad(job.job, width)}  #{colour}  #{Style.dim(job.completed_at.to_s)}"
+        width = document.phases.max_of(&.phase.size)
+        document.phases.each do |phase|
+          colour = phase.completed? ? Style.green(phase.status) : Style.red(phase.status)
+          puts "  #{Style.pad(phase.phase, width)}  #{colour}  #{Style.dim(phase.completed_at.to_s)}"
         end
       end
 
@@ -215,21 +215,21 @@ module Fluxion::CLI
     end
 
     def summary : String
-      "Remove one job or item from the recorded state"
+      "Remove one phase or item from the recorded state"
     end
 
     def usage : String
-      "fluxion state forget --profile NAME (--job NAME | --item KEY [--step NAME] [--type TYPE])"
+      "fluxion state forget --profile NAME (--phase NAME | --item KEY [--step NAME] [--type TYPE])"
     end
 
-    @job : String?
+    @phase : String?
     @item : String?
     @step : String?
     @type : String?
 
     def register(parser : OptionParser) : Nil
       parser.on("--profile=NAME", "Profile name [default: default]") { |value| @profile_name = value }
-      parser.on("--job=NAME", "Job to forget") { |value| @job = value }
+      parser.on("--phase=NAME", "Phase to forget") { |value| @phase = value }
       parser.on("--item=KEY", "Item key to forget") { |value| @item = value }
       parser.on("--step=NAME", "Step qualifying --item") { |value| @step = value }
       parser.on("--type=TYPE", "Item type qualifying --item") { |value| @type = value }
@@ -238,9 +238,9 @@ module Fluxion::CLI
     def run(arguments : Array(String)) : ExitCode
       parse(arguments)
 
-      job = @job.presence
+      phase = @phase.presence
       item = @item.presence
-      raise Failure.invalid_input("Specify --job or --item") if job.nil? && item.nil?
+      raise Failure.invalid_input("Specify --phase or --item") if phase.nil? && item.nil?
       if (@step || @type) && item.nil?
         raise Failure.invalid_input("--step and --type only qualify --item")
       end
@@ -258,12 +258,12 @@ module Fluxion::CLI
 
       document = store.load(@profile_name)
 
-      if job
-        unless document.forget_job(job)
-          raise Failure.invalid_input("No recorded job named '#{job}'")
+      if phase
+        unless document.forget_phase(phase)
+          raise Failure.invalid_input("No recorded phase named '#{phase}'")
         end
         store.save(document)
-        puts "#{Style.green(Symbols.success)} Forgot job '#{job}'"
+        puts "#{Style.green(Symbols.success)} Forgot phase '#{phase}'"
         return ExitCode::Success
       end
 
@@ -338,16 +338,16 @@ module Fluxion::CLI
       puts "- Profile: `#{document.profile_name}`"
       puts "- Last run: `#{document.last_run_at}`"
       puts "- Fluxion version: `#{document.fluxion_version}`"
-      document.next_job.try { |job| puts "- Next job: `#{job}`" }
+      document.next_phase.try { |phase| puts "- Next phase: `#{phase}`" }
       puts
-      puts "## Jobs"
+      puts "## Phases"
       puts
-      if document.jobs.empty?
-        puts "_No jobs recorded._"
+      if document.phases.empty?
+        puts "_No phases recorded._"
       else
-        puts "| Job | Status | Completed |"
+        puts "| Phase | Status | Completed |"
         puts "| --- | --- | --- |"
-        document.jobs.each { |job| puts "| #{job.job} | #{job.status} | #{job.completed_at} |" }
+        document.phases.each { |phase| puts "| #{phase.phase} | #{phase.status} | #{phase.completed_at} |" }
       end
       puts
       puts "## Items"
@@ -375,9 +375,9 @@ module Fluxion::CLI
       puts "<h1>Fluxion run report</h1>"
       puts "<p><strong>Profile:</strong> #{html_escape(document.profile_name)}</p>"
       puts "<p><strong>Last run:</strong> #{document.last_run_at}</p>"
-      puts "<h2>Jobs</h2><table><tr><th>Job</th><th>Status</th><th>Completed</th></tr>"
-      document.jobs.each do |job|
-        puts "<tr><td>#{html_escape(job.job)}</td><td>#{job.status}</td><td>#{job.completed_at}</td></tr>"
+      puts "<h2>Phases</h2><table><tr><th>Phase</th><th>Status</th><th>Completed</th></tr>"
+      document.phases.each do |phase|
+        puts "<tr><td>#{html_escape(phase.phase)}</td><td>#{phase.status}</td><td>#{phase.completed_at}</td></tr>"
       end
       puts "</table>"
       puts "<h2>Items</h2><table><tr><th>Step</th><th>Item</th><th>Type</th><th>Version</th></tr>"

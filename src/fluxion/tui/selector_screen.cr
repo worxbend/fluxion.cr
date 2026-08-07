@@ -3,11 +3,11 @@ module Fluxion::TUI
   #
   # Shown before anything mutates the host, because the moment to change your
   # mind about a bootstrap run is before it starts, not during. Rendered as one
-  # flat list of jobs and their steps rather than a drill-down: the whole
+  # flat list of phases and their steps rather than a drill-down: the whole
   # profile fits on a screen, and nesting would hide what is about to happen.
   class SelectorScreen
     # One line of the list, flattened so cursor movement is a single index.
-    record Row, job : Job, step : Step?
+    record Row, phase : Phase, step : Step?
 
     getter selection : Selection
 
@@ -21,9 +21,9 @@ module Fluxion::TUI
 
     private def build_rows : Array(Row)
       rows = [] of Row
-      @selection.profile.jobs.each do |job|
-        rows << Row.new(job, nil)
-        job.steps.each { |step| rows << Row.new(job, step) }
+      @selection.profile.phases.each do |phase|
+        rows << Row.new(phase, nil)
+        phase.steps.each { |step| rows << Row.new(phase, step) }
       end
       rows
     end
@@ -74,9 +74,9 @@ module Fluxion::TUI
       return unless row
 
       if step = row.step
-        @selection.toggle_step(row.job, step)
+        @selection.toggle_step(row.phase, step)
       else
-        @selection.toggle_job(row.job)
+        @selection.toggle_phase(row.phase)
       end
     end
 
@@ -101,7 +101,7 @@ module Fluxion::TUI
     end
 
     private def render_list(buffer : CryTUI::Buffer, area : CryTUI::Rect) : Nil
-      inner = Theme.frame(buffer, area, "jobs and steps")
+      inner = Theme.frame(buffer, area, "phases and steps")
       return if inner.height <= 0
 
       # Keep the cursor on screen by scrolling the window, not the cursor.
@@ -122,9 +122,9 @@ module Fluxion::TUI
         count = step.items.size
         "    [#{mark}] #{step.name.ljust(28)} #{step.kind.ljust(20)} #{count} item#{"s" if count != 1}"
       else
-        mark = @selection.job?(row.job.name) ? "✔" : " "
-        dependencies = row.job.depends_on.empty? ? "" : "  after: #{row.job.depends_on.join(", ")}"
-        "[#{mark}] #{row.job.name}#{dependencies}"
+        mark = @selection.phase?(row.phase.name) ? "✔" : " "
+        dependencies = row.phase.depends_on.empty? ? "" : "  after: #{row.phase.depends_on.join(", ")}"
+        "[#{mark}] #{row.phase.name}#{dependencies}"
       end
     end
 

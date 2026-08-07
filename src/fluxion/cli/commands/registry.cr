@@ -909,17 +909,22 @@ module Fluxion::CLI
 
     EXAMPLE_PROFILE = <<-YAML
       # A starting point. Replace it with what your machines actually need.
-      profile: workstation
-      os:
-        type: fedora
+      apiVersion: initkit.io/v1alpha1
+      kind: WorkstationProfile
+      metadata:
+        name: workstation
+      spec:
+        target:
+          os:
+            distribution: fedora
 
-      jobs:
-        - name: base
-          steps:
-            - type: packages
-              name: core-tools
-              packageManager: dnf
-              packages: [git, curl, jq]
+        phases:
+          - name: base
+            steps:
+              - name: core-tools
+                kind: dnf-packages
+                spec:
+                  packages: [git, curl, jq]
 
       YAML
   end

@@ -62,16 +62,21 @@ spec states the YAML it means rather than referring to a fixture file:
 
 ```crystal
 result = ProfileHelpers.parse(<<-YAML)
-  profile: p
-  os:
-    type: fedora
-  jobs:
-    - name: base
-      steps:
-        - type: packages
-          name: tools
-          packageManager: dnf
-          packages: [git]
+  apiVersion: initkit.io/v1alpha1
+  kind: WorkstationProfile
+  metadata:
+    name: p
+  spec:
+    target:
+      os:
+        distribution: fedora
+    phases:
+      - name: base
+        steps:
+          - name: tools
+            kind: dnf-packages
+            spec:
+              packages: [git]
   YAML
 
 result.errors.should be_empty
@@ -85,16 +90,17 @@ parses every one of them, so a regression in any parser surfaces there first.
 Four places, in order:
 
 1. **`core/steps/`** — the validated data. No IO.
-2. **`config/step_parser/`** — YAML in, that type out. Add the `type` string to
-   `StepParser::KINDS`; the did-you-mean suggester reads the same list.
-3. **`executor/step_executor.cr`** or **`executor/executors/`** — the commands.
+2. **`config/step_parser/`** — YAML in, that type out.
+3. **`config/plan_kinds.cr`** — the kind id, its category, and its entry in
+   `STEP_TYPES`. `fluxion kinds`, `validate`, the did-you-mean suggester, and
+   the mapper all read that one table, so they cannot drift apart.
+4. **`executor/step_executor.cr`** or **`executor/executors/`** — the commands.
    Register it in `ExecutorRegistry.default`.
-4. **`executor/probe.cr`** — how to tell whether it is already there, if it has
+5. **`executor/probe.cr`** — how to tell whether it is already there, if it has
    an observable footprint. Register it in `ProbeRegistry.default`.
 
-Then document it in `docs/config-schema.md`. If it is also a manifest plan
-kind, add it to `config/plan_kinds.cr` — `fluxion kinds` and `validate` read
-that one table, so they cannot drift apart.
+Then document it in `docs/config-schema.md`, in the same order the table
+declares it.
 
 ## Adding a command
 

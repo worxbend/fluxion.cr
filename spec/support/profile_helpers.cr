@@ -71,26 +71,24 @@ module ProfileHelpers
     )
   end
 
-  # A minimal valid jobs/steps profile with `body` spliced in as the step list.
+  # A minimal valid profile with `body` spliced in as one phase's step list.
   #
   # Built line by line rather than from a heredoc: the body arrives already
   # indented for readability at the call site, and re-indenting it inside a
   # heredoc makes both halves fragile.
-  def jobs_profile(body : String, os : String = "fedora") : String
-    header = [
-      "profile: test",
-      "os:",
-      "  type: #{os}",
-      "jobs:",
-      "  - name: base",
-      "    steps:",
-    ]
-    (header + indent(body, 6)).join('\n') + '\n'
+  def manifest(body : String, distribution : String = "fedora", phase : String = "base") : String
+    (manifest_header(distribution) + ["    - name: #{phase}", "      steps:"] + indent(body, 8))
+      .join('\n') + '\n'
   end
 
-  # A minimal valid manifest with `body` spliced in as the plan list.
-  def manifest(body : String, distribution : String = "fedora") : String
-    header = [
+  # The header every profile needs, for specs that write `spec.phases`
+  # themselves because the phase is what they are testing.
+  def manifest_phases(body : String, distribution : String = "fedora") : String
+    (manifest_header(distribution) + indent(body, 4)).join('\n') + '\n'
+  end
+
+  private def manifest_header(distribution : String) : Array(String)
+    [
       "apiVersion: initkit.io/v1alpha1",
       "kind: WorkstationProfile",
       "metadata:",
@@ -99,9 +97,8 @@ module ProfileHelpers
       "  target:",
       "    os:",
       "      distribution: #{distribution}",
-      "  plan:",
+      "  phases:",
     ]
-    (header + indent(body, 4)).join('\n') + '\n'
   end
 
   # Re-indents a fragment to `spaces`, normalising whatever indentation the

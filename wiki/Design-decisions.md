@@ -86,13 +86,27 @@ of thing people walk away from.
 Approval happens up front with `--yes`, where the decision is visible next to
 the dry run that motivated it.
 
+## Why is there only one config schema?
+
+Two shapes were drafted before either shipped: a `jobs`/`steps` document and a
+`WorkstationProfile` manifest. They described the same work, so the cost was
+paid three times over — two words for every concept (jobs and phases, modules
+and steps, `type` and `kind`), two validation paths that had to be kept in
+agreement, and a reference that had to explain both and then explain when to
+choose which.
+
+The manifest shape won because it carries a version header and keeps each
+kind's payload in its own `spec`, which is what lets a new kind be added without
+touching the envelope. The phase DAG, `dependsOn`, and `restartPolicy` came
+across from the other side, so nothing was lost with it.
+
 ## Why is state fingerprinted?
 
-Otherwise "this job completed" would mean "this job completed once, ever", and
-adding a package to a completed job would be silently ignored.
+Otherwise "this phase completed" would mean "this phase completed once, ever",
+and adding a package to a completed phase would be silently ignored.
 
 The fingerprint covers what actually changes what runs, so editing a profile
-makes the affected jobs run again and leaves the rest alone.
+makes the affected phases run again and leaves the rest alone.
 
 ## Why is the TUI optional?
 

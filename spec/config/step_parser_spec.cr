@@ -2,36 +2,26 @@ require "../spec_helper"
 
 private SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-private def parse_step(yaml : String, os : String = "fedora")
-  ProfileHelpers.parse(ProfileHelpers.jobs_profile(yaml, os))
+# Every step reaches the parser through its kind, which is the only entry point
+# there is. These specs stay at the field level: what the kind resolves to is
+# the manifest spec's business, what each `spec:` payload accepts is this one's.
+private def parse_step(yaml : String, distribution : String = "fedora")
+  ProfileHelpers.parse(ProfileHelpers.manifest(yaml, distribution))
 end
 
 describe Fluxion::Config::StepParser do
-  describe "unknown kinds" do
-    it "suggests the closest supported type" do
-      result = parse_step("- type: package\n  name: x\n")
-      message = result.error_messages.find!(&.includes?("unsupported step type"))
-      message.should contain("Did you mean 'packages'?")
-    end
-
-    it "offers no suggestion for something entirely unrelated" do
-      result = parse_step("- type: ansible-playbook\n  name: x\n")
-      message = result.error_messages.find!(&.includes?("unsupported step type"))
-      message.should_not contain("Did you mean")
-    end
-  end
-
-  describe "compiled-binary trust" do
+  describe "binary-downloads trust" do
     it "accepts a literal checksum" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: kubectl
-          binaryName: kubectl
-          url: https://dl.k8s.io/release/v1.30.2/bin/linux/amd64/kubectl
-          checksum:
-            algorithm: sha256
-            value: #{SHA}
-          installPath: /usr/local/bin/kubectl
+        - name: kubectl
+          kind: binary-downloads
+          spec:
+            binaryName: kubectl
+            url: https://dl.k8s.io/release/v1.30.2/bin/linux/amd64/kubectl
+            checksum:
+              algorithm: sha256
+              value: #{SHA}
+            installPath: /usr/local/bin/kubectl
         STEP
 
       result.errors.should be_empty
@@ -42,13 +32,14 @@ describe Fluxion::Config::StepParser do
 
     it "accepts a signer-bound detached signature" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: nvim
-          binaryName: nvim
-          url: https://example.test/nvim
-          signatureUrl: https://example.test/nvim.asc
-          allowedSignerFingerprint: BC528686B50D79E339D3721CEB3E94ADBE1229CF
-          installPath: /usr/local/bin/nvim
+        - name: nvim
+          kind: binary-downloads
+          spec:
+            binaryName: nvim
+            url: https://example.test/nvim
+            signatureUrl: https://example.test/nvim.asc
+            allowedSignerFingerprint: BC528686B50D79E339D3721CEB3E94ADBE1229CF
+            installPath: /usr/local/bin/nvim
         STEP
 
       result.errors.should be_empty
@@ -58,11 +49,12 @@ describe Fluxion::Config::StepParser do
 
     it "refuses a download with no trust anchor at all" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: nvim
-          binaryName: nvim
-          url: https://example.test/nvim
-          installPath: /usr/local/bin/nvim
+        - name: nvim
+          kind: binary-downloads
+          spec:
+            binaryName: nvim
+            url: https://example.test/nvim
+            installPath: /usr/local/bin/nvim
         STEP
 
       message = result.error_messages.find!(&.includes?("must declare a literal SHA-256"))
@@ -71,12 +63,13 @@ describe Fluxion::Config::StepParser do
 
     it "refuses a checksum URL standing in for a checksum" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: nvim
-          binaryName: nvim
-          url: https://example.test/nvim
-          checksumUrl: https://example.test/checksums.txt
-          installPath: /usr/local/bin/nvim
+        - name: nvim
+          kind: binary-downloads
+          spec:
+            binaryName: nvim
+            url: https://example.test/nvim
+            checksumUrl: https://example.test/checksums.txt
+            installPath: /usr/local/bin/nvim
         STEP
 
       result.error_messages.any?(&.includes?("must declare a literal SHA-256")).should be_true
@@ -84,12 +77,13 @@ describe Fluxion::Config::StepParser do
 
     it "refuses a signature without a signer" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: nvim
-          binaryName: nvim
-          url: https://example.test/nvim
-          signatureUrl: https://example.test/nvim.asc
-          installPath: /usr/local/bin/nvim
+        - name: nvim
+          kind: binary-downloads
+          spec:
+            binaryName: nvim
+            url: https://example.test/nvim
+            signatureUrl: https://example.test/nvim.asc
+            installPath: /usr/local/bin/nvim
         STEP
 
       result.error_messages.any?(&.includes?("must be configured together")).should be_true
@@ -97,14 +91,15 @@ describe Fluxion::Config::StepParser do
 
     it "rejects a plain-HTTP artifact URL" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: nvim
-          binaryName: nvim
-          url: http://example.test/nvim
-          checksum:
-            algorithm: sha256
-            value: #{SHA}
-          installPath: /usr/local/bin/nvim
+        - name: nvim
+          kind: binary-downloads
+          spec:
+            binaryName: nvim
+            url: http://example.test/nvim
+            checksum:
+              algorithm: sha256
+              value: #{SHA}
+            installPath: /usr/local/bin/nvim
         STEP
 
       result.error_messages.any?(&.includes?("must use https")).should be_true
@@ -112,14 +107,15 @@ describe Fluxion::Config::StepParser do
 
     it "rejects credentials embedded in the URL" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: nvim
-          binaryName: nvim
-          url: https://user:pw@example.test/nvim
-          checksum:
-            algorithm: sha256
-            value: #{SHA}
-          installPath: /usr/local/bin/nvim
+        - name: nvim
+          kind: binary-downloads
+          spec:
+            binaryName: nvim
+            url: https://user:pw@example.test/nvim
+            checksum:
+              algorithm: sha256
+              value: #{SHA}
+            installPath: /usr/local/bin/nvim
         STEP
 
       result.error_messages.any?(&.includes?("must not include user-info")).should be_true
@@ -127,14 +123,15 @@ describe Fluxion::Config::StepParser do
 
     it "requires an archive member path for archive URLs" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: rg
-          binaryName: rg
-          url: https://example.test/ripgrep.tar.gz
-          checksum:
-            algorithm: sha256
-            value: #{SHA}
-          installPath: /usr/local/bin/rg
+        - name: rg
+          kind: binary-downloads
+          spec:
+            binaryName: rg
+            url: https://example.test/ripgrep.tar.gz
+            checksum:
+              algorithm: sha256
+              value: #{SHA}
+            installPath: /usr/local/bin/rg
         STEP
 
       message = result.error_messages.find!(&.includes?("archivePath"))
@@ -143,16 +140,17 @@ describe Fluxion::Config::StepParser do
 
     it "refuses delegation when stripComponents would change the selection" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: rg
-          binaryName: rg
-          url: https://example.test/ripgrep.zip
-          archivePath: ripgrep/rg
-          stripComponents: 1
-          checksum:
-            algorithm: sha256
-            value: #{SHA}
-          installPath: /usr/local/bin/rg
+        - name: rg
+          kind: binary-downloads
+          spec:
+            binaryName: rg
+            url: https://example.test/ripgrep.zip
+            archivePath: ripgrep/rg
+            stripComponents: 1
+            checksum:
+              algorithm: sha256
+              value: #{SHA}
+            installPath: /usr/local/bin/rg
         STEP
 
       result.error_messages.any?(&.includes?("no stripComponents equivalent")).should be_true
@@ -160,15 +158,16 @@ describe Fluxion::Config::StepParser do
 
     it "rejects an install path the symlink would shadow" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: nvim
-          binaryName: nvim
-          url: https://example.test/nvim
-          checksum:
-            algorithm: sha256
-            value: #{SHA}
-          installPath: /usr/local/bin/nvim
-          symlinkPath: /usr/local/bin/nvim
+        - name: nvim
+          kind: binary-downloads
+          spec:
+            binaryName: nvim
+            url: https://example.test/nvim
+            checksum:
+              algorithm: sha256
+              value: #{SHA}
+            installPath: /usr/local/bin/nvim
+            symlinkPath: /usr/local/bin/nvim
         STEP
 
       result.error_messages.any?(&.includes?("must differ from install path")).should be_true
@@ -176,14 +175,15 @@ describe Fluxion::Config::StepParser do
 
     it "requires an absolute install path" do
       result = parse_step(<<-STEP)
-        - type: compiled-binary
-          name: nvim
-          binaryName: nvim
-          url: https://example.test/nvim
-          checksum:
-            algorithm: sha256
-            value: #{SHA}
-          installPath: bin/nvim
+        - name: nvim
+          kind: binary-downloads
+          spec:
+            binaryName: nvim
+            url: https://example.test/nvim
+            checksum:
+              algorithm: sha256
+              value: #{SHA}
+            installPath: bin/nvim
         STEP
 
       result.error_messages.any?(&.includes?("must be absolute")).should be_true
@@ -193,10 +193,11 @@ describe Fluxion::Config::StepParser do
   describe "repository kinds" do
     it "requires a key URL and its checksum together" do
       result = parse_step(<<-STEP)
-        - type: rpm-repository
-          name: docker
-          baseUrl: https://download.docker.com/linux/fedora/stable
-          gpgKeyUrl: https://download.docker.com/linux/fedora/gpg
+        - name: docker
+          kind: rpm-repository
+          spec:
+            baseUrl: https://download.docker.com/linux/fedora/stable
+            gpgKeyUrl: https://download.docker.com/linux/fedora/gpg
         STEP
 
       message = result.error_messages.find!(&.includes?("configured together"))
@@ -205,11 +206,12 @@ describe Fluxion::Config::StepParser do
 
     it "refuses an enabled repository that disables gpgCheck" do
       result = parse_step(<<-STEP)
-        - type: rpm-repository
-          name: docker
-          baseUrl: https://download.docker.com/linux/fedora/stable
-          enabled: true
-          gpgCheck: false
+        - name: docker
+          kind: rpm-repository
+          spec:
+            baseUrl: https://download.docker.com/linux/fedora/stable
+            enabled: true
+            gpgCheck: false
         STEP
 
       result.error_messages.any?(&.includes?("must enforce gpgCheck")).should be_true
@@ -217,37 +219,40 @@ describe Fluxion::Config::StepParser do
 
     it "confines the repo file to the manager's directory" do
       result = parse_step(<<-STEP)
-        - type: rpm-repository
-          name: docker
-          baseUrl: https://download.docker.com/linux/fedora/stable
-          repoFile: /tmp/docker.repo
-          gpgCheck: false
-          enabled: false
+        - name: docker
+          kind: rpm-repository
+          spec:
+            baseUrl: https://download.docker.com/linux/fedora/stable
+            repoFile: /tmp/docker.repo
+            gpgCheck: false
+            enabled: false
         STEP
 
       result.error_messages.any?(&.includes?("/etc/yum.repos.d")).should be_true
     end
 
     it "rejects an APT source option that bypasses verification" do
-      result = parse_step(<<-STEP, os: "debian")
-        - type: apt-repository
-          name: docker
-          source: "deb [trusted=yes] https://download.docker.com/linux/debian bookworm stable"
+      result = parse_step(<<-STEP, distribution: "debian")
+        - name: docker
+          kind: apt-repository
+          spec:
+            source: "deb [trusted=yes] https://download.docker.com/linux/debian bookworm stable"
         STEP
 
       result.error_messages.any?(&.includes?("option is not allowed: trusted")).should be_true
     end
 
     it "rejects an APT source whose signed-by disagrees with the keyring" do
-      result = parse_step(<<-STEP, os: "debian")
-        - type: apt-repository
-          name: docker
-          source: "deb [arch=amd64 signed-by=/etc/apt/keyrings/other.gpg] https://download.docker.com/linux/debian bookworm stable"
-          keyring: /etc/apt/keyrings/docker.gpg
-          signingKeyUrl: https://download.docker.com/linux/debian/gpg
-          checksum:
-            algorithm: sha256
-            value: #{SHA}
+      result = parse_step(<<-STEP, distribution: "debian")
+        - name: docker
+          kind: apt-repository
+          spec:
+            source: "deb [arch=amd64 signed-by=/etc/apt/keyrings/other.gpg] https://download.docker.com/linux/debian bookworm stable"
+            keyring: /etc/apt/keyrings/docker.gpg
+            signingKeyUrl: https://download.docker.com/linux/debian/gpg
+            checksum:
+              algorithm: sha256
+              value: #{SHA}
         STEP
 
       result.error_messages.any?(&.includes?("signed-by option must match")).should be_true
@@ -255,32 +260,35 @@ describe Fluxion::Config::StepParser do
 
     it "requires a checksum for a Flatpak descriptor" do
       result = parse_step(<<-STEP)
-        - type: flatpak-remote
-          name: flathub
-          remote: flathub
-          url: https://flathub.org/repo/flathub.flatpakrepo
+        - name: flathub
+          kind: flatpak-remote
+          spec:
+            remote: flathub
+            url: https://flathub.org/repo/flathub.flatpakrepo
         STEP
 
       result.error_messages.any?(&.includes?("required for the Flatpak repository descriptor")).should be_true
     end
 
     it "requires a signed and trusted SigLevel on an enabled pacman repository" do
-      result = parse_step(<<-STEP, os: "arch")
-        - type: pacman-repository
-          name: chaotic-aur
-          server: https://cdn-mirror.chaotic.cx/chaotic-aur/x86_64
-          sigLevel: Optional TrustAll
+      result = parse_step(<<-STEP, distribution: "arch")
+        - name: chaotic-aur
+          kind: pacman-repository
+          spec:
+            server: https://cdn-mirror.chaotic.cx/chaotic-aur/x86_64
+            sigLevel: Optional TrustAll
         STEP
 
       result.error_messages.any?(&.includes?("signed, trusted packages and databases")).should be_true
     end
 
     it "accepts Required TrustedOnly" do
-      result = parse_step(<<-STEP, os: "arch")
-        - type: pacman-repository
-          name: chaotic-aur
-          server: https://cdn-mirror.chaotic.cx/chaotic-aur/x86_64
-          sigLevel: Required TrustedOnly
+      result = parse_step(<<-STEP, distribution: "arch")
+        - name: chaotic-aur
+          kind: pacman-repository
+          spec:
+            server: https://cdn-mirror.chaotic.cx/chaotic-aur/x86_64
+            sigLevel: Required TrustedOnly
         STEP
 
       result.errors.should be_empty
@@ -288,11 +296,12 @@ describe Fluxion::Config::StepParser do
 
     it "tracks package and database trust independently" do
       # Databases are left at the default, so this must still be refused.
-      result = parse_step(<<-STEP, os: "arch")
-        - type: pacman-repository
-          name: chaotic-aur
-          server: https://cdn-mirror.chaotic.cx/chaotic-aur/x86_64
-          sigLevel: PackageRequired PackageTrustedOnly
+      result = parse_step(<<-STEP, distribution: "arch")
+        - name: chaotic-aur
+          kind: pacman-repository
+          spec:
+            server: https://cdn-mirror.chaotic.cx/chaotic-aur/x86_64
+            sigLevel: PackageRequired PackageTrustedOnly
         STEP
 
       result.error_messages.any?(&.includes?("signed, trusted packages and databases")).should be_true
@@ -300,11 +309,12 @@ describe Fluxion::Config::StepParser do
 
     it "requires a full fingerprint for every imported key" do
       result = parse_step(<<-STEP)
-        - type: gpg-key
-          name: keys
-          keys:
-            - url: https://packages.microsoft.com/keys/microsoft.asc
-              fingerprint: BE1229CF
+        - name: keys
+          kind: gpg-key
+          spec:
+            keys:
+              - url: https://packages.microsoft.com/keys/microsoft.asc
+                fingerprint: BE1229CF
         STEP
 
       result.error_messages.any?(&.includes?("fingerprint")).should be_true
@@ -313,15 +323,16 @@ describe Fluxion::Config::StepParser do
 
   describe "shell kinds" do
     it "requires exactly one of script or url" do
-      result = parse_step("- type: shell-script\n  name: setup\n")
+      result = parse_step("- name: setup\n  kind: shell-scripts\n  spec: {}\n")
       result.error_messages.any?(&.includes?("exactly one of script or url")).should be_true
     end
 
     it "requires a digest for a remote script" do
       result = parse_step(<<-STEP)
-        - type: shell-script
-          name: setup
-          url: https://example.org/install.sh
+        - name: setup
+          kind: shell-scripts
+          spec:
+            url: https://example.org/install.sh
         STEP
 
       message = result.error_messages.find!(&.includes?("required for a remote script"))
@@ -330,11 +341,12 @@ describe Fluxion::Config::StepParser do
 
     it "refuses a digest on a local script" do
       ProfileHelpers.with_profile("echo hi\n", "setup.sh") do |script|
-        result = ProfileHelpers.parse(ProfileHelpers.jobs_profile(<<-STEP))
-          - type: shell-script
-            name: setup
-            script: #{script}
-            sha256: #{SHA}
+        result = parse_step(<<-STEP)
+          - name: setup
+            kind: shell-scripts
+            spec:
+              script: #{script}
+              sha256: #{SHA}
           STEP
 
         result.error_messages.any?(&.includes?("only valid for a remote URL")).should be_true
@@ -343,11 +355,12 @@ describe Fluxion::Config::StepParser do
 
     it "keeps a shell string and a direct argv distinct" do
       result = parse_step(<<-STEP)
-        - type: shell-command
-          name: git-defaults
-          commands:
-            - "git config --global init.defaultBranch main"
-            - argv: [git, config, --global, pull.rebase, "false"]
+        - name: git-defaults
+          kind: commands
+          spec:
+            commands:
+              - "git config --global init.defaultBranch main"
+              - argv: [git, config, --global, pull.rebase, "false"]
         STEP
 
       result.errors.should be_empty
@@ -360,11 +373,12 @@ describe Fluxion::Config::StepParser do
 
     it "treats an empty allowedExitCodes list as the default" do
       result = parse_step(<<-STEP)
-        - type: shell-command
-          name: c
-          commands:
-            - run: "true"
-              allowedExitCodes: []
+        - name: c
+          kind: commands
+          spec:
+            commands:
+              - run: "true"
+                allowedExitCodes: []
         STEP
 
       result.step("c").as(Fluxion::ShellCommandStep).commands.first.allowed_exit_codes.should eq([0])
@@ -372,13 +386,14 @@ describe Fluxion::Config::StepParser do
 
     it "infers sensitivity from the environment variable name" do
       result = parse_step(<<-STEP)
-        - type: shell-command
-          name: c
-          commands:
-            - run: "true"
-              env:
-                GITHUB_TOKEN: abc
-                EDITOR: vim
+        - name: c
+          kind: commands
+          spec:
+            commands:
+              - run: "true"
+                env:
+                  GITHUB_TOKEN: abc
+                  EDITOR: vim
         STEP
 
       env = result.step("c").as(Fluxion::ShellCommandStep).commands.first.environment
@@ -386,8 +401,40 @@ describe Fluxion::Config::StepParser do
       env.find! { |v| v.name == "EDITOR" }.sensitive?.should be_false
     end
 
+    it "reads a shell for shell-reload and defaults to zsh" do
+      result = parse_step(<<-STEP)
+        - name: reload
+          kind: shell-reload
+          spec:
+            shell: bash
+        - name: reload-default
+          kind: shell-reload
+        STEP
+
+      result.errors.should be_empty
+      result.step("reload").as(Fluxion::ShellReloadStep).shell.should eq(Fluxion::ShellKind::Bash)
+      result.step("reload-default").as(Fluxion::ShellReloadStep).shell.should eq(Fluxion::ShellKind::Zsh)
+    end
+
+    it "requires an absolute path for the login shell" do
+      result = parse_step("- name: login\n  kind: default-shell\n  spec:\n    shell: zsh\n")
+      result.error_messages.any?(&.includes?("must be absolute")).should be_true
+    end
+
+    it "gives an assert step a default message naming it" do
+      result = parse_step(<<-STEP)
+        - name: has-git
+          kind: assert
+          spec:
+            command: command -v git
+        STEP
+
+      result.errors.should be_empty
+      result.step("has-git").as(Fluxion::AssertStep).message.should contain("has-git")
+    end
+
     it "warns about a manual step with no probe" do
-      result = parse_step("- type: manual\n  name: login\n  message: 'Run gh auth login'\n")
+      result = parse_step("- name: login\n  kind: manual\n  spec:\n    message: 'Run gh auth login'\n")
       result.errors.should be_empty
       result.warnings.any?(&.message.includes?("can never be marked complete")).should be_true
     end
@@ -395,17 +442,18 @@ describe Fluxion::Config::StepParser do
 
   describe "system kinds" do
     it "rejects group-removal syntax" do
-      result = parse_step("- type: user-groups\n  name: g\n  groups: ['-docker']\n")
+      result = parse_step("- name: g\n  kind: user-groups\n  spec:\n    groups: ['-docker']\n")
       message = result.error_messages.find!(&.includes?("append-only"))
       message.should contain("gpasswd -d")
     end
 
     it "rejects a bare git config key" do
       result = parse_step(<<-STEP)
-        - type: git-config
-          name: identity
-          entries:
-            email: me@example.test
+        - name: identity
+          kind: git-config
+          spec:
+            entries:
+              email: me@example.test
         STEP
 
       result.error_messages.any?(&.includes?("section.key")).should be_true
@@ -413,12 +461,13 @@ describe Fluxion::Config::StepParser do
 
     it "requires an immutable commit for a cloned repo" do
       result = parse_step(<<-STEP)
-        - type: git-repo
-          name: plugins
-          repos:
-            - url: https://github.com/tmux-plugins/tpm.git
-              dest: ~/.tmux/plugins/tpm
-              ref: main
+        - name: plugins
+          kind: git-repo
+          spec:
+            repos:
+              - url: https://github.com/tmux-plugins/tpm.git
+                dest: ~/.tmux/plugins/tpm
+                ref: main
         STEP
 
       message = result.error_messages.find!(&.includes?("40-hex commit"))
@@ -427,12 +476,13 @@ describe Fluxion::Config::StepParser do
 
     it "rejects a repo URL carrying query data" do
       result = parse_step(<<-STEP)
-        - type: git-repo
-          name: plugins
-          repos:
-            - url: https://github.com/a/b.git?token=1
-              dest: ~/x
-              ref: #{"a" * 40}
+        - name: plugins
+          kind: git-repo
+          spec:
+            repos:
+              - url: https://github.com/a/b.git?token=1
+                dest: ~/x
+                ref: #{"a" * 40}
         STEP
 
       result.error_messages.any?(&.includes?("query or fragment")).should be_true
@@ -440,12 +490,13 @@ describe Fluxion::Config::StepParser do
 
     it "refuses a unit that is both masked and enabled" do
       result = parse_step(<<-STEP)
-        - type: systemd-unit
-          name: services
-          units:
-            - name: sshd
-              enabled: true
-              mask: true
+        - name: services
+          kind: systemd-unit
+          spec:
+            units:
+              - name: sshd
+                enabled: true
+                mask: true
         STEP
 
       result.error_messages.any?(&.includes?("cannot both mask and enable")).should be_true
@@ -453,10 +504,11 @@ describe Fluxion::Config::StepParser do
 
     it "appends .service to a bare unit name" do
       result = parse_step(<<-STEP)
-        - type: systemd-unit
-          name: services
-          units:
-            - docker
+        - name: services
+          kind: systemd-unit
+          spec:
+            units:
+              - docker
         STEP
 
       result.step("services").as(Fluxion::SystemdUnitStep).units.first.qualified_name
@@ -464,19 +516,20 @@ describe Fluxion::Config::StepParser do
     end
 
     it "refuses a system-setting step that sets nothing" do
-      result = parse_step("- type: system-setting\n  name: s\n")
+      result = parse_step("- name: s\n  kind: system-setting\n  spec: {}\n")
       result.error_messages.any?(&.includes?("declares no system setting")).should be_true
     end
 
     it "orders system-setting items predictably" do
       result = parse_step(<<-STEP)
-        - type: system-setting
-          name: s
-          hostname: workstation
-          ntp: true
-          locale:
-            LC_ALL: C
-            LANG: en_US.UTF-8
+        - name: s
+          kind: system-setting
+          spec:
+            hostname: workstation
+            ntp: true
+            locale:
+              LC_ALL: C
+              LANG: en_US.UTF-8
         STEP
 
       result.step("s").as(Fluxion::SystemSettingStep).item_keys
@@ -485,11 +538,12 @@ describe Fluxion::Config::StepParser do
 
     it "refuses distUpgrade together with refreshOnly" do
       result = parse_step(<<-STEP)
-        - type: system-update
-          name: u
-          packageManager: dnf
-          distUpgrade: true
-          refreshOnly: true
+        - name: u
+          kind: system-update
+          spec:
+            packageManager: dnf
+            distUpgrade: true
+            refreshOnly: true
         STEP
 
       result.error_messages.any?(&.includes?("cannot be both distUpgrade and refreshOnly")).should be_true
@@ -497,10 +551,11 @@ describe Fluxion::Config::StepParser do
 
     it "parses an ISO-8601 timeout" do
       result = parse_step(<<-STEP)
-        - type: system-update
-          name: u
-          packageManager: dnf
-          timeout: PT2H
+        - name: u
+          kind: system-update
+          spec:
+            packageManager: dnf
+            timeout: PT2H
         STEP
 
       result.step("u").as(Fluxion::SystemUpdateStep).timeout.should eq(2.hours)
@@ -508,10 +563,11 @@ describe Fluxion::Config::StepParser do
 
     it "parses a compact timeout" do
       result = parse_step(<<-STEP)
-        - type: system-update
-          name: u
-          packageManager: dnf
-          timeout: 30m
+        - name: u
+          kind: system-update
+          spec:
+            packageManager: dnf
+            timeout: 30m
         STEP
 
       result.step("u").as(Fluxion::SystemUpdateStep).timeout.should eq(30.minutes)
@@ -521,11 +577,12 @@ describe Fluxion::Config::StepParser do
   describe "pinned installers" do
     it "requires an exact Nerd Fonts release" do
       result = parse_step(<<-STEP)
-        - type: nerd-fonts
-          name: fonts
-          config:
-            release: latest
-            families: [JetBrainsMono]
+        - name: fonts
+          kind: nerd-fonts
+          spec:
+            config:
+              release: latest
+              families: [JetBrainsMono]
         STEP
 
       message = result.error_messages.find!(&.includes?("exact release"))
@@ -534,21 +591,42 @@ describe Fluxion::Config::StepParser do
 
     it "requires a full commit for oh-my-zsh" do
       result = parse_step(<<-STEP)
-        - type: oh-my-zsh
-          name: omz
-          revision: master
-          sha256: #{SHA}
+        - name: omz
+          kind: oh-my-zsh
+          spec:
+            revision: master
+            sha256: #{SHA}
         STEP
 
       result.error_messages.any?(&.includes?("40-character commit")).should be_true
     end
 
+    it "requires a pinned digest for a toolchain installer" do
+      result = parse_step(<<-STEP)
+        - name: rust
+          kind: toolchain
+          spec:
+            kind: rustup
+            installScriptUrl: https://sh.rustup.rs
+        STEP
+
+      message = result.error_messages.find!(&.includes?("sha256"))
+      message.should contain("fail-closed")
+    end
+
+    it "rejects an unknown toolchain and lists the accepted ones" do
+      result = parse_step("- name: t\n  kind: toolchain\n  spec:\n    kind: nvm\n")
+      message = result.error_messages.find!(&.includes?("toolchain kind is required"))
+      message.should contain("RUSTUP")
+    end
+
     it "requires a lock file when locked is set" do
       result = parse_step(<<-STEP)
-        - type: binstaller-profile
-          name: binaries
-          config: ~/.config/binstaller/config.yaml
-          locked: true
+        - name: binaries
+          kind: binstaller-profile
+          spec:
+            config: ~/.config/binstaller/config.yaml
+            locked: true
         STEP
 
       result.error_messages.any?(&.includes?("locked is true")).should be_true
@@ -556,10 +634,11 @@ describe Fluxion::Config::StepParser do
 
     it "rejects an inline binstaller profile" do
       result = parse_step(<<-STEP)
-        - type: binstaller-profile
-          name: binaries
-          config:
-            apiVersion: binstaller.io/v1alpha1
+        - name: binaries
+          kind: binstaller-profile
+          spec:
+            config:
+              apiVersion: binstaller.io/v1alpha1
         STEP
 
       message = result.error_messages.find!(&.includes?("not an inline object"))

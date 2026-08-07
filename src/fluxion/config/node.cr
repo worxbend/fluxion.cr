@@ -4,10 +4,10 @@ module Fluxion::Config
   # A YAML value together with the dotted path that reached it.
   #
   # Every diagnostic Fluxion prints names the exact config location that caused
-  # it (`jobs[1].steps[0].packageManager`), which is only possible if the path
-  # travels with the value. Walking the document by hand rather than
-  # deserializing into DTOs is what buys that, plus the freedom to accept the
-  # several shapes the schema allows for one field.
+  # it (`spec.phases[1].steps[0].spec.packageManager`), which is only possible
+  # if the path travels with the value. Walking the document by hand rather
+  # than deserializing into DTOs is what buys that, plus the freedom to accept
+  # the several shapes the schema allows for one field.
   #
   # A missing key produces a node rather than nil, so a chain like
   # `node["spec"]["target"]["os"]` never needs intermediate nil checks and
@@ -57,8 +57,12 @@ module Fluxion::Config
       return Node.new(nil, child_path(keys.first)) unless mapping
 
       keys.each do |key|
-        if mapping.has_key?(YAML::Any.new(key))
-          return Node.new(mapping[YAML::Any.new(key)], child_path(key))
+        # One lookup rather than `has_key?` followed by `[]`: both wrap the key
+        # in a `YAML::Any` and hash it, and this runs for every field of every
+        # step. A key whose value is YAML `null` still returns a node here,
+        # which is the distinction `missing?` and `null?` exist to preserve.
+        if value = mapping[YAML::Any.new(key)]?
+          return Node.new(value, child_path(key))
         end
       end
       Node.new(nil, child_path(keys.first))

@@ -142,21 +142,35 @@ module Fluxion::Executor
       when status = result.receive
         status.exit_code
       when timeout(timeout)
-        terminate(process)
-        select
-        when result.receive
-        when timeout(TERMINATION_GRACE)
-        end
+        terminate(process, result)
         nil
       end
     end
 
     # Signals the whole process group: a package manager that spawned children
     # would otherwise leave them running after Fluxion gave up on it.
-    private def terminate(process : Process) : Nil
+    #
+    # The grace period is spent waiting on the exit channel rather than in a
+    # `sleep`, for two reasons. A process that honours TERM is reaped the
+    # moment it does, instead of being killed several seconds later for no
+    # reason; and the caller previously sat out the grace period twice — once
+    # sleeping here, once waiting for the exit afterwards — so giving up on a
+    # command took twice as long as `TERMINATION_GRACE` claims.
+    private def terminate(process : Process, exited : Channel(Process::Status)) : Nil
       process.signal(Signal::TERM) rescue nil
-      sleep TERMINATION_GRACE
+
+      select
+      when exited.receive
+        return
+      when timeout(TERMINATION_GRACE)
+      end
+
       process.signal(Signal::KILL) rescue nil
+
+      select
+      when exited.receive
+      when timeout(TERMINATION_GRACE)
+      end
     rescue
       # The process already exited between the timeout and the signal.
     end

@@ -44,12 +44,13 @@ messages. One self-contained change each.
 
 ## Adding a step kind
 
-Four places, in order — `docs/development.md` has the detail:
+Five places, in order — `docs/development.md` has the detail:
 
 1. `core/steps/` — the validated data
 2. `config/step_parser/` — YAML in, that type out
-3. `executor/` — the commands it produces
-4. `executor/probe.cr` — how to tell it is already there
+3. `config/plan_kinds.cr` — the kind id and its category
+4. `executor/` — the commands it produces
+5. `executor/probe.cr` — how to tell it is already there
 
 Then document it in `docs/config-schema.md`.
 

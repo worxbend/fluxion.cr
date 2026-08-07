@@ -18,7 +18,7 @@ require "./core/steps/repositories"
 require "./core/steps/binaries"
 require "./core/steps/shell"
 require "./core/steps/system"
-require "./core/job"
+require "./core/phase"
 
 # The domain model: validated data describing what a profile asks for, with no
 # knowledge of processes, terminals, YAML, or the network.

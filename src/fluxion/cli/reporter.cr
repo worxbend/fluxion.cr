@@ -39,7 +39,7 @@ module Fluxion::CLI
     private def phase_started(event : ExecutionEvent) : Nil
       close_item
       @output.puts
-      @output.puts "#{Style.bold_blue("[JOB]")} #{Style.bold(event.step_name)}"
+      @output.puts "#{Style.bold_blue("[PHASE]")} #{Style.bold(event.step_name)}"
     end
 
     private def phase_completed(event : ExecutionEvent) : Nil
@@ -49,7 +49,7 @@ module Fluxion::CLI
 
     private def phase_failed(event : ExecutionEvent) : Nil
       close_item
-      @output.puts "#{Style.bold_red("[FAIL]")} job #{event.step_name}"
+      @output.puts "#{Style.bold_red("[FAIL]")} phase #{event.step_name}"
     end
 
     private def phase_blocked(event : ExecutionEvent) : Nil
@@ -113,7 +113,7 @@ module Fluxion::CLI
       close_item
       @output.puts
       @output.puts Style.bold_yellow("#{Symbols.warning} Stopped at your request; state was saved")
-      @output.puts "  #{Style.dim("Next job: #{event.item}")}" unless event.item.empty?
+      @output.puts "  #{Style.dim("Next phase: #{event.item}")}" unless event.item.empty?
     end
 
     # Prints the closing half of an open item line.
@@ -152,11 +152,11 @@ module Fluxion::CLI
 
       @output.puts "#{Style.bold("Summary:")} #{parts.join(Style.dim(" · "))}"
 
-      unless @summary.failed_jobs.empty?
-        @output.puts Style.red("Failed jobs: #{@summary.failed_jobs.join(", ")}")
+      unless @summary.failed_phases.empty?
+        @output.puts Style.red("Failed phases: #{@summary.failed_phases.join(", ")}")
       end
-      unless @summary.blocked_jobs.empty?
-        @output.puts Style.yellow("Blocked jobs: #{@summary.blocked_jobs.join(", ")}")
+      unless @summary.blocked_phases.empty?
+        @output.puts Style.yellow("Blocked phases: #{@summary.blocked_phases.join(", ")}")
       end
     end
   end

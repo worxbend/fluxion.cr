@@ -14,6 +14,11 @@ module Fluxion::Config
     # through `env`, or use structured `command` plus `args`.
     private SHELL_EXPRESSION_SUFFIXES = %w[.unless .probeCommand]
 
+    # The one list whose entries are steps. Matching on the path is what lets
+    # a diagnostic name the step it came from, and what scopes the
+    # shell-expression rules to the kinds that have them.
+    private STEPS_PATH = /\Aspec\.phases\[\d+\]\.steps\z/
+
     getter diagnostics : DiagnosticCollector
 
     def initialize(@host : HostFacts, @diagnostics : DiagnosticCollector = DiagnosticCollector.new)
@@ -90,7 +95,7 @@ module Fluxion::Config
       substituted
     end
 
-    private def walk(value : YAML::Any, path : String, plan : PlanContext?) : YAML::Any
+    private def walk(value : YAML::Any, path : String, step : StepContext?) : YAML::Any
       case raw = value.raw
       when Hash(YAML::Any, YAML::Any)
         # Keys are never interpolated: a variable naming a schema field would
@@ -98,29 +103,29 @@ module Fluxion::Config
         mapped = {} of YAML::Any => YAML::Any
         raw.each do |key, child|
           name = key.as_s? || key.to_s
-          mapped[key] = walk(child, child_path(path, name), plan)
+          mapped[key] = walk(child, child_path(path, name), step)
         end
         YAML::Any.new(mapped)
       when Array(YAML::Any)
         entries = raw.map_with_index do |child, index|
-          child_plan = path == "spec.plan" ? plan_context(child) : plan
-          walk(child, "#{path}[#{index}]", child_plan)
+          child_step = path.matches?(STEPS_PATH) ? step_context(child) : step
+          walk(child, "#{path}[#{index}]", child_step)
         end
         YAML::Any.new(entries)
       when String
-        YAML::Any.new(substitute(raw, path, plan))
+        YAML::Any.new(substitute(raw, path, step))
       else
         value
       end
     end
 
-    private def substitute(text : String, path : String, plan : PlanContext?) : String
+    private def substitute(text : String, path : String, step : StepContext?) : String
       return text unless text.includes?("${")
 
-      if shell_expression?(path, plan)
+      if shell_expression?(path, step)
         text.scan(VARIABLE) do |match|
           @diagnostics.error(
-            describe(path, plan),
+            describe(path, step),
             "cannot interpolate #{match[0]} inside a shell expression",
             "pass data through env, or use structured command plus args",
           )
@@ -130,12 +135,12 @@ module Fluxion::Config
 
       replace(text) do |token, name|
         if name.empty?
-          @diagnostics.error(describe(path, plan), "references unresolved variable #{token}")
+          @diagnostics.error(describe(path, step), "references unresolved variable #{token}")
           token
         elsif value = @variables[name]?
           value
         else
-          @diagnostics.error(describe(path, plan), "references unresolved variable ${#{name}}")
+          @diagnostics.error(describe(path, step), "references unresolved variable ${#{name}}")
           token
         end
       end
@@ -157,11 +162,11 @@ module Fluxion::Config
       end
     end
 
-    private def shell_expression?(path : String, plan : PlanContext?) : Bool
-      return false unless plan && path.starts_with?("spec.plan[")
+    private def shell_expression?(path : String, step : StepContext?) : Bool
+      return false unless step
       return true if SHELL_EXPRESSION_SUFFIXES.any? { |suffix| path.ends_with?(suffix) }
 
-      case plan.kind
+      case step.kind
       when "assert"
         path.ends_with?(".spec.command")
       when "commands"
@@ -171,18 +176,18 @@ module Fluxion::Config
       end
     end
 
-    private def describe(path : String, plan : PlanContext?) : String
-      return path unless plan
-      "#{path} in plan entry '#{plan.name}'"
+    private def describe(path : String, step : StepContext?) : String
+      return path unless step
+      "#{path} in step '#{step.name}'"
     end
 
-    private def plan_context(entry : YAML::Any) : PlanContext?
+    private def step_context(entry : YAML::Any) : StepContext?
       mapping = entry.as_h?
       return unless mapping
       name = mapping[YAML::Any.new("name")]?.try(&.as_s?)
       return unless name
       kind = mapping[YAML::Any.new("kind")]?.try(&.as_s?).try(&.strip.downcase)
-      PlanContext.new(name, kind || "")
+      StepContext.new(name, kind || "")
     end
 
     private def child_path(parent : String, key : String) : String
@@ -190,8 +195,8 @@ module Fluxion::Config
       key.matches?(/\A[A-Za-z_][A-Za-z0-9_]*\z/) ? "#{parent}.#{key}" : "#{parent}.['#{key}']"
     end
 
-    # Which plan entry a node belongs to, so errors can name it and so the
-    # shell-expression rules can depend on the entry's kind.
-    private record PlanContext, name : String, kind : String
+    # Which step a node belongs to, so errors can name it and so the
+    # shell-expression rules can depend on the step's kind.
+    private record StepContext, name : String, kind : String
   end
 end

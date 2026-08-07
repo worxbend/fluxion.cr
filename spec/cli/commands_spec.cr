@@ -38,23 +38,29 @@ private def invoke_all(arguments : Array(String), profile : String? = nil) : Run
 end
 
 private VALID_PROFILE = <<-YAML
-  profile: workstation
-  os:
-    type: fedora
-    release: "44"
-  jobs:
-    - name: base
-      steps:
-        - type: packages
-          name: core-tools
-          packageManager: dnf
-          packages: [git, curl]
-    - name: desktop
-      dependsOn: [base]
-      steps:
-        - type: flatpak
-          name: apps
-          appIds: [com.spotify.Client]
+  apiVersion: initkit.io/v1alpha1
+  kind: WorkstationProfile
+  metadata:
+    name: workstation
+  spec:
+    target:
+      os:
+        distribution: fedora
+        release: "44"
+    phases:
+      - name: base
+        steps:
+          - name: core-tools
+            kind: dnf-packages
+            spec:
+              packages: [git, curl]
+      - name: desktop
+        dependsOn: [base]
+        steps:
+          - name: apps
+            kind: flatpak-packages
+            spec:
+              apps: [com.spotify.Client]
   YAML
 
 describe Fluxion::CLI::App do
@@ -90,46 +96,58 @@ describe Fluxion::CLI::ValidateCommand do
     result.success?.should be_true
     result.stdout.should contain("Config is valid")
     result.stdout.should contain("workstation")
-    result.stdout.should contain("2 jobs")
+    result.stdout.should contain("2 phases")
     result.stdout.should contain("2 steps")
   end
 
   it "reports every problem at once with its config path" do
     result = invoke("validate", profile: <<-YAML)
-      profile: broken
-      os:
-        type: debian
-      jobs:
-        - name: base
-          dependsOn: [missing]
-          steps:
-            - type: packages
-              name: tools
-              packageManager: dnf
-              packages: ["bad name"]
+      apiVersion: initkit.io/v1alpha1
+      kind: WorkstationProfile
+      metadata:
+        name: broken
+      spec:
+        target:
+          os:
+            distribution: debian
+        phases:
+          - name: base
+            dependsOn: [missing]
+            steps:
+              - name: tools
+                kind: dnf-packages
+                spec:
+                  packages: ["bad name"]
       YAML
 
     result.exit_code.should eq(Fluxion::CLI::ExitCode::ConfigurationError)
     result.stderr.should contain("Config validation failed")
-    result.stdout.should contain("jobs[0].steps[0].packages[0]")
+    result.stdout.should contain("spec.phases[0].steps[0].spec.packages[0]")
     result.stdout.should contain("unsafe shell characters")
-    result.stdout.should contain("unknown job 'missing'")
+    result.stdout.should contain("unknown phase 'missing'")
     result.stdout.should contain("not valid for target debian")
   end
 
-  it "suggests the closest step type for a typo" do
+  it "suggests the closest step kind for a typo" do
     result = invoke("validate", profile: <<-YAML)
-      profile: p
-      os:
-        type: fedora
-      jobs:
-        - name: base
-          steps:
-            - type: package
-              name: tools
+      apiVersion: initkit.io/v1alpha1
+      kind: WorkstationProfile
+      metadata:
+        name: p
+      spec:
+        target:
+          os:
+            distribution: fedora
+        phases:
+          - name: base
+            steps:
+              - name: tools
+                kind: dnf-package
+                spec:
+                  packages: [git]
       YAML
 
-    result.stdout.should contain("Did you mean 'packages'?")
+    result.stdout.should contain("Did you mean 'dnf-packages'?")
   end
 
   it "renders JSON with a stable shape" do
@@ -138,7 +156,7 @@ describe Fluxion::CLI::ValidateCommand do
 
     json = result.json
     json["profileName"].as_s.should eq("workstation")
-    json["jobCount"].as_i.should eq(2)
+    json["phaseCount"].as_i.should eq(2)
     json["stepCount"].as_i.should eq(2)
     json["valid"].as_bool.should be_true
     json["issues"].as_a.should be_empty
@@ -148,16 +166,21 @@ describe Fluxion::CLI::ValidateCommand do
     # A duplicate package is wasteful, not wrong, so it warns rather than
     # failing — but --strict is exactly the flag for treating it as failure.
     warned = <<-YAML
-      profile: p
-      os:
-        type: fedora
-      jobs:
-        - name: base
-          steps:
-            - type: packages
-              name: tools
-              packageManager: dnf
-              packages: [git, git]
+      apiVersion: initkit.io/v1alpha1
+      kind: WorkstationProfile
+      metadata:
+        name: p
+      spec:
+        target:
+          os:
+            distribution: fedora
+        phases:
+          - name: base
+            steps:
+              - name: tools
+                kind: dnf-packages
+                spec:
+                  packages: [git, git]
       YAML
 
     invoke("validate", profile: warned).success?.should be_true
@@ -219,7 +242,7 @@ describe Fluxion::CLI::ListCommand do
 end
 
 describe Fluxion::CLI::PlanCommand do
-  it "orders jobs by their dependencies" do
+  it "orders phases by their dependencies" do
     result = invoke("plan", profile: VALID_PROFILE)
     result.success?.should be_true
     result.stdout.index!("base").should be < result.stdout.index!("desktop")
@@ -238,7 +261,7 @@ describe Fluxion::CLI::PlanCommand do
 
   it "renders a table" do
     result = invoke("plan", "--format", "table", profile: VALID_PROFILE)
-    result.stdout.should contain("JOB")
+    result.stdout.should contain("PHASE")
     result.stdout.should contain("STEP")
     result.stdout.should contain("ITEM")
   end
@@ -249,34 +272,39 @@ describe Fluxion::CLI::PlanCommand do
     result.stdout.should contain("core-tools")
   end
 
-  it "renders JSON with jobs, steps, and items" do
+  it "renders JSON with phases, steps, and items" do
     json = invoke("plan", "--format", "json", profile: VALID_PROFILE).json
-    jobs = json["jobs"].as_a
-    jobs.map(&.["name"].as_s).should eq(%w[base desktop])
-    jobs[1]["dependsOn"].as_a.map(&.as_s).should eq(["base"])
-    jobs[0]["steps"].as_a.first["items"].as_a.map(&.["key"].as_s).should eq(%w[git curl])
+    phases = json["phases"].as_a
+    phases.map(&.["name"].as_s).should eq(%w[base desktop])
+    phases[1]["dependsOn"].as_a.map(&.as_s).should eq(["base"])
+    phases[0]["steps"].as_a.first["items"].as_a.map(&.["key"].as_s).should eq(%w[git curl])
   end
 
-  it "flags a job that requires a logout" do
+  it "flags a phase that requires a logout" do
     result = invoke("plan", profile: <<-YAML)
-      profile: p
-      os:
-        type: fedora
-      jobs:
-        - name: shell
-          restartPolicy:
-            type: prompt-logout
-          steps:
-            - type: packages
-              name: tools
-              packageManager: dnf
-              packages: [zsh]
+      apiVersion: initkit.io/v1alpha1
+      kind: WorkstationProfile
+      metadata:
+        name: p
+      spec:
+        target:
+          os:
+            distribution: fedora
+        phases:
+          - name: shell
+            restartPolicy:
+              type: prompt-logout
+            steps:
+              - name: tools
+                kind: dnf-packages
+                spec:
+                  packages: [zsh]
       YAML
 
     result.stdout.should contain("RESTART REQUIRED")
   end
 
-  it "reports manifest entries the host excluded" do
+  it "reports steps the host excluded" do
     result = invoke("plan", profile: <<-YAML)
       apiVersion: initkit.io/v1alpha1
       kind: WorkstationProfile
@@ -286,13 +314,15 @@ describe Fluxion::CLI::PlanCommand do
         target:
           os:
             distribution: fedora
-        plan:
-          - name: nowhere
-            kind: dnf-packages
-            when:
-              distribution: plan9
-            spec:
-              packages: [git]
+        phases:
+          - name: base
+            steps:
+              - name: nowhere
+                kind: dnf-packages
+                when:
+                  distribution: plan9
+                spec:
+                  packages: [git]
       YAML
 
     result.success?.should be_true
@@ -306,8 +336,8 @@ describe Fluxion::CLI::GraphCommand do
     result = invoke("graph", profile: VALID_PROFILE)
     result.success?.should be_true
     result.stdout.should contain("flowchart TD")
-    result.stdout.should contain(%(j_base["base"]))
-    result.stdout.should contain("j_base --> j_desktop")
+    result.stdout.should contain(%(p_base["base"]))
+    result.stdout.should contain("p_base --> p_desktop")
   end
 
   it "renders Graphviz dot" do
@@ -323,17 +353,26 @@ describe Fluxion::CLI::GraphCommand do
     edge["to"].as_s.should eq("desktop")
   end
 
-  it "sanitizes job names into valid Mermaid identifiers" do
+  it "sanitizes phase names into valid Mermaid identifiers" do
     result = invoke("graph", profile: <<-YAML)
-      profile: p
-      os:
-        type: fedora
-      jobs:
-        - name: base-cli.tools
-          steps: []
+      apiVersion: initkit.io/v1alpha1
+      kind: WorkstationProfile
+      metadata:
+        name: p
+      spec:
+        target:
+          os:
+            distribution: fedora
+        phases:
+          - name: base-cli.tools
+            steps:
+              - name: tools
+                kind: dnf-packages
+                spec:
+                  packages: [git]
       YAML
 
-    result.stdout.should contain("j_base_cli_tools")
+    result.stdout.should contain("p_base_cli_tools")
   end
 end
 

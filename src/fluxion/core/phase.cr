@@ -1,18 +1,15 @@
 module Fluxion
-  # A group of steps that run together, ordered against other jobs by
+  # A group of steps that run together, ordered against other phases by
   # `dependsOn`.
-  #
-  # The stable schema calls these `jobs` (with `phases` as a legacy alias) and
-  # the manifest frontend produces exactly one, named `manifest-plan`.
-  class Job
+  class Phase
     getter name : String
     getter description : String
     getter depends_on : Array(String)
     getter steps : Array(Step)
     getter restart_policy : RestartPolicy
 
-    # When false, the first failed step hard-fails the job and blocks every
-    # job that depends on it. Defaults to true so one bad package does not
+    # When false, the first failed step hard-fails the phase and blocks every
+    # phase that depends on it. Defaults to true so one bad package does not
     # abandon the rest of a bootstrap.
     getter? continue_on_step_error : Bool
 
@@ -30,7 +27,7 @@ module Fluxion
       @steps.flat_map(&.items)
     end
 
-    # True when finishing this job ends the run and writes a resume point.
+    # True when finishing this phase ends the run and writes a resume point.
     def halts? : Bool
       @restart_policy.halts? || @steps.any?(&.halts?)
     end
@@ -40,7 +37,7 @@ module Fluxion
     end
   end
 
-  # Manifest-level execution defaults. Each is optional so "not stated" stays
+  # Profile-level execution defaults. Each is optional so "not stated" stays
   # distinguishable from "explicitly false" — a per-entry setting overrides the
   # default, but only when a default exists.
   struct Policy
@@ -56,7 +53,7 @@ module Fluxion
     end
   end
 
-  # A manifest plan entry that host facts or a `when` rule excluded.
+  # A step or source that host facts or a `when` rule excluded.
   #
   # Recorded rather than dropped so `plan`, `dry-run`, `apply`, and the TUI can
   # all show what was skipped and why — silence would look like the entry was
@@ -96,7 +93,7 @@ module Fluxion
     getter name : String
     getter target : TargetOs
     getter policy : Policy
-    getter jobs : Array(Job)
+    getter phases : Array(Phase)
     getter skipped_plan_entries : Array(SkippedPlanEntry)
     getter source_setups : Array(SourceSetup)
 
@@ -108,7 +105,7 @@ module Fluxion
     def initialize(
       @name : String,
       @target : TargetOs,
-      @jobs : Array(Job),
+      @phases : Array(Phase),
       @policy : Policy = Policy.empty,
       @skipped_plan_entries : Array(SkippedPlanEntry) = [] of SkippedPlanEntry,
       @source_setups : Array(SourceSetup) = [] of SourceSetup,
@@ -117,42 +114,34 @@ module Fluxion
     end
 
     def steps : Array(Step)
-      @jobs.flat_map(&.steps)
+      @phases.flat_map(&.steps)
     end
 
     def items : Array(ItemRef)
-      @jobs.flat_map(&.items)
+      @phases.flat_map(&.items)
     end
 
-    def job?(name : String) : Job?
-      @jobs.find { |job| job.name == name }
+    def phase?(name : String) : Phase?
+      @phases.find { |phase| phase.name == name }
     end
 
-    # True when this profile came from a WorkstationProfile manifest, which
-    # produces exactly one job with this reserved name.
-    def manifest? : Bool
-      @jobs.size == 1 && @jobs.first.name == MANIFEST_JOB_NAME
-    end
-
-    MANIFEST_JOB_NAME = "manifest-plan"
-
-    # Jobs in dependency order. Ties break on declaration order so the same
+    # Phases in dependency order. Ties break on declaration order so the same
     # profile always plans identically.
-    def ordered_jobs : Array(Job)
-      remaining = @jobs.dup
-      resolved = [] of Job
+    def ordered_phases : Array(Phase)
+      remaining = @phases.dup
+      resolved = [] of Phase
       resolved_names = Set(String).new
 
       until remaining.empty?
-        ready = remaining.select { |job| job.depends_on.all? { |dep| resolved_names.includes?(dep) } }
+        ready = remaining.select { |phase| phase.depends_on.all? { |dep| resolved_names.includes?(dep) } }
         if ready.empty?
-          raise ConfigError.new("Circular dependency detected among jobs: #{remaining.map(&.name).sort!.join(", ")}")
+          raise ConfigError.new("Circular dependency detected among phases: #{remaining.map(&.name).sort!.join(", ")}")
         end
-        ready.each do |job|
-          resolved << job
-          resolved_names << job.name
+        ready.each do |phase|
+          resolved << phase
+          resolved_names << phase.name
         end
-        remaining.reject! { |job| resolved_names.includes?(job.name) }
+        remaining.reject! { |phase| resolved_names.includes?(phase.name) }
       end
 
       resolved

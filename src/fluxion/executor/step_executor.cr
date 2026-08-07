@@ -1,7 +1,7 @@
 module Fluxion::Executor
   # Turns one step into the work it represents.
   #
-  # A step executor's whole job is producing commands. `dry-run` prints them,
+  # A step executor exists to produce commands. `dry-run` prints them,
   # `apply` runs them, and `plan --show-commands` previews them — from the same
   # method, so a preview cannot describe something different from what runs.
   #

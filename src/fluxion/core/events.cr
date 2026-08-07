@@ -93,8 +93,8 @@ module Fluxion
       new(step, item, EventKind::ItemCompleted, result: result)
     end
 
-    def self.cancelled(phase : String, next_plan_entry : String? = nil) : self
-      new(phase, next_plan_entry || "", EventKind::Cancelled, phase_context: phase)
+    def self.cancelled(phase : String, next_phase : String? = nil) : self
+      new(phase, next_phase || "", EventKind::Cancelled, phase_context: phase)
     end
 
     def self.error(step : String, item : String, result : StepResult) : self
@@ -161,7 +161,7 @@ module Fluxion
     end
 
     # Unique across the whole profile: the same key can legitimately appear in
-    # two steps, which is why `state forget` asks for `--module` when it does.
+    # two steps, which is why `state forget` asks for `--step` when it does.
     def qualified_key : String
       "#{@step_name}/#{@key}"
     end

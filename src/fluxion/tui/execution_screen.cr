@@ -35,7 +35,7 @@ module Fluxion::TUI
       @items = [] of Item
       @index = {} of String => Int32
       @log = Deque(String).new
-      @current_job = ""
+      @current_phase = ""
       @current_step = ""
       @finished = false
       @mutex = Mutex.new
@@ -53,7 +53,7 @@ module Fluxion::TUI
       @mutex.synchronize do
         case event.kind
         when .phase_started?
-          @current_job = event.step_name
+          @current_phase = event.step_name
           log("▸ #{event.step_name}")
         when .phase_failed?
           log("✘ #{event.step_name} failed")
@@ -135,7 +135,7 @@ module Fluxion::TUI
     private def render_header(buffer : CryTUI::Buffer, area : CryTUI::Rect) : Nil
       Theme.line(buffer, area, area.y, " Fluxion — #{@profile.name} (#{@mode})", Theme.title)
       Theme.line(buffer, area, area.y + 1,
-        "  #{@current_job.empty? ? "starting" : @current_job}#{@current_step.empty? ? "" : " · #{@current_step}"}",
+        "  #{@current_phase.empty? ? "starting" : @current_phase}#{@current_step.empty? ? "" : " · #{@current_step}"}",
         Theme.dim)
     end
 

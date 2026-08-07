@@ -324,15 +324,26 @@ module Fluxion::Executor
         return result
       end
 
-      if step_requires_approval?(step, item) && !options.approved?
+      if step.requires_approval?(item.key) && !options.approved?
         result = StepResult::Failure.new(item.key,
           "explicit confirmation required; re-run with --yes", 2)
         listener.on_event(ExecutionEvent.item_completed(step.name, item.key, result))
         return result
       end
 
-      result = executor.execute(step, item, @runner) do |line|
-        listener.on_event(ExecutionEvent.item_output(step.name, item.key, line))
+      # The one place a `Fluxion::Error` from an executor becomes a failed item.
+      #
+      # Twelve executors rescue it themselves and return a Failure, while the
+      # base `execute` does not — so whether a trust or execution error failed
+      # one item or unwound the whole run depended on whether that kind happened
+      # to override `execute`. Catching it here gives every kind the same
+      # contract, and leaves the ones that already rescue doing no harm.
+      result = begin
+        executor.execute(step, item, @runner) do |line|
+          listener.on_event(ExecutionEvent.item_output(step.name, item.key, line))
+        end
+      rescue error : Error
+        StepResult::Failure.new(item.key, error.message || error.class.name, 1)
       end
 
       listener.on_event(ExecutionEvent.item_completed(step.name, item.key, result))
@@ -358,16 +369,6 @@ module Fluxion::Executor
     # `confirm` items need explicit approval. Fluxion does not prompt for them
     # in either plain or TUI mode: a run that waits for input is a run that
     # hangs unattended.
-    private def step_requires_approval?(step : Step, item : StepItem) : Bool
-      case step
-      when ShellCommandStep
-        step.commands.any? { |command| command.name == item.key && command.confirmation_required? }
-      when ShellScriptStep
-        step.scripts.any? { |script| script.name == item.key && script.confirmation_required? }
-      else
-        false
-      end
-    end
 
     private def select_phases(profile : Profile, options : RunOptions) : Array(Phase)
       phases = profile.ordered_phases

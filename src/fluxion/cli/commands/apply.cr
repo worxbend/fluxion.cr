@@ -67,16 +67,19 @@ module Fluxion::CLI
           "Refusing to apply as root: run as your own user and let Fluxion escalate per step")
       end
 
-      cancellation = install_interrupt_handler
+      # The TUI needs a real terminal on both ends. In CI, a pipe, or a build
+      # tool it is not available regardless of the flag, so a run never blocks
+      # on a UI nobody can see. Decided before the handler is installed, because
+      # what an interrupt may print depends on who owns the screen.
+      use_tui = @globals.use_tui? && TUI::App.available?
+
+      cancellation = install_interrupt_handler(use_tui)
       orchestrator = Executor::Orchestrator.new(
         deps.runner,
         state: deps.store,
       )
 
-      # The TUI needs a real terminal on both ends. In CI, a pipe, or a build
-      # tool it is not available regardless of the flag, so a run never blocks
-      # on a UI nobody can see.
-      if @globals.use_tui? && TUI::App.available?
+      if use_tui
         return run_with_tui(profile, options, orchestrator, cancellation)
       end
 
@@ -109,23 +112,30 @@ module Fluxion::CLI
              end
 
       puts "#{Style.bold("Fluxion")} #{Style.dim("·")} #{profile.name} #{Style.dim("·")} #{mode}"
-      puts "#{Style.dim("Target:")} #{profile.target}   #{Style.dim("Host:")} #{Host.facts}"
+      puts "#{Style.dim("Target:")} #{profile.target}   #{Style.dim("Host:")} #{deps.host_facts}"
       puts
     end
 
     # The first interrupt asks for a clean stop at the next item boundary; the
     # second gives up on that and exits, because a user pressing Ctrl-C twice
     # has stopped caring about a tidy shutdown.
-    private def install_interrupt_handler : CancellationSignal
+    private def install_interrupt_handler(tui : Bool = false) : CancellationSignal
       signal = CancellationSignal.new
 
       Process.on_terminate do |_reason|
         if signal.cancel
+          # Silent under the TUI. The screen belongs to the alternate buffer,
+          # and writing to stderr from a signal fiber punches a hole in it that
+          # the next diffed frame never repairs — the renderer only rewrites
+          # cells it knows changed. `ExecutionScreen`'s footer says the same
+          # thing, in a place the renderer owns.
+          next if tui
+
           @error_output.puts
           @error_output.puts Style.bold_yellow(
             "Stopping after the current step; press Ctrl-C again to quit now.")
         else
-          @error_output.puts Style.red("Interrupted.")
+          @error_output.puts Style.red("Interrupted.") unless tui
           exit ExitCode::Cancelled.value
         end
       end

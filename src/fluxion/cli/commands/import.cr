@@ -44,7 +44,7 @@ module Fluxion::CLI
     # Emitting the header costs four lines and loses nothing: the phase below
     # it still lifts straight into an existing profile.
     protected def header(io : IO, name : String) : Nil
-      facts = Host.facts
+      facts = deps.host_facts
       ProfileDocument.header(io, name, facts.distribution, facts.version)
       io << '\n'
     end
@@ -79,7 +79,7 @@ module Fluxion::CLI
       parse(arguments)
       path = destination
 
-      facts = Host.facts
+      facts = deps.host_facts
       manager = facts.distribution.try(&.package_managers.first)
       raise Failure.external("No supported host package database found") unless manager
 

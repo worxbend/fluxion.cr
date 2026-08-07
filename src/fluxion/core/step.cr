@@ -91,6 +91,17 @@ module Fluxion
       true
     end
 
+    # Whether one of this step's items declared `confirm`, and so needs
+    # `apply --yes`.
+    #
+    # Answered by the step because only the step knows where its items live —
+    # the orchestrator used to reach into `ShellCommandStep#commands` and
+    # `ShellScriptStep#scripts` by name, so a third kind gaining a `confirm`
+    # field would have been silently unguarded.
+    def requires_approval?(item_key : String) : Bool
+      false
+    end
+
     # True when reaching this step ends the run and writes a resume point.
     #
     # The orchestrator deliberately branches on `is_a?(InterruptStep)` rather

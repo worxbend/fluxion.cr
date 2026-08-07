@@ -137,14 +137,14 @@ module Fluxion::CLI
     # Loads the profile, turning validation failures into a configuration exit.
     protected def load_profile : Profile
       path = @globals.resolved_config_path
-      Config::Loader.load(path, Host.facts)
+      Config::Loader.load(path, deps.host_facts)
     rescue error : ValidationError
       raise Failure.configuration(error.message || "Config validation failed")
     end
 
     # Loads without failing on diagnostics, for the commands that report them.
     protected def load_with_diagnostics : {Profile, Array(Diagnostic)}
-      Config::Loader.load_with_diagnostics(@globals.resolved_config_path, Host.facts)
+      Config::Loader.load_with_diagnostics(@globals.resolved_config_path, deps.host_facts)
     end
 
     protected def format_option(parser : OptionParser, accepted : Array(Format), &block : Format ->) : Nil

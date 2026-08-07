@@ -136,7 +136,14 @@ module Fluxion::Executor
         verb = update.dist_upgrade? ? "full-upgrade" : "upgrade"
         [refresh, Command.new(["sudo", "apt-get", verb, "-y"], timeout: timeout)]
       else
-        [] of Command
+        # Not `[] of Command`. `run_commands` treats an empty sequence as done,
+        # so a manager with no branch here reported `✔ ok` having run nothing,
+        # and `RunSummary#ok?` then exited 0. `step_parser` rejects the two
+        # managers that legitimately have no system-update path before a step
+        # can be built, so reaching this means the enum grew and this table did
+        # not.
+        raise ExecutionError.new(
+          "No system-update commands defined for #{manager.config_name}")
       end
     end
   end

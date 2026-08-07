@@ -404,7 +404,7 @@ module Fluxion::CLI
       catalogue = store(target)
       parsed = manifest(target)
 
-      distribution = Host.facts.distribution
+      distribution = deps.host_facts.distribution
       entries = @search.try { |query| parsed.search(query) } || parsed.entries
       entries = entries.select { |entry| catalogue.installed?(entry) } if @installed_only
       # A profile written for another distribution is hidden rather than shown
@@ -574,7 +574,7 @@ module Fluxion::CLI
 
       # A distribution mismatch is a warning rather than a refusal: a profile
       # may legitimately be run somewhere its author did not anticipate.
-      distribution = Host.facts.distribution
+      distribution = deps.host_facts.distribution
       unless found.targets?(distribution)
         @error_output.puts "#{Style.yellow(Symbols.warning)} " \
                            "'#{found.id}' is written for #{found.distributions.map(&.config_name).join(", ")}; " \
@@ -702,7 +702,7 @@ module Fluxion::CLI
       # Validating right after the edit turns a typo into a message now rather
       # than a failure on the next apply.
       begin
-        Config::Loader.load(path, Host.facts)
+        Config::Loader.load(path, deps.host_facts)
         puts "#{Style.green(Symbols.success)} #{path} is valid"
       rescue error : ValidationError | ConfigError
         @error_output.puts "#{Style.yellow(Symbols.warning)} Saved, but it does not validate:"

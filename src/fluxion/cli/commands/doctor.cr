@@ -72,7 +72,7 @@ module Fluxion::CLI
 
     private def host_checks : Array(Check)
       checks = [] of Check
-      facts = Host.facts
+      facts = deps.host_facts
 
       if facts.distribution
         checks << Check.new(Level::Pass, "host os", facts.to_s)

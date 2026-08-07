@@ -184,6 +184,10 @@ module Fluxion
       @scripts.map { |script| item(script.name, "script", script.key) }
     end
 
+    def requires_approval?(item_key : String) : Bool
+      @scripts.any? { |script| script.name == item_key && script.confirmation_required? }
+    end
+
     def summary : String
       "#{@scripts.size} script#{"s" if @scripts.size != 1}"
     end
@@ -216,6 +220,10 @@ module Fluxion
 
     def items : Array(ItemRef)
       @commands.map { |command| item(command.name, "command") }
+    end
+
+    def requires_approval?(item_key : String) : Bool
+      @commands.any? { |command| command.name == item_key && command.confirmation_required? }
     end
 
     def summary : String

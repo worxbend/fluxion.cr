@@ -79,7 +79,7 @@ module Fluxion::CLI
     end
 
     private def header(profile : Profile) : Nil
-      facts = Host.facts
+      facts = deps.host_facts
       puts "#{Style.dim("Profile:")} #{profile.name}"
       puts "#{Style.dim("Target:")}  #{profile.target}"
       puts "#{Style.dim("Host:")}    #{facts}"
@@ -200,6 +200,13 @@ module Fluxion::CLI
     end
 
     private def step_json(step : Step)
+      # `ItemType`, not `ItemRef#type`. The two are separate vocabularies —
+      # `ItemRef#type` is a free string each Step writes by hand — and they
+      # disagree for six kinds, so `plan --format json` reported `"binary"` for
+      # the same item `status --format json` called `"compiled_binary"`, and
+      # `state forget --type` rejected the value `plan` had just printed.
+      item_type = Executor::ItemTypes.for(step).json_name
+
       {
         "name"  => step.name,
         "type"  => step.kind,
@@ -207,7 +214,7 @@ module Fluxion::CLI
           {
             "key"         => item.key,
             "displayName" => item.label,
-            "type"        => item.type,
+            "type"        => item_type,
             "status"      => "would run",
           }
         end,

@@ -34,7 +34,7 @@ module Fluxion::CLI
       raise Failure.invalid_input("Specify --output") unless output
 
       runner = deps.runner
-      facts = Host.facts
+      facts = deps.host_facts
 
       snapshot = {
         "fluxionVersion" => VERSION,

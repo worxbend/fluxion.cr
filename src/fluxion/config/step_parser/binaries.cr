@@ -103,6 +103,28 @@ module Fluxion::Config
       value
     end
 
+    # `installerVersion` is an assertion, not a choice.
+    #
+    # Fluxion resolves each delegated tool through `ToolBroker`, which holds
+    # digests for exactly one release, so naming any other version could never
+    # be honoured. It was parsed, range-checked, stored on the step and then
+    # never read — a field that looked like a knob and turned nothing. Rather
+    # than delete it and silently ignore what a profile already says, a
+    # mismatch now names both versions.
+    private def pinned_installer_version(context : Context, node : Node,
+                                         pinned : String, subject : String) : String
+      declared = context.optional_string(node)
+      return pinned unless declared
+
+      exact_release(context, node, declared, subject)
+      return declared if declared == pinned
+
+      context.error(node.path,
+        "#{subject} #{declared} is not the release Fluxion has a verified digest for",
+        "Fluxion pins #{pinned}; remove the field to use it")
+      pinned
+    end
+
     private def binstaller(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       config_node = node["config", "configPath"]
       if config_node.mapping?
@@ -122,9 +144,8 @@ module Fluxion::Config
           "a lock without a lock file pins nothing")
       end
 
-      version = context.optional_string(node["installerVersion"]) ||
-                BinstallerProfileStep::DEFAULT_INSTALLER_VERSION
-      exact_release(context, node["installerVersion"], version, "installerVersion")
+      version = pinned_installer_version(context, node["installerVersion"],
+        BinstallerProfileStep::DEFAULT_INSTALLER_VERSION, "installerVersion")
 
       BinstallerProfileStep.new(
         name, config,
@@ -140,9 +161,8 @@ module Fluxion::Config
     end
 
     private def nerd_fonts(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
-      version = context.optional_string(node["installerVersion"]) ||
-                NerdFontsStep::DEFAULT_INSTALLER_VERSION
-      exact_release(context, node["installerVersion"], version, "installerVersion")
+      version = pinned_installer_version(context, node["installerVersion"],
+        NerdFontsStep::DEFAULT_INSTALLER_VERSION, "installerVersion")
       binary = context.optional_string(node["nerdfontBinary"]) || NerdFontsStep::DEFAULT_BINARY
 
       config_node = node["config"]
@@ -200,8 +220,8 @@ module Fluxion::Config
       config = context.local_path(config_node)
       return unless config
 
-      version = context.optional_string(node["installerVersion"]) || DotbotStep::DEFAULT_INSTALLER_VERSION
-      exact_release(context, node["installerVersion"], version, "installerVersion")
+      version = pinned_installer_version(context, node["installerVersion"],
+        DotbotStep::DEFAULT_INSTALLER_VERSION, "installerVersion")
 
       DotbotStep.new(
         name, config,

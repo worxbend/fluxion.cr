@@ -36,7 +36,7 @@ module Fluxion::Executor
     DOTBOT = Spec.new(
       name: "dotbot",
       repository: "worxbend/dotbot-go",
-      version: "v0.4.2",
+      version: DotbotStep::DEFAULT_INSTALLER_VERSION,
       asset_template: "dotbot-${os}-${arch}.tar.gz",
       executable: "dotbot",
       digests: {
@@ -48,7 +48,7 @@ module Fluxion::Executor
     NERD_FONTS = Spec.new(
       name: "nerd-fonts-installer",
       repository: "worxbend/nerd-fonts-installer",
-      version: "v1.0.7",
+      version: NerdFontsStep::DEFAULT_INSTALLER_VERSION,
       asset_template: "nerd-fonts-installer_${version}_${os}_${arch}.tar.gz",
       executable: "nerd-fonts-installer",
       digests: {
@@ -60,7 +60,7 @@ module Fluxion::Executor
     BINSTALLER = Spec.new(
       name: "binstaller",
       repository: "worxbend/binstaller",
-      version: "v0.2.0",
+      version: BinstallerProfileStep::DEFAULT_INSTALLER_VERSION,
       asset_template: "binstaller-${version}-${os}-${arch}.tar.gz",
       executable: "binstaller",
       digests: {
@@ -272,8 +272,9 @@ module Fluxion::Executor
     def commands(step : Step, item : StepItem) : Array(Command)
       profile = step.as(BinstallerProfileStep)
       # A preview must never be able to install anything, so it maps onto
-      # binstaller's `plan`, never its `apply`.
-      [Command.new(["binstaller", "plan"] + selection(profile), timeout: PLAN_TIMEOUT)]
+      # binstaller's `plan`, never its `apply`. Everything else about the
+      # invocation is identical to the run, because both come from `argv`.
+      [Command.new(argv(profile, "plan", KnownTools::BINSTALLER.executable), timeout: PLAN_TIMEOUT)]
     end
 
     def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
@@ -285,22 +286,29 @@ module Fluxion::Executor
       end
 
       executable = ToolBroker.new(runner).resolve(KnownTools::BINSTALLER)
-      argv = [executable, "apply"] + selection(profile)
-      if profile.locked?
-        argv << "--locked"
-        profile.lock_file.try { |lock| argv.concat(["--lock-file", lock]) }
+      result = runner.run(Command.new(argv(profile, "apply", executable), timeout: APPLY_TIMEOUT)) do |line|
+        sink.call(line)
       end
-
-      result = runner.run(Command.new(argv, timeout: APPLY_TIMEOUT)) { |line| sink.call(line) }
       outcome(item, result, started, "binstaller")
     rescue error : Error
       StepResult::Failure.new(item.key, "failed to prepare binstaller: #{error.message}", 1)
     end
 
-    private def selection(step : BinstallerProfileStep) : Array(String)
-      argv = ["--config", step.config]
+    # The one place a binstaller invocation is built.
+    #
+    # The preview used to assemble its own, omitting the lock flags entirely, so
+    # `plan --show-commands` described a different command than `apply` ran —
+    # in a codebase whose whole point is that both come from one method.
+    private def argv(step : BinstallerProfileStep, verb : String, executable : String) : Array(String)
+      argv = [executable, verb, "--config", step.config]
       step.only.each { |tool| argv.concat(["--only", tool]) }
       step.skip.each { |tool| argv.concat(["--skip", tool]) }
+
+      argv << "--locked" if step.locked?
+      # Outside the `locked?` branch: `lockFile` without `locked` used to be
+      # accepted by the parser and then silently dropped here, so a profile
+      # naming a lock file ran unlocked against whatever was current.
+      step.lock_file.try { |lock| argv.concat(["--lock-file", lock]) }
       argv
     end
   end

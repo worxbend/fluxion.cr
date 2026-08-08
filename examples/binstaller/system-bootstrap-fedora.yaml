@@ -1,0 +1,223 @@
+apiVersion: binstaller.io/v1alpha1
+kind: BinaryDistributionProfile
+
+# The binaries this profile installs. binstaller owns download,
+# verification and install; Fluxion points at this file and runs it.
+
+spec:
+  policy:
+    # strict rejects latest-URLs, missing checksums, sudo symlinks and tar.xz.
+    mode: strict
+    appsDir: "${HOME}/.apps"
+    allowSudoSymlinks: false
+
+  plan:
+    - name: yazi
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/yazi/bin"
+        download:
+          url: "https://github.com/sxyazi/yazi/releases/download/v26.5.6/yazi-x86_64-unknown-linux-gnu.zip"
+          checksum:
+            algorithm: sha256
+            value: "1c9096f0a83b8102c194385f644cdeff93cc8269426163c9d033041ebd537bd2"
+          archive:
+            type: zip
+            extract:
+              files:
+                - from: yazi-x86_64-unknown-linux-gnu/yazi
+                  to: yazi
+        executables:
+          - path: yazi
+
+    - name: zig
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/zig/bin"
+        download:
+          url: "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz"
+          checksum:
+            algorithm: sha256
+            value: "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
+          archive:
+            type: tar.xz
+            extract:
+              files:
+                - from: zig-x86_64-linux-0.15.2/zig
+                  to: zig
+        executables:
+          - path: zig
+
+    - name: helm
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/helm/bin"
+        download:
+          url: "https://get.helm.sh/helm-v4.2.3-linux-amd64.tar.gz"
+          checksum:
+            algorithm: sha256
+            value: "e9b88b4ee95b18c706839c28d3a0220e5bc470e9cd9262410c90793c45ff8b7c"
+          archive:
+            type: tar.gz
+            extract:
+              files:
+                - from: linux-amd64/helm
+                  to: helm
+        executables:
+          - path: helm
+
+    - name: kubectl
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/kubectl/bin"
+        download:
+          url: "https://dl.k8s.io/release/v1.36.3/bin/linux/amd64/kubectl"
+          checksum:
+            algorithm: sha256
+            value: "ebbd080e7c2e275093b55915722043257eb24004363e20acb3c4d71919f88336"
+        executables:
+          - path: kubectl
+
+    - name: kustomize
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/kustomize/bin"
+        download:
+          url: "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz"
+          checksum:
+            algorithm: sha256
+            value: "029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d"
+          archive:
+            type: tar.gz
+            extract:
+              files:
+                - from: kustomize
+                  to: kustomize
+        executables:
+          - path: kustomize
+
+    - name: minikube
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/minikube/bin"
+        download:
+          url: "https://storage.googleapis.com/minikube/releases/v1.38.1/minikube-linux-amd64"
+          checksum:
+            algorithm: sha256
+            value: "099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e"
+        executables:
+          - path: minikube
+
+    - name: kind
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/kind/bin"
+        download:
+          url: "https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64"
+          checksum:
+            algorithm: sha256
+            value: "eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa"
+        executables:
+          - path: kind
+
+    - name: zellij
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/zellij/bin"
+        download:
+          url: "https://github.com/zellij-org/zellij/releases/download/v0.44.1/zellij-x86_64-unknown-linux-musl.tar.gz"
+          checksum:
+            algorithm: sha256
+            value: "669825021d529fca5d939888263c9d2a90762145191fa07581a15250e8af2b49"
+          archive:
+            type: tar.gz
+            extract:
+              files:
+                - from: zellij
+                  to: zellij
+        executables:
+          - path: zellij
+
+    - name: neovide
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/neovide/bin"
+        download:
+          url: "https://github.com/neovide/neovide/releases/download/0.16.2/neovide.AppImage"
+          checksum:
+            algorithm: sha256
+            value: "ef617c743d7425267ac3ae2f1761ac8fc801683bd3e013758eb68247a53c6812"
+        executables:
+          - path: neovide
+
+    - name: neovim
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/neovim/bin"
+        download:
+          url: "https://github.com/neovim/neovim/releases/download/v0.12.4/nvim-linux-x86_64.tar.gz"
+          checksum:
+            algorithm: sha256
+            value: "012bf3fcac5ade43914df3f174668bf64d05e049a4f032a388c027b1ebd78628"
+          archive:
+            type: tar.gz
+            extract:
+              files:
+                - from: nvim-linux-x86_64/bin/nvim
+                  to: nvim
+        executables:
+          - path: nvim
+
+    - name: lazygit
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/lazygit/bin"
+        download:
+          url: "https://github.com/jesseduffield/lazygit/releases/download/v0.61.0/lazygit_0.61.0_linux_x86_64.tar.gz"
+          checksum:
+            algorithm: sha256
+            value: "4a9702b346283a23a6919c9424617e14788ac00e9cd3c9be266bac48cc6de8eb"
+          archive:
+            type: tar.gz
+            extract:
+              files:
+                - from: lazygit
+                  to: lazygit
+        executables:
+          - path: lazygit
+
+    - name: jujutsu
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/jujutsu/bin"
+        download:
+          url: "https://github.com/jj-vcs/jj/releases/download/v0.40.0/jj-v0.40.0-x86_64-unknown-linux-musl.tar.gz"
+          checksum:
+            algorithm: sha256
+            value: "5c8979f46873e052f59bdd9535636dca6e6f9f70571b73f6d63c3b92acfaa037"
+          archive:
+            type: tar.gz
+            extract:
+              files:
+                - from: jj
+                  to: jj
+        executables:
+          - path: jj
+
+    - name: xplr
+      kind: binary-tool
+      spec:
+        installDir: "~/.apps/xplr/bin"
+        download:
+          url: "https://github.com/sayanarijit/xplr/releases/download/v1.1.0/xplr-linux.tar.gz"
+          checksum:
+            algorithm: sha256
+            value: "0ad6f8942ee8b6287945752242fc3f115d8f7aa32f859e8083c4df607f29831a"
+          archive:
+            type: tar.gz
+            extract:
+              files:
+                - from: xplr
+                  to: xplr
+        executables:
+          - path: xplr

@@ -1,0 +1,32 @@
+apiVersion: binstaller.io/v1alpha1
+kind: BinaryDistributionProfile
+
+# The binaries this profile installs. binstaller owns download,
+# verification and install; Fluxion points at this file and runs it.
+
+spec:
+  policy:
+    # strict rejects latest-URLs, missing checksums, sudo symlinks and tar.xz.
+    mode: strict
+    appsDir: "${HOME}/.apps"
+    allowSudoSymlinks: false
+
+  plan:
+    - name: local-tool-download
+      kind: binary-tool
+      spec:
+        installDir: "${HOME}/.local/bin"
+        download:
+          url: "https://example.invalid/fluxion-demo-tool-x86_64.tar.gz"
+          checksum:
+            algorithm: sha256
+            value: "0000000000000000000000000000000000000000000000000000000000000000"
+          archive:
+            type: tar.gz
+            stripComponents: 1
+            extract:
+              files:
+                - from: fluxion-demo-tool
+                  to: fluxion-demo-tool
+        executables:
+          - path: fluxion-demo-tool

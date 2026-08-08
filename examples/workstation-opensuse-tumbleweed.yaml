@@ -94,18 +94,10 @@ spec:
       description: Binaries that are not packaged for Tumbleweed
       dependsOn: [desktop]
       steps:
-        - name: local-binary-tool
-          kind: binary-downloads
+        - name: binaries
+          kind: binstaller-profile
           spec:
-            binaryName: fluxion-demo-status
-            url: https://example.invalid/fluxion-demo-status-x86_64.tar.gz
-            checksum:
-              algorithm: SHA-256
-              value: "0000000000000000000000000000000000000000000000000000000000000000"
-            installPath: ${binDir}/fluxion-demo-status
-            archivePath: fluxion-demo-status
-            stripComponents: 1
-            mode: "0755"
+            config: ./binstaller/workstation-opensuse-tumbleweed.yaml
 
     - name: finalisation
       description: Configuration files, one-off commands, and the relogin checkpoint

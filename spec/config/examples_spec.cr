@@ -58,7 +58,9 @@ describe "example profiles" do
       Fluxion::Config::Loader.parse(context, document, path).steps.each { |step| kinds << step.kind }
     end
 
-    %w[packages flatpak shell-command compiled-binary].each do |kind|
+    # `binstaller-profile` replaced `compiled-binary` here: installing a binary
+    # is delegated now, so the examples must exercise the delegated path.
+    %w[packages flatpak shell-command binstaller-profile].each do |kind|
       kinds.should contain(kind)
     end
   end

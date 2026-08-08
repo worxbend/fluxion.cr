@@ -99,18 +99,10 @@ spec:
       description: Binaries and scripts that expect the packages to be present
       dependsOn: [desktop]
       steps:
-        - name: local-bin-download
-          kind: binary-downloads
+        - name: binaries
+          kind: binstaller-profile
           spec:
-            binaryName: fluxion-demo-helper
-            url: https://example.invalid/fluxion-demo-helper-x86_64.tgz
-            checksum:
-              algorithm: SHA-256
-              value: "0000000000000000000000000000000000000000000000000000000000000000"
-            installPath: ${binDir}/fluxion-demo-helper
-            archivePath: bin/fluxion-demo-helper
-            stripComponents: 1
-            mode: "0755"
+            config: ./binstaller/workstation-arch.yaml
 
         - name: shell-hooks
           kind: shell-scripts

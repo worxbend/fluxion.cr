@@ -101,18 +101,10 @@ spec:
       description: Binaries and hook scripts that expect the packages to be present
       dependsOn: [desktop]
       steps:
-        - name: local-tool-download
-          kind: binary-downloads
+        - name: binaries
+          kind: binstaller-profile
           spec:
-            binaryName: fluxion-demo-tool
-            url: https://example.invalid/fluxion-demo-tool-x86_64.tar.gz
-            checksum:
-              algorithm: SHA-256
-              value: "0000000000000000000000000000000000000000000000000000000000000000"
-            installPath: ${binDir}/fluxion-demo-tool
-            archivePath: fluxion-demo-tool
-            stripComponents: 1
-            mode: "0755"
+            config: ./binstaller/workstation-ubuntu.yaml
 
         - name: shell-bootstrap-script
           kind: shell-scripts

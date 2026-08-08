@@ -107,6 +107,25 @@ module Fluxion::CLI
       [Check.new(Level::Warn, "state directory", "#{parent} does not exist yet")]
     end
 
+    # The path a delegated kind hands to another tool, if this step is one.
+    private def delegated_config(step : Step) : String?
+      case step
+      when BinstallerProfileStep then step.config
+      when NerdFontsStep         then step.config
+      when DotbotStep            then step.config
+      end
+    end
+
+    # Existence only. What is inside belongs to the tool that reads it, and
+    # `doctor` answers "can this host run this profile" before a run rather
+    # than validating someone else's schema.
+    private def delegated_check(step : Step, config : String) : Check
+      info = File.info?(config)
+      return Check.new(Level::Fail, "#{step.kind} config", "#{config} does not exist") unless info
+      return Check.new(Level::Fail, "#{step.kind} config", "#{config} is not a regular file") unless info.file?
+      Check.new(Level::Pass, "#{step.kind} config", config)
+    end
+
     private def profile_checks(profile : Profile) : Array(Check)
       checks = [] of Check
       checks << Check.new(Level::Pass, "target os", profile.target.to_s)
@@ -117,6 +136,8 @@ module Fluxion::CLI
           next unless seen.add?(command)
           checks << command_check(command)
         end
+
+        delegated_config(step).try { |config| checks << delegated_check(step, config) }
 
         case step
         when DefaultShellStep
@@ -187,6 +208,10 @@ module Fluxion::CLI
       "fluxion lint [-c FILE] [--format text|json]"
     end
 
+    # The only piece of binstaller's schema Fluxion knows, and it is used to
+    # decide whether to say anything at all rather than to validate.
+    BINSTALLER_API_VERSION = "binstaller.io/v1alpha1"
+
     record Finding, severity : Diagnostic::Severity, rule : String, step : String, message : String
 
     @format = Format::Text
@@ -208,6 +233,43 @@ module Fluxion::CLI
       ExitCode::Success
     end
 
+    # Fluxion used to refuse a binary download with no digest at parse time.
+    # That refusal now lives in binstaller's own `spec.policy.mode: strict`, so
+    # this says when a referenced profile is not asking for it.
+    #
+    # Best-effort and advisory by design: the file belongs to another tool, may
+    # not exist yet when `lint` runs, and its schema is not Fluxion's to
+    # validate. Anything unreadable or unrecognised is simply not reported.
+    private def binstaller_findings(step : BinstallerProfileStep) : Array(Finding)
+      findings = [] of Finding
+      body = File.read(step.config) rescue return findings
+      document = YAML.parse(body) rescue return findings
+
+      return findings unless document["apiVersion"]?.try(&.as_s?) == BINSTALLER_API_VERSION
+
+      mode = document["spec"]?.try(&.["policy"]?).try(&.["mode"]?).try(&.as_s?)
+      unless mode == "strict"
+        findings << Finding.new(Diagnostic::Severity::Warning, "binstaller-not-strict", step.name,
+          "#{File.basename(step.config)} does not set spec.policy.mode: strict, " \
+          "so missing checksums and mutable URLs are only flagged rather than refused")
+      end
+
+      unpinned = document["spec"]?.try(&.["plan"]?).try(&.as_a?).try do |plan|
+        plan.compact_map do |entry|
+          next if entry["spec"]?.try(&.["download"]?).try(&.["checksum"]?)
+          entry["name"]?.try(&.as_s?)
+        end
+      end
+
+      if unpinned && !unpinned.empty?
+        findings << Finding.new(Diagnostic::Severity::Warning, "binstaller-unpinned", step.name,
+          "#{unpinned.size == 1 ? "1 entry declares" : "#{unpinned.size} entries declare"} " \
+          "no checksum: #{unpinned.first(5).join(", ")}")
+      end
+
+      findings
+    end
+
     private def analyse(profile : Profile) : Array(Finding)
       findings = [] of Finding
 
@@ -225,6 +287,8 @@ module Fluxion::CLI
           next if step.probe_command
           findings << Finding.new(Diagnostic::Severity::Warning, "manual-without-probe", step.name,
             "has no probeCommand, so it can never be marked complete and will block every rerun")
+        when BinstallerProfileStep
+          findings.concat(binstaller_findings(step))
         end
 
         if step.mutating? && step.probe_command.nil? && unprobeable?(step)

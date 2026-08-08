@@ -195,18 +195,25 @@ module Fluxion::Executor
       script.script || script.name
     end
 
-    # Declared shell wins, then the step's, then the file's shebang, then bash.
+    # Declared shell wins, then the step's, then a local file's shebang, then
+    # bash.
     #
-    # The shebang is only consulted for a real file: an inline body has none,
-    # and a remote script has not been fetched when the preview is built. A
-    # declared shell reaches argv as the bare name so `sudo` resolves it against
-    # the root-owned system directories rather than a hardcoded location.
+    # The shebang is consulted for a `script:` source ONLY, because that is the
+    # only one whose bytes exist when the preview is built. Reading it for a
+    # remote script made `plan` say bash while the run picked whatever the
+    # fetched file declared — a preview describing something other than what
+    # runs, which is the one thing this codebase says it will not do. An inline
+    # body has no shebang at all, which is why the parser requires `shell:`
+    # there. Declare `shell:` on a remote script to choose its interpreter.
+    #
+    # A declared shell reaches argv as the bare name so `sudo` resolves it
+    # against the root-owned system directories rather than a hardcoded path.
     private def interpreter(step : ShellScriptStep, script : ShellScriptItem, path : String) : String
       if shell = step.shell_for(script)
         return shell.command
       end
 
-      return "/bin/bash" unless File.file?(path)
+      return "/bin/bash" unless script.script && File.file?(path)
       first = File.open(path, &.gets(chomp: true)) rescue nil
       return "/bin/bash" unless first && first.starts_with?("#!")
 

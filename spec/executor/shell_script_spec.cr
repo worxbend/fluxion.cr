@@ -138,3 +138,27 @@ describe Fluxion::Executor::ShellScriptExecutor do
     end
   end
 end
+
+describe "preview and run agree on the interpreter" do
+  it "does not read a remote script's shebang" do
+    # The bytes do not exist when `plan` runs, so reading them at execute time
+    # would make the preview describe a different command than the run — the
+    # one thing this codebase says it will not do.
+    remote = Fluxion::ShellScriptItem.new(
+      name: "vendor", url: "https://example.test/install.sh",
+      sha256: Fluxion::Checksum.new(Fluxion::ChecksumAlgorithm::Sha256, "0" * 64))
+    step = Fluxion::ShellScriptStep.new("setup", [remote])
+
+    argv_for(step).first.should eq("/bin/bash")
+  end
+
+  it "uses a remote script's declared shell in the preview" do
+    remote = Fluxion::ShellScriptItem.new(
+      name: "vendor", url: "https://example.test/install.sh",
+      shell: Fluxion::ShellKind::Sh,
+      sha256: Fluxion::Checksum.new(Fluxion::ChecksumAlgorithm::Sha256, "0" * 64))
+    step = Fluxion::ShellScriptStep.new("setup", [remote])
+
+    argv_for(step).first.should eq("sh")
+  end
+end

@@ -564,8 +564,12 @@ else. Precedence:
 
 1. the item's `shell`
 2. the step's `shell`
-3. the file's `#!` line, for `script:` and `url:` only
+3. the file's `#!` line, for a local `script:` only
 4. `/bin/bash`
+
+A remote `url:` script does not consult its shebang: the bytes do not exist
+when `plan` runs, so reading them at execute time would make the preview and
+the run disagree. Declare `shell:` to choose its interpreter, or it is bash.
 
 It reaches argv as the bare name so that under `sudo` the target is resolved
 against the root-owned system directories rather than a hardcoded location.

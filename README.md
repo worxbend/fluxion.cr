@@ -150,11 +150,20 @@ step. See [docs/registry.md](docs/registry.md).
 
 These are deliberate, and each has a reason:
 
-- **It will not run unverified bytes.** Every download is HTTPS-only with no
-  URL credentials, re-validated after each redirect, size-bounded while
-  streaming, and digest-checked before use. A detached signature must name a
-  signer the profile explicitly trusts — a valid signature from an unknown key
-  is not trust.
+- **It will not run unverified bytes it fetched itself.** Every download
+  Fluxion makes is HTTPS-only with no URL credentials, re-validated after each
+  redirect, size-bounded while streaming, and digest-checked before use. That
+  covers the toolchain and oh-my-zsh installers, repository signing keys, and
+  the delegated tools themselves — a release asset that is not in Fluxion's
+  pinned digest catalog is not installed.
+- **It will not pretend to verify what it delegates.** Installing binaries is
+  binstaller's job and installing fonts is nerd-fonts-installer's, and each
+  reads its own config. Fluxion verifies the tool, then runs it; the checksums
+  for what *it* installs live in that tool's profile. Set
+  `spec.policy.mode: strict` in a binstaller profile to get back a hard refusal
+  of missing checksums and mutable URLs — `fluxion lint` says so when it is
+  absent. A copy of one of these tools already on `PATH` is used as-is and
+  never replaced, so it is yours to trust.
 - **It will not trust `PATH` for anything privileged.** A `sudo` step becomes
   `sudo -n -- <resolved target>`, where the target is a real path under a
   root-owned system directory with no writable ancestor.

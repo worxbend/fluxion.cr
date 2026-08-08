@@ -109,15 +109,21 @@ that does not match what arrived is a truncation, not a small file. On any
 failure the partial file is deleted before raising, so no code path can return
 an unverified download.
 
-**Signatures.** A zero exit from `gpg` is not sufficient: `gpg` reports success
-for a signature made by any key it happens to have. The machine-readable status
-output is parsed, every `VALIDSIG` must name the configured signer, and SHA-1
-is not among the accepted hash algorithms.
+**Delegated installers.** Binaries and fonts are installed by `binstaller` and
+`nerd-fonts-installer`, each from its own config. Fluxion verifies *the tool*:
+the release asset must match a digest in `KnownTools`, or it is not installed,
+and a copy already on `PATH` is used as-is rather than replaced. It does not
+verify what the tool then installs — those checksums live in the tool's own
+profile, which is the file Fluxion points at. `binstaller`'s
+`spec.policy.mode: strict` is what makes that an even trade: it refuses missing
+checksums, mutable URLs, sudo symlinks and `tar.xz`. Fluxion hashes the
+referenced config's bytes so editing it re-runs the step, but never parses it —
+those schemas belong to those tools.
 
-**Checksum documents.** Supplemental only. A document served by the same host
-as the artifact proves nothing on its own, so it can accompany a signature but
-never replace one. Two different digests for one asset is refused rather than
-resolved by picking one.
+This is a deliberate narrowing. Fluxion used to carry a `binary-downloads` kind
+with its own download, signature and archive handling; one bootstrapper
+reimplementing a package manager badly is worse than delegating to a tool whose
+whole job it is.
 
 **Privileged commands.** A `sudo` step becomes
 `sudo -n -- <resolved target> …`. The `-n` means it can never sit waiting for a
@@ -130,11 +136,12 @@ ancestor, because a writable parent means the file can be swapped.
 where a swap would happen. Without a digest to re-verify, the privileged path
 refuses to run at all.
 
-**Archives.** Only `tar.gz` is extracted in-process, and the reader bounds the
-*decompressed* stream rather than the compressed file, which is what stops a
-decompression bomb. Selection is by exact post-strip path, never basename, and
-two members sharing one is refused. `.zip` and `.tar.xz` are delegated rather
-than growing two more parsers with the same obligations.
+**Archives.** Only `tar.gz` is extracted in-process, and only to unpack a
+delegated tool's own release asset. The reader bounds the *decompressed* stream
+rather than the compressed file, which is what stops a decompression bomb;
+selection is by exact post-strip path, never basename, and two members sharing
+one is refused. Everything a profile installs is unpacked by the tool that
+installs it, so Fluxion needs no `.zip` or `.tar.xz` parser.
 
 **Running as root.** `apply` refuses. There is no safe way to drop back to the
 user's account for the steps that must not be root-owned, and a half-root home

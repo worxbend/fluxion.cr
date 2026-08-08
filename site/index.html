@@ -396,13 +396,23 @@ Summary: <span class="g">0 ok</span> · <span class="r">0 failed</span> · <span
 
     <div class="refusals">
       <div class="refusal reveal">
-        <h3><span class="no">no</span> It will not run unverified bytes.</h3>
+        <h3><span class="no">no</span> It will not run unverified bytes it fetched itself.</h3>
         <p>
-          Every download is HTTPS-only with no URL credentials, re-validated after each
-          redirect — a redirect is an attacker-controllable hop — size-bounded while
-          streaming rather than after, and digest-checked before use. A detached signature
-          must name a signer the profile explicitly trusts: a valid signature from an
-          unknown key is not trust.
+          Every download Fluxion makes is HTTPS-only with no URL credentials, re-validated
+          after each redirect — a redirect is an attacker-controllable hop — size-bounded
+          while streaming rather than after, and digest-checked before use. A release asset
+          that is not in Fluxion&rsquo;s pinned digest catalog is not installed.
+        </p>
+      </div>
+      <div class="refusal reveal">
+        <h3><span class="no">no</span> It will not pretend to verify what it delegates.</h3>
+        <p>
+          Installing binaries is <code>binstaller</code>&rsquo;s job and installing fonts is
+          <code>nerd-fonts-installer</code>&rsquo;s, each reading its own config. Fluxion
+          verifies the tool, then runs it; the checksums for what <em>it</em> installs live in
+          that tool&rsquo;s profile. Set <code>spec.policy.mode: strict</code> to get back a hard
+          refusal of missing checksums and mutable URLs &mdash; <code>fluxion lint</code> says so
+          when it is absent.
         </p>
       </div>
       <div class="refusal reveal">

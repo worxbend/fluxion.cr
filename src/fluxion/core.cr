@@ -1,3 +1,4 @@
+require "digest/sha256"
 require "uri"
 
 require "./core/errors"

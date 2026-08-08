@@ -91,6 +91,22 @@ module Fluxion
       true
     end
 
+    # SHA-256 of the config file this step delegates to, when it delegates.
+    #
+    # The kinds that hand their work to another tool — binstaller, dotbot,
+    # nerd-fonts-installer — carry a path, not a description of the work. Their
+    # item key is that path, so `Fingerprint.of` saw nothing change when the
+    # file behind it changed: once such a step succeeded, editing the config it
+    # points at never ran it again under `--skip-already-installed`.
+    #
+    # The file's *bytes* are hashed, never parsed. Fluxion does not know those
+    # schemas and should not learn them — a new tool, a bumped version or an
+    # edited URL all move the digest, and an upstream field rename cannot break
+    # this. Nil for every step that describes its own work.
+    def external_config_digest : String?
+      nil
+    end
+
     # Whether one of this step's items declared `confirm`, and so needs
     # `apply --yes`.
     #

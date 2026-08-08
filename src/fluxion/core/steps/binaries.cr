@@ -135,7 +135,23 @@ module Fluxion
   # `BinaryDistributionProfile` the user already maintains, so there is one
   # source of truth. An inline profile object is rejected because binstaller
   # owns that schema.
+  # The digest of a delegated config, read once per call.
+  #
+  # An unreadable file returns nil rather than raising: the fingerprint is
+  # bookkeeping, and a missing config is the executor's problem to report with
+  # a message naming the path, not the parser's to crash on.
+  module DelegatedConfig
+    def external_config_digest : String?
+      path = config
+      return unless File.file?(path)
+      Digest::SHA256.hexdigest(File.read(path))
+    rescue File::Error
+      nil
+    end
+  end
+
   class BinstallerProfileStep < Step
+    include DelegatedConfig
     DEFAULT_INSTALLER_VERSION = "v0.2.0"
 
     getter config : String
@@ -253,6 +269,7 @@ module Fluxion
 
   # `type: dotbot` — apply dotfiles with `dotbot-go`.
   class DotbotStep < Step
+    include DelegatedConfig
     DEFAULT_INSTALLER_VERSION = "v0.4.2"
     DEFAULT_BINARY            = "dotbot"
 

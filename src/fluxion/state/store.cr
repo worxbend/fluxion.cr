@@ -348,6 +348,12 @@ module Fluxion::State
         # Item keys capture the packages, paths, and units a step will act on,
         # which is what actually changes when a profile is edited.
         step.items.each { |item| append(digest, "item", "#{item.type}/#{item.key}") }
+
+        # A delegated step's item key is the path to someone else's config, so
+        # everything above is blind to the work actually changing. Without this
+        # a completed binstaller or dotbot phase stayed completed no matter what
+        # was edited behind that path.
+        step.external_config_digest.try { |config| append(digest, "config", config) }
       end
 
       digest.hexfinal

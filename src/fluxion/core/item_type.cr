@@ -16,6 +16,10 @@ module Fluxion
     Flatpak
     FlatpakRemote
     ShellScript
+    # Retired with the `binary-downloads` kind. Kept because it is the
+    # discriminator in state files previous runs wrote, and in files the Java
+    # implementation wrote — deleting it would make those unreadable. Nothing
+    # produces it any more.
     CompiledBinary
     Dotbot
     DefaultShell

@@ -107,37 +107,4 @@ module Fluxion
       value.gsub(/[\s:]/, "").upcase
     end
   end
-
-  # How a downloaded artifact earns the right to be executed or installed.
-  #
-  # A `checksumUrl` alone is deliberately not a member: fetching the expected
-  # digest from the same host that serves the artifact proves nothing, so it is
-  # supplemental metadata that must accompany one of these modes.
-  abstract struct TrustAnchor
-    # A literal SHA-256 pinned in the profile.
-    struct Digest < TrustAnchor
-      getter checksum : Checksum
-
-      def initialize(@checksum : Checksum)
-      end
-
-      def to_s(io : IO) : Nil
-        io << @checksum
-      end
-    end
-
-    # A detached OpenPGP signature bound to a specific signer. Both halves are
-    # required: a valid signature from an unknown key is not trust.
-    struct Signature < TrustAnchor
-      getter signature_url : String
-      getter signer : Fingerprint
-
-      def initialize(@signature_url : String, @signer : Fingerprint)
-      end
-
-      def to_s(io : IO) : Nil
-        io << "signature by " << @signer
-      end
-    end
-  end
 end

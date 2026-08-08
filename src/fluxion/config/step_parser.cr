@@ -38,7 +38,6 @@ module Fluxion::Config
       when "pacman-repository"  then pacman_repository(context, node, name, description, probe)
       when "flatpak-remote"     then flatpak_remote(context, node, name, description, probe)
       when "gpg-key"            then gpg_key(context, node, name, description, probe)
-      when "compiled-binary"    then compiled_binary(context, node, name, description, probe)
       when "binstaller-profile" then binstaller(context, node, name, description, probe)
       when "nerd-fonts"         then nerd_fonts(context, node, name, description, probe)
       when "dotbot"             then dotbot(context, node, name, description, probe)

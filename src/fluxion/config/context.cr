@@ -219,21 +219,6 @@ module Fluxion::Config
       raw
     end
 
-    # A normalized relative POSIX path, used for archive member selection.
-    def archive_path(node : Node) : String?
-      raw = node.string?
-      return if raw.nil? || raw.strip.empty?
-
-      value = raw.strip
-      invalid = value.starts_with?('/') || value.starts_with?("..") ||
-                value.includes?('\\') || Path.posix(value).normalize.to_s != value
-      if invalid
-        error(node.path, "must be a normalized relative POSIX path")
-        return
-      end
-      value
-    end
-
     OCTAL_MODE = /\A[0-7]{3,4}\z/
 
     def file_mode(node : Node) : String?

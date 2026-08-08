@@ -168,35 +168,4 @@ describe "Downloader over an injected transport" do
       end
     end
   end
-
-  describe "#download_text" do
-    it "reads a checksum document" do
-      transport = FakeTransport.new.on("https://example.test/SHA256SUMS", "abc  rg.tar.gz\n")
-
-      Downloader.new(transport: transport)
-        .download_text("https://example.test/SHA256SUMS")
-        .should eq("abc  rg.tar.gz\n")
-    end
-
-    it "bounds the document at MAX_TEXT_BYTES regardless of the artifact ceiling" do
-      # `download_text` deliberately ignores `max_bytes`: a checksum document
-      # is small by nature, so a large one means something is wrong no matter
-      # how big an artifact the caller was willing to accept.
-      oversized = "x" * (Downloader::MAX_TEXT_BYTES + 1)
-      transport = FakeTransport.new.on("https://example.test/SHA256SUMS", oversized)
-
-      expect_raises(Fluxion::TrustError, /exceeds the maximum size/) do
-        Downloader.new(max_bytes: Downloader::MAX_ARTIFACT_BYTES, transport: transport)
-          .download_text("https://example.test/SHA256SUMS")
-      end
-    end
-
-    it "reports a missing document rather than returning nothing" do
-      transport = FakeTransport.new
-
-      expect_raises(Fluxion::TrustError, /HTTP 404/) do
-        Downloader.new(transport: transport).download_text("https://example.test/nope")
-      end
-    end
-  end
 end

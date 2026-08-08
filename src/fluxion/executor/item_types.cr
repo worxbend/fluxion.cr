@@ -26,7 +26,6 @@ module Fluxion::Executor
       when PacmanRepositoryStep  then ItemType::PacmanRepository
       when FlatpakRemoteStep     then ItemType::FlatpakRemote
       when GpgKeyStep            then ItemType::GpgKey
-      when CompiledBinaryStep    then ItemType::CompiledBinary
       when BinstallerProfileStep then ItemType::BinstallerProfile
       when NerdFontsStep         then ItemType::NerdFont
       when DotbotStep            then ItemType::Dotbot

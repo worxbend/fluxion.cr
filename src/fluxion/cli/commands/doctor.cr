@@ -126,8 +126,6 @@ module Fluxion::CLI
           else
             Check.new(Level::Fail, "shell path", "#{step.shell_path} is not executable")
           end
-        when CompiledBinaryStep
-          checks << artifact_check(step)
         end
       end
 
@@ -153,19 +151,6 @@ module Fluxion::CLI
     private def command_check(command : String, required : Bool = true) : Check
       return Check.new(Level::Pass, "#{command} command", command) if Host.command_exists?(command)
       Check.new(required ? Level::Fail : Level::Warn, "#{command} command", "not found on PATH")
-    end
-
-    private def artifact_check(step : CompiledBinaryStep) : Check
-      if step.format.delegated?
-        return Check.new(Level::Warn, "binary artifact",
-          "#{PublicUrl.from(step.url)} needs binstaller for #{step.format}")
-      end
-
-      return Check.new(Level::Warn, "binary network", "skipped #{PublicUrl.from(step.url)}") if @skip_network
-
-      # Reachability only. Verifying the artifact would mean downloading it,
-      # which is not what a readiness check is for.
-      reachable?(step.url) ? Check.new(Level::Pass, "binary network", PublicUrl.from(step.url)) : Check.new(Level::Fail, "binary network", "#{PublicUrl.from(step.url)} is unreachable")
     end
 
     private def reachable?(url : String) : Bool
@@ -240,11 +225,6 @@ module Fluxion::CLI
           next if step.probe_command
           findings << Finding.new(Diagnostic::Severity::Warning, "manual-without-probe", step.name,
             "has no probeCommand, so it can never be marked complete and will block every rerun")
-        when CompiledBinaryStep
-          if step.trust.is_a?(TrustAnchor::Signature) && step.checksum_url.nil?
-            findings << Finding.new(Diagnostic::Severity::Info, "signature-without-checksum", step.name,
-              "a checksumUrl alongside the signature would catch a mismatched release asset earlier")
-          end
         end
 
         if step.mutating? && step.probe_command.nil? && unprobeable?(step)

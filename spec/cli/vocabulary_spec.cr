@@ -8,12 +8,8 @@ require "../spec_helper"
 # `type`, and `state forget --type` rejected the value `plan` had just printed.
 private def step_for(kind : String) : Fluxion::Step
   case kind
-  when "compiled-binary"
-    Fluxion::CompiledBinaryStep.new(
-      name: "rg", binary_name: "rg", url: "https://example.test/rg",
-      trust: Fluxion::TrustAnchor::Digest.new(
-        Fluxion::Checksum.new(Fluxion::ChecksumAlgorithm::Sha256, "0" * 64)),
-      install_path: "/usr/local/bin/rg", format: Fluxion::ArtifactFormat::PlainBinary)
+  when "binstaller-profile"
+    Fluxion::BinstallerProfileStep.new("portable", "/tmp/binstaller.yaml")
   when "shell-command"
     Fluxion::ShellCommandStep.new("cmds", [Fluxion::ShellCommandItem.shell("true")])
   when "shell-script"
@@ -29,10 +25,10 @@ end
 describe "item type vocabulary" do
   # The six kinds whose hand-written `ItemRef#type` differs from the enum.
   {
-    "compiled-binary" => "compiled_binary",
-    "shell-command"   => "shell_command",
-    "shell-script"    => "shell_script",
-    "dotbot"          => "dotbot",
+    "binstaller-profile" => "binstaller_profile",
+    "shell-command"      => "shell_command",
+    "shell-script"       => "shell_script",
+    "dotbot"             => "dotbot",
   }.each do |kind, expected|
     it "reports #{kind} as #{expected} everywhere" do
       step = step_for(kind)

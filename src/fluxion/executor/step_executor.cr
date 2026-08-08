@@ -108,7 +108,6 @@ module Fluxion::Executor
         ShellScriptExecutor.new,
         AssertExecutor.new,
         ManualExecutor.new,
-        CompiledBinaryExecutor.new,
         ToolchainExecutor.new,
         OhMyZshExecutor.new,
         FileWriteExecutor.new,

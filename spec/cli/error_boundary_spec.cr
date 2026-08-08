@@ -56,13 +56,13 @@ describe "IO error boundaries" do
       # so an untranslated `Socket::ConnectError` bypassed the per-item failure
       # boundary and aborted the whole run.
       expect_raises(Fluxion::ExecutionError, /Could not fetch/) do
-        Fluxion::Executor::Downloader.new.download_text("https://127.0.0.1:1/nothing")
+        Fluxion::Executor::Downloader.new.download("https://127.0.0.1:1/nothing", File.tempname("fluxion-refused"))
       end
     end
 
     it "keeps the redacted URL in the message" do
       error = expect_raises(Fluxion::ExecutionError) do
-        Fluxion::Executor::Downloader.new.download_text("https://127.0.0.1:1/secret-path")
+        Fluxion::Executor::Downloader.new.download("https://127.0.0.1:1/secret-path", File.tempname("fluxion-refused"))
       end
       error.message.to_s.should contain("127.0.0.1")
     end

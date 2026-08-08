@@ -265,6 +265,13 @@ module Fluxion::Config
       id = raw.strip.downcase
       kind = PlanKinds.find(id)
       unless kind
+        # Checked before the did-you-mean, which cannot help with a kind that
+        # was removed rather than mistyped.
+        if replacement = PlanKinds.retired?(id)
+          context.error(node.path, "step kind '#{raw.strip}' was removed", replacement)
+          return
+        end
+
         context.error(node.path, "unsupported step kind '#{raw.strip}'", PlanKinds.suggestion_for(id))
         return
       end

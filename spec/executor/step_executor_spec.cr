@@ -331,36 +331,6 @@ describe "manual" do
   end
 end
 
-describe "compiled-binary" do
-  it "previews the download, verification, and install" do
-    # There is no single process that does this, and a preview showing only the
-    # final install would hide the parts worth reviewing.
-    checksum = Fluxion::Checksum.new(Fluxion::ChecksumAlgorithm::Sha256, "a" * 64)
-    step = Fluxion::CompiledBinaryStep.new(
-      "kubectl", "kubectl", "https://example.test/kubectl?token=secret",
-      Fluxion::TrustAnchor::Digest.new(checksum),
-      "/usr/local/bin/kubectl", Fluxion::ArtifactFormat::PlainBinary)
-
-    preview = argv_for(step).first
-    preview.should contain("download")
-    preview.should contain("/usr/local/bin/kubectl")
-    # The query string is stripped: a preview is read by humans and pasted
-    # into issues.
-    preview.join(' ').should_not contain("token=secret")
-  end
-
-  it "refuses a delegated format it cannot reach binstaller for" do
-    checksum = Fluxion::Checksum.new(Fluxion::ChecksumAlgorithm::Sha256, "a" * 64)
-    step = Fluxion::CompiledBinaryStep.new(
-      "rg", "rg", "https://example.test/rg.zip",
-      Fluxion::TrustAnchor::Digest.new(checksum),
-      "/tmp/fluxion-spec-rg", Fluxion::ArtifactFormat::Zip, archive_path: "rg")
-
-    result = run_item(step, Fluxion::Executor::FakeShellRunner.new)
-    result.as(Fluxion::StepResult::Failure).error_message.should contain("binstaller")
-  end
-end
-
 describe "flatpak" do
   it "installs from the declared remote" do
     step = Fluxion::FlatpakStep.new("apps", ["com.spotify.Client"], "flathub")

@@ -207,22 +207,7 @@ module Fluxion::Executor
       info = File.info?(item.key)
       return InstallationStatus::NotInstalled.new(item.key) unless info
 
-      if item.item_type.compiled_binary?
-        unless info.file? && info.permissions.owner_execute?
-          return InstallationStatus::Unknown.new(item.key, "path exists but is not an executable file")
-        end
-        return InstallationStatus::InstalledByProbe.new(item.key, detect_version(item, runner))
-      end
-
       InstallationStatus::InstalledByProbe.new(item.key)
-    end
-
-    # Best-effort: a binary that does not answer `--version` is still
-    # installed, so a failure here is not evidence of absence.
-    private def detect_version(item : StepItem, runner : ShellRunner) : String?
-      result = runner.run(Command.new([item.key, "--version"], timeout: 3.seconds))
-      return unless result.success?
-      result.stdout.lines.first?.try(&.match(/(\d+\.\d+[\w.\-]*)/)).try(&.[1])
     end
   end
 

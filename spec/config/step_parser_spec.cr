@@ -10,183 +10,20 @@ private def parse_step(yaml : String, distribution : String = "fedora")
 end
 
 describe Fluxion::Config::StepParser do
-  describe "binary-downloads trust" do
-    it "accepts a literal checksum" do
+  # `binary-downloads` was removed: binstaller owns download, verification and
+  # install now. Its trust tests went with it — the guarantees live in the
+  # binstaller profile's `spec.policy.mode: strict`.
+  describe "retired kinds" do
+    it "names what took over rather than guessing at a typo" do
       result = parse_step(<<-STEP)
         - name: kubectl
           kind: binary-downloads
           spec:
             binaryName: kubectl
-            url: https://dl.k8s.io/release/v1.30.2/bin/linux/amd64/kubectl
-            checksum:
-              algorithm: sha256
-              value: #{SHA}
-            installPath: /usr/local/bin/kubectl
         STEP
 
-      result.errors.should be_empty
-      step = result.step("kubectl").as(Fluxion::CompiledBinaryStep)
-      step.trust.should be_a(Fluxion::TrustAnchor::Digest)
-      step.format.should eq(Fluxion::ArtifactFormat::PlainBinary)
-    end
-
-    it "accepts a signer-bound detached signature" do
-      result = parse_step(<<-STEP)
-        - name: nvim
-          kind: binary-downloads
-          spec:
-            binaryName: nvim
-            url: https://example.test/nvim
-            signatureUrl: https://example.test/nvim.asc
-            allowedSignerFingerprint: BC528686B50D79E339D3721CEB3E94ADBE1229CF
-            installPath: /usr/local/bin/nvim
-        STEP
-
-      result.errors.should be_empty
-      result.step("nvim").as(Fluxion::CompiledBinaryStep).trust
-        .should be_a(Fluxion::TrustAnchor::Signature)
-    end
-
-    it "refuses a download with no trust anchor at all" do
-      result = parse_step(<<-STEP)
-        - name: nvim
-          kind: binary-downloads
-          spec:
-            binaryName: nvim
-            url: https://example.test/nvim
-            installPath: /usr/local/bin/nvim
-        STEP
-
-      message = result.error_messages.find!(&.includes?("must declare a literal SHA-256"))
-      message.should contain("checksumUrl is supplemental metadata")
-    end
-
-    it "refuses a checksum URL standing in for a checksum" do
-      result = parse_step(<<-STEP)
-        - name: nvim
-          kind: binary-downloads
-          spec:
-            binaryName: nvim
-            url: https://example.test/nvim
-            checksumUrl: https://example.test/checksums.txt
-            installPath: /usr/local/bin/nvim
-        STEP
-
-      result.error_messages.any?(&.includes?("must declare a literal SHA-256")).should be_true
-    end
-
-    it "refuses a signature without a signer" do
-      result = parse_step(<<-STEP)
-        - name: nvim
-          kind: binary-downloads
-          spec:
-            binaryName: nvim
-            url: https://example.test/nvim
-            signatureUrl: https://example.test/nvim.asc
-            installPath: /usr/local/bin/nvim
-        STEP
-
-      result.error_messages.any?(&.includes?("must be configured together")).should be_true
-    end
-
-    it "rejects a plain-HTTP artifact URL" do
-      result = parse_step(<<-STEP)
-        - name: nvim
-          kind: binary-downloads
-          spec:
-            binaryName: nvim
-            url: http://example.test/nvim
-            checksum:
-              algorithm: sha256
-              value: #{SHA}
-            installPath: /usr/local/bin/nvim
-        STEP
-
-      result.error_messages.any?(&.includes?("must use https")).should be_true
-    end
-
-    it "rejects credentials embedded in the URL" do
-      result = parse_step(<<-STEP)
-        - name: nvim
-          kind: binary-downloads
-          spec:
-            binaryName: nvim
-            url: https://user:pw@example.test/nvim
-            checksum:
-              algorithm: sha256
-              value: #{SHA}
-            installPath: /usr/local/bin/nvim
-        STEP
-
-      result.error_messages.any?(&.includes?("must not include user-info")).should be_true
-    end
-
-    it "requires an archive member path for archive URLs" do
-      result = parse_step(<<-STEP)
-        - name: rg
-          kind: binary-downloads
-          spec:
-            binaryName: rg
-            url: https://example.test/ripgrep.tar.gz
-            checksum:
-              algorithm: sha256
-              value: #{SHA}
-            installPath: /usr/local/bin/rg
-        STEP
-
-      message = result.error_messages.find!(&.includes?("archivePath"))
-      message.should contain("never guesses by basename")
-    end
-
-    it "refuses delegation when stripComponents would change the selection" do
-      result = parse_step(<<-STEP)
-        - name: rg
-          kind: binary-downloads
-          spec:
-            binaryName: rg
-            url: https://example.test/ripgrep.zip
-            archivePath: ripgrep/rg
-            stripComponents: 1
-            checksum:
-              algorithm: sha256
-              value: #{SHA}
-            installPath: /usr/local/bin/rg
-        STEP
-
-      result.error_messages.any?(&.includes?("no stripComponents equivalent")).should be_true
-    end
-
-    it "rejects an install path the symlink would shadow" do
-      result = parse_step(<<-STEP)
-        - name: nvim
-          kind: binary-downloads
-          spec:
-            binaryName: nvim
-            url: https://example.test/nvim
-            checksum:
-              algorithm: sha256
-              value: #{SHA}
-            installPath: /usr/local/bin/nvim
-            symlinkPath: /usr/local/bin/nvim
-        STEP
-
-      result.error_messages.any?(&.includes?("must differ from install path")).should be_true
-    end
-
-    it "requires an absolute install path" do
-      result = parse_step(<<-STEP)
-        - name: nvim
-          kind: binary-downloads
-          spec:
-            binaryName: nvim
-            url: https://example.test/nvim
-            checksum:
-              algorithm: sha256
-              value: #{SHA}
-            installPath: bin/nvim
-        STEP
-
-      result.error_messages.any?(&.includes?("must be absolute")).should be_true
+      message = result.error_messages.find!(&.includes?("was removed"))
+      message.should contain("binstaller-profile")
     end
   end
 

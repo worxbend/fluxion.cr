@@ -53,7 +53,6 @@ module Fluxion::Config
       Kind.new("zypper-packages", "Install packages with zypper.", Category::Packages, ZYPPER_ACTIONS, PackageManager::Zypper),
       Kind.new("sdkman-packages", "Install SDKMAN candidates such as java or maven.", Category::Sdkman),
       Kind.new("flatpak-packages", "Install Flatpak applications.", Category::Apps),
-      Kind.new("binary-downloads", "Download and install a compiled binary or archive.", Category::Installer),
       Kind.new("shell-scripts", "Run local or HTTPS-fetched shell scripts.", Category::Installer),
       Kind.new("commands", "Run shell or direct argv commands.", Category::Installer),
       Kind.new("file-writes", "Write files from inline content or a source path.", Category::Installer),
@@ -96,6 +95,22 @@ module Fluxion::Config
       ALL.find { |kind| kind.id == id }
     end
 
+    # Kinds that existed and no longer do.
+    #
+    # A retired kind is not a typo, so `suggestion_for` cannot help: the edit
+    # distance from "binary-downloads" to every surviving kind is far outside
+    # its budget, and the user would get a bare "unsupported step kind" with no
+    # hint at all. Each entry says what took the job over.
+    RETIRED = {
+      "binary-downloads" => "binstaller now owns download, verification and install: " \
+                            "move these entries into a BinaryDistributionProfile and point at it " \
+                            "with kind: binstaller-profile",
+    }
+
+    def retired?(id : String) : String?
+      RETIRED[id]?
+    end
+
     def suggestion_for(id : String) : String?
       return if id.empty?
       budget = Math.max(2, id.size // 3)
@@ -116,7 +131,6 @@ module Fluxion::Config
     # shape differs from their builder's — the package family, `file-writes`,
     # and `interrupt` — are absent, because the mapper handles those directly.
     STEP_TYPES = {
-      "binary-downloads"   => "compiled-binary",
       "shell-scripts"      => "shell-script",
       "commands"           => "shell-command",
       "nerd-fonts"         => "nerd-fonts",

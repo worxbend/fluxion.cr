@@ -358,7 +358,6 @@ same order.
 | `zypper-packages` | Packages | Install packages with zypper. |
 | `sdkman-packages` | Sdkman | Install SDKMAN candidates such as java or maven. |
 | `flatpak-packages` | Apps | Install Flatpak applications. |
-| `binary-downloads` | Installer | Download and install a compiled binary or archive. |
 | `shell-scripts` | Installer | Run local or HTTPS-fetched shell scripts. |
 | `commands` | Installer | Run shell or direct argv commands. |
 | `file-writes` | Installer | Write files from inline content or a source path. |
@@ -513,86 +512,6 @@ than hiding it in a shell command where nothing verifies it.
 ---
 
 ## Installer kinds
-
-### `binary-downloads`
-
-```yaml
-- name: install-neovim
-  kind: binary-downloads
-  spec:
-    binaryName: nvim            # required — display name and extracted file name
-    url: https://github.com/... # required — https only
-    checksum:                   # SHA-256 is the only supported algorithm
-      algorithm: sha256
-      value: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-    installPath: /usr/local/bin/nvim   # required — absolute, normalized
-    archivePath: nvim-linux64/bin/nvim # required for archives — exact post-strip path
-    stripComponents: 1          # optional — components stripped before matching
-    mode: "0755"                # optional — POSIX install mode; default "0755"
-    symlinkPath: /usr/local/bin/vim    # optional
-    continueOnError: false      # default: false
-```
-
-Every download must use one of two trust modes: a literal SHA-256 `checksum`, or
-an HTTPS detached signature naming a signer the profile trusts.
-
-```yaml
-- name: install-neovim
-  kind: binary-downloads
-  spec:
-    binaryName: nvim
-    url: https://example.org/nvim.tar.gz
-    signatureUrl: https://example.org/nvim.tar.gz.asc
-    allowedSignerFingerprint: 0123456789ABCDEF0123456789ABCDEF01234567
-    checksumUrl: https://example.org/checksums.txt   # supplemental metadata
-    installPath: /usr/local/bin/nvim
-    archivePath: nvim-linux64/bin/nvim
-```
-
-`checksum` and `checksumUrl` are mutually exclusive.
-
-`checksumUrl` never establishes trust by itself: it is served by the same host as
-the artifact, so an attacker who can replace one can replace both. Use it only
-alongside a signer-bound signature. A checksum document may hold one bare
-SHA-256 digest or ordinary `sha256sum` lines; a named entry is accepted only when
-its safe relative path's basename matches the artifact URL's final component.
-
-`signatureUrl` and `allowedSignerFingerprint` must be configured together — a
-valid signature from an unknown key is not trust. The fingerprint is the 40-hex
-OpenPGP v4 or 64-hex v5 primary/signing-key fingerprint. Fluxion runs GPG with a
-machine-readable status channel and requires a signature whose signing or
-primary-key fingerprint matches; a zero exit code alone is not sufficient,
-because `gpg` reports success for a signature made by any key it happens to
-hold. Accepted signature hashes are SHA-256, SHA-384, and SHA-512; accepted
-public-key algorithms are RSA signing, ECDSA, legacy EdDSA, Ed25519, and Ed448.
-DSA and SHA-1 are rejected.
-
-Artifact, checksum, and signature URLs must be absolute HTTPS URLs with a host
-and no user-info. A redirect that downgrades to HTTP is rejected. Query strings
-stay available to the in-memory request for signed URLs but are stripped from
-persisted state.
-
-Supported formats are `.tar.gz`, `.tgz`, `.zip`, `.tar.xz`, and plain binaries.
-`.tar.gz` and `.tgz` are extracted in process; `.zip` and `.tar.xz` are
-delegated to `binstaller`, and the step fails rather than copying an archive
-into place if that delegation is unavailable. Archive URLs require a normalized
-relative POSIX `archivePath`, matched exactly after `stripComponents` — never by
-basename, because two members can share one. Delegation is refused when
-`stripComponents > 0`, since `binstaller` has no equivalent selector.
-
-Downloads are streamed with timeouts. Artifacts and signatures are capped at
-1 GiB and checksum documents at 1 MiB; oversized, truncated, or interrupted
-downloads are rejected and their partial files removed. Local tar extraction
-caps each entry at 1 GiB and the whole decompressed stream at 2 GiB, including
-headers, padding, GNU long-name records, and PAX metadata — a compressed file's
-size says nothing about what it expands to.
-
-The verified binary is staged beside `installPath`, given its `mode` and
-`symlinkPath`, and moved into place atomically only after that succeeds; a
-failed commit restores the previous symlink. Privileged staging is allowed only
-in a root-owned directory with no symlink components and no group or other write
-permission. Dry-run previews the URL, the archive selection, the destination,
-the mode, and the symlink without downloading or writing anything.
 
 ### `shell-scripts`
 

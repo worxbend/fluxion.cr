@@ -163,26 +163,11 @@ module Fluxion::Executor
         "Checksum mismatch for #{PublicUrl.from(url)}: expected #{expected.value} but got #{actual}")
     end
 
-    # Fetches a small text document, such as a checksums file.
-    def download_text(url : String) : String
-      uri = validate(url)
-      body = String.build do |io|
-        fetch(uri) do |stream, _|
-          buffer = Bytes.new(CHUNK_BYTES)
-          written = 0_i64
-          loop do
-            read = stream.read(buffer)
-            break if read.zero?
-            written += read
-            if written > MAX_TEXT_BYTES
-              raise TrustError.new("Response exceeds the maximum size of #{MAX_TEXT_BYTES} bytes: #{PublicUrl.from(url)}")
-            end
-            io.write(buffer[0, read])
-          end
-        end
-      end
-      body
-    end
+    # Deliberately absent: `download_text`, which fetched a checksums file.
+    #
+    # Its only caller was the supplemental checksum-document check on
+    # `binary-downloads`, and it went with that kind. `MAX_TEXT_BYTES` stays: it
+    # is the ceiling the toolchain and oh-my-zsh installers download under.
 
     # Validates transport rules. Applied to the request URL and again to the
     # final URL after redirects.
@@ -230,156 +215,11 @@ module Fluxion::Executor
     end
   end
 
-  # Verifies a detached OpenPGP signature against an explicitly trusted signer.
-  #
-  # A zero exit from gpg is deliberately not sufficient. gpg reports success
-  # for a signature made by any key it happens to have, so the machine-readable
-  # status output is parsed and every VALIDSIG must name the configured signer.
-  module SignatureVerifier
-    extend self
-
-    VERIFY_TIMEOUT = 1.minute
-
-    # Statuses that mean the signature is bad, expired, revoked, or unknown.
-    REJECTED = %w[BADSIG ERRSIG EXPSIG EXPKEYSIG REVKEYSIG KEYEXPIRED SIGEXPIRED NODATA NO_PUBKEY]
-
-    # RSA-encrypt-or-sign, RSA-sign, ECDSA, legacy EdDSA, Ed25519, Ed448.
-    ALLOWED_PUBLIC_KEY_ALGORITHMS = Set{1, 3, 19, 22, 27, 28}
-
-    # SHA-256, SHA-384, SHA-512. SHA-1 is deliberately absent.
-    ALLOWED_HASH_ALGORITHMS = Set{8, 9, 10}
-
-    def verify(artifact : String, signature : String, signer : Fingerprint, runner : ShellRunner) : Nil
-      unless runner.command_exists?("gpg")
-        raise TrustError.new("gpg is not on PATH, so the signature cannot be verified")
-      end
-
-      result = runner.run(Command.new(
-        ["gpg", "--batch", "--no-tty", "--status-fd=1", "--verify", signature, artifact],
-        timeout: VERIFY_TIMEOUT))
-
-      statuses = result.stdout.lines.compact_map do |line|
-        next unless line.starts_with?("[GNUPG:] ")
-        line.lchop("[GNUPG:] ").strip.split(/\s+/)
-      end
-
-      unless result.success?
-        raise TrustError.new("Signature verification failed: #{result.detail.presence || "gpg exited #{result.exit_code}"}")
-      end
-
-      if rejected = statuses.find { |fields| REJECTED.includes?(fields.first?) }
-        raise TrustError.new("Signature verification reported #{rejected.first}")
-      end
-
-      valid = statuses.select { |fields| fields.first? == "VALIDSIG" }
-      raise TrustError.new("Signature status is missing VALIDSIG") if valid.empty?
-
-      valid.each { |fields| check_valid_signature(fields, signer) }
-    end
-
-    # GnuPG's documented VALIDSIG layout, after the status keyword:
-    #
-    #   1 fingerprint      2 creation date   3 timestamp   4 expiry
-    #   5 version          6 reserved        7 pubkey-algo 8 hash-algo
-    #   9 sig-class       10 primary key fingerprint
-    #
-    # The primary fingerprint is the last field and may be absent on very old
-    # gpg, which is the only reason 10 fields is accepted alongside 11.
-    private def check_valid_signature(fields : Array(String), signer : Fingerprint) : Nil
-      unless fields.size == 10 || fields.size == 11
-        raise TrustError.new("Signature reported a malformed VALIDSIG status")
-      end
-
-      # Three distinct causes, reported separately and naming the value seen.
-      # They shared one message, which fired at exactly the moment a real user
-      # needs to know whether the problem is their key algorithm, their digest
-      # algorithm, or a gpg that wrote something unparseable — and the numbers
-      # were already in scope.
-      public_key = fields[7]?.try(&.to_i?)
-      hash = fields[8]?.try(&.to_i?)
-
-      unless public_key && hash
-        raise TrustError.new(
-          "VALIDSIG algorithm fields are not integers: " \
-          "pubkey=#{fields[7]?.inspect} hash=#{fields[8]?.inspect}")
-      end
-
-      unless ALLOWED_PUBLIC_KEY_ALGORITHMS.includes?(public_key)
-        raise TrustError.new(
-          "Signature uses public-key algorithm #{public_key}, which is not accepted " \
-          "(allowed: #{ALLOWED_PUBLIC_KEY_ALGORITHMS.to_a.sort!.join(", ")})")
-      end
-
-      unless ALLOWED_HASH_ALGORITHMS.includes?(hash)
-        raise TrustError.new(
-          "Signature uses hash algorithm #{hash}, which is not accepted " \
-          "(allowed: #{ALLOWED_HASH_ALGORITHMS.to_a.sort!.join(", ")}; SHA-1 is deliberately absent)")
-      end
-
-      # The signing key, and the primary key it belongs to when reported.
-      # A profile may legitimately pin either.
-      signing = fields[1]
-      primary = fields[10]?
-
-      return if signer.matches?(signing)
-      return if primary && signer.matches?(primary)
-
-      raise TrustError.new("Signature was not made by the configured allowed signer #{signer}")
-    end
-  end
-
-  # Parses a `sha256sum`-style checksum document.
-  #
-  # A checksum document is never a trust anchor on its own — it is served by
-  # the same host as the artifact — so this only ever supplements a
-  # signer-bound signature.
-  module ChecksumDocument
-    extend self
-
-    def digest_for(body : String, asset : String) : String
-      lines = body.lines.map(&.strip).reject(&.empty?)
-
-      # A document containing exactly one bare digest names its asset by
-      # context rather than in the file.
-      if lines.size == 1 && lines.first.matches?(/\A[0-9a-fA-F]{64}\z/)
-        return lines.first.downcase
-      end
-
-      matches = lines.compact_map do |line|
-        fields = line.split(/\s+/, 2)
-        next unless fields.size == 2
-        next unless normalize(fields[1]) == asset
-        fields[0].downcase
-      end
-
-      case matches.size
-      when 0 then raise TrustError.new("Checksum document has no entry for #{asset}")
-      when 1
-        digest = matches.first
-        unless digest.matches?(/\A[0-9a-f]{64}\z/)
-          raise TrustError.new("Malformed SHA-256 entry for #{asset}")
-        end
-        digest
-      else
-        # Two different digests for one name means the document is either
-        # corrupt or crafted, and picking one would be a guess.
-        raise TrustError.new("Checksum document has duplicate entries for #{asset}")
-      end
-    end
-
-    # `sha256sum` writes a leading `*` for binary mode; some tools prefix `./`.
-    private def normalize(name : String) : String
-      cleaned = name.strip.lchop('*').lchop("./")
-      File.basename(cleaned)
-    end
-  end
-
   # Replays canned responses, the way `FakeShellRunner` replays canned results.
   #
   # Shipped beside the real transport rather than kept in the specs because it
-  # is what makes the download-verify-install path reachable at all: without it
-  # every `execute` on a fetching executor would make a real HTTPS request, so
-  # none of them had a spec.
+  # is what makes the download paths reachable at all: without it every fetch
+  # would make a real HTTPS request.
   class FakeHttpTransport < HttpTransport
     # Every URL requested, in order, including each redirect hop — which is how
     # a spec asserts that a redirect was actually re-validated and followed.

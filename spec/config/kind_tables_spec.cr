@@ -108,3 +108,32 @@ private class UnmappedStep < Fluxion::Step
     [] of Fluxion::ItemRef
   end
 end
+
+describe "installerVersion" do
+  it "refuses a release Fluxion has no digest for, naming the one it has" do
+    # It was parsed, range-checked, stored and never read — a knob that turned
+    # nothing, because ToolBroker resolves the pinned release regardless.
+    result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEP))
+      - name: portable
+        kind: binstaller-profile
+        spec:
+          config: ./binstaller.yaml
+          installerVersion: v9.9.9
+      STEP
+
+    message = result.error_messages.find!(&.includes?("verified digest"))
+    message.should contain(Fluxion::BinstallerProfileStep::DEFAULT_INSTALLER_VERSION)
+  end
+
+  it "accepts the pinned release" do
+    result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEP))
+      - name: portable
+        kind: binstaller-profile
+        spec:
+          config: ./binstaller.yaml
+          installerVersion: #{Fluxion::BinstallerProfileStep::DEFAULT_INSTALLER_VERSION}
+      STEP
+
+    result.errors.should be_empty
+  end
+end

@@ -88,3 +88,36 @@ describe "delegated config change detection" do
     end
   end
 end
+
+describe "Recorder#recorded" do
+  it "stops counting a delegated step as installed once its config changes" do
+    # This is the branch the whole change exists for, and it had no spec.
+    directory = File.tempname("fluxion-recorded")
+    begin
+      store = Fluxion::State::Store.new(directory)
+      config = File.tempname("fluxion-recorded-config")
+      File.write(config, "versions:\n  lazygit: 0.61.0\n")
+
+      profile = Fluxion::Profile.new("test",
+        Fluxion::TargetOs.new(Fluxion::Distribution::Fedora), [phase_for(config)])
+      options = Fluxion::Executor::RunOptions.new(
+        mode: Fluxion::Executor::RunMode::SkipInstalled)
+      runner = Fluxion::Executor::FakeShellRunner.new.available("binstaller")
+
+      orchestrator = Fluxion::Executor::Orchestrator.new(runner, state: store)
+      orchestrator.run(profile, options, Fluxion::NullExecutionListener.new)
+      first = runner.commands.size
+      first.should be > 0
+
+      # Same profile, edited config: the step must run again.
+      File.write(config, "versions:\n  lazygit: 0.62.0\n")
+      runner2 = Fluxion::Executor::FakeShellRunner.new.available("binstaller")
+      Fluxion::Executor::Orchestrator.new(runner2, state: store)
+        .run(profile, options, Fluxion::NullExecutionListener.new)
+
+      runner2.commands.size.should be > 0
+    ensure
+      FileUtils.rm_rf(directory)
+    end
+  end
+end

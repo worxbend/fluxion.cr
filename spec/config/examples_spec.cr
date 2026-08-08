@@ -82,3 +82,32 @@ describe "example profiles" do
     end
   end
 end
+
+describe "delegated configs in the shipped examples" do
+  root = File.expand_path(File.join(__DIR__, "..", "..", "examples"))
+  examples = Dir.glob(File.join(root, "*.yaml")).sort
+
+  it "resolve to files that exist" do
+    # The profiles point at companion configs with relative paths. A typo would
+    # only surface at apply time, on the machine, halfway through a bootstrap.
+    missing = [] of String
+
+    examples.each do |path|
+      document = Fluxion::Config::Loader.read(path)
+      context = Fluxion::Config::Context.new(File.dirname(path), ProfileHelpers.fedora_host)
+      Fluxion::Config::Loader.parse(context, document, path).steps.each do |step|
+        config = case step
+                 when Fluxion::BinstallerProfileStep then step.config
+                 when Fluxion::NerdFontsStep         then step.config
+                 when Fluxion::DotbotStep            then step.config
+                 end
+        next unless config
+        # A `~` path is the user's own and cannot be checked from here.
+        next if config.starts_with?(Fluxion::Host.home)
+        missing << "#{File.basename(path)} -> #{config}" unless File.file?(config)
+      end
+    end
+
+    missing.should be_empty
+  end
+end

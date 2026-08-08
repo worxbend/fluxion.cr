@@ -162,3 +162,105 @@ describe "preview and run agree on the interpreter" do
     argv_for(step).first.should eq("sh")
   end
 end
+
+# The remote path became reachable once `DownloadSupport` gave it an injectable
+# transport; before that no spec could execute it without a network.
+private class FakeFetchingScriptExecutor < Fluxion::Executor::ShellScriptExecutor
+  def initialize(@transport : Fluxion::Executor::FakeHttpTransport)
+    super()
+  end
+
+  protected def http_transport : Fluxion::Executor::HttpTransport
+    @transport
+  end
+end
+
+private def run_remote(step : Fluxion::ShellScriptStep,
+                       transport : Fluxion::Executor::FakeHttpTransport,
+                       runner = Fluxion::Executor::FakeShellRunner.new) : Fluxion::StepResult
+  executor = FakeFetchingScriptExecutor.new(transport)
+  executor.execute(step, executor.items(step).first, runner) { }
+end
+
+private def remote_step(body : String, digest : String,
+                        shell : Fluxion::ShellKind? = nil) : Fluxion::ShellScriptStep
+  Fluxion::ShellScriptStep.new("setup", [Fluxion::ShellScriptItem.new(
+    name: "vendor", url: "https://example.test/install.sh", shell: shell,
+    sha256: Fluxion::Checksum.new(Fluxion::ChecksumAlgorithm::Sha256, digest))])
+end
+
+describe "remote scripts" do
+  it "downloads, verifies, and runs the fetched file" do
+    body = "#!/bin/sh\necho hi\n"
+    transport = Fluxion::Executor::FakeHttpTransport.new.on("https://example.test/install.sh", body)
+    runner = Fluxion::Executor::FakeShellRunner.new
+
+    result = run_remote(remote_step(body, Digest::SHA256.hexdigest(body)), transport, runner)
+
+    result.should be_a(Fluxion::StepResult::Success)
+    runner.argv.first.last.should end_with(".sh")
+  end
+
+  it "refuses to run bytes whose digest does not match" do
+    # The pin is the whole reason a remote script is allowed at all.
+    transport = Fluxion::Executor::FakeHttpTransport.new
+      .on("https://example.test/install.sh", "tampered")
+    runner = Fluxion::Executor::FakeShellRunner.new
+
+    result = run_remote(remote_step("expected", Digest::SHA256.hexdigest("expected")),
+      transport, runner)
+
+    result.should be_a(Fluxion::StepResult::Failure)
+    result.as(Fluxion::StepResult::Failure).error_message.should contain("Checksum mismatch")
+    runner.commands.should be_empty
+  end
+
+  it "reports an unreachable host as a failed item rather than raising" do
+    result = run_remote(remote_step("x", Digest::SHA256.hexdigest("x")),
+      Fluxion::Executor::FakeHttpTransport.new)
+
+    result.should be_a(Fluxion::StepResult::Failure)
+  end
+
+  it "re-runs when the pin changes" do
+    # The item key is the URL, so re-pinning to a new release would otherwise
+    # leave the step looking unchanged.
+    one = Fluxion::State::Fingerprint.of(Fluxion::Phase.new("p",
+      [remote_step("a", Digest::SHA256.hexdigest("a"))] of Fluxion::Step))
+    two = Fluxion::State::Fingerprint.of(Fluxion::Phase.new("p",
+      [remote_step("b", Digest::SHA256.hexdigest("b"))] of Fluxion::Step))
+
+    two.should_not eq(one)
+  end
+end
+
+describe "failure paths" do
+  it "reports a local script that is not there" do
+    step = Fluxion::ShellScriptStep.new("setup",
+      [Fluxion::ShellScriptItem.new(name: "s", script: "/nope/absent.sh")])
+    result = run(step)
+
+    result.should be_a(Fluxion::StepResult::Failure)
+    result.as(Fluxion::StepResult::Failure).error_message.should contain("/nope/absent.sh")
+  end
+
+  it "reports a non-zero exit with the command that produced it" do
+    runner = Fluxion::Executor::FakeShellRunner.new.default(Fluxion::ProcessResult.new(3, "boom"))
+    step = script_step([Fluxion::ShellScriptItem.new(
+      name: "s", content: "exit 3\n", shell: Fluxion::ShellKind::Bash)])
+
+    result = run(step, runner)
+    failure = result.as(Fluxion::StepResult::Failure)
+    failure.exit_code.should eq(3)
+    failure.error_message.should contain("exited 3")
+  end
+
+  it "honours allowedExitCodes" do
+    runner = Fluxion::Executor::FakeShellRunner.new.default(Fluxion::ProcessResult.new(1, ""))
+    step = script_step([Fluxion::ShellScriptItem.new(
+      name: "s", content: "exit 1\n", shell: Fluxion::ShellKind::Bash,
+      allowed_exit_codes: [0, 1])])
+
+    run(step, runner).should be_a(Fluxion::StepResult::Success)
+  end
+end

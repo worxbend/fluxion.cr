@@ -63,3 +63,31 @@ jobs:
 
       - name: Check the maintenance scripts
         run: shellcheck scripts/*.sh
+
+  # SonarQube Cloud. Deliberately its own job on a plain runner rather than a
+  # step in `test`: the scanner needs a JVM and node, which the Crystal Alpine
+  # container does not carry.
+  #
+  # It runs on the same triggers as everything else here — a bare
+  # `pull_request:` already defaults to opened/synchronize/reopened, which is
+  # exactly what the scanner wants.
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+
+    # `secrets` are not exposed to workflows triggered from a fork, so without
+    # this the job would fail with an empty token on every outside contribution
+    # and show a red cross that says nothing about the change.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Shallow clones cost the analysis its blame data, which is what
+          # new-code detection and issue attribution are built on.
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

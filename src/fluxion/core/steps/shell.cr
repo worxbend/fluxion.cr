@@ -73,13 +73,25 @@ module Fluxion
 
     getter script : String?
     getter url : String?
+
+    # An inline script body, written into the run's private workspace and
+    # executed from there. The third and last source: exactly one of `script`,
+    # `url` or `content`.
+    getter content : String?
+
     getter args : Array(String)
     getter sha256 : Checksum?
+
+    # The interpreter this item asked for, if it did. Nil means fall back to
+    # the step's, then to the file's shebang, then to bash.
+    getter shell : ShellKind?
 
     def initialize(
       @name : String,
       @script : String? = nil,
       @url : String? = nil,
+      @content : String? = nil,
+      @shell : ShellKind? = nil,
       @args : Array(String) = [] of String,
       @working_dir : String? = nil,
       @environment : Array(ShellEnvironmentVariable) = [] of ShellEnvironmentVariable,
@@ -99,11 +111,18 @@ module Fluxion
       !@url.nil?
     end
 
+    def inline? : Bool
+      !@content.nil?
+    end
+
     # Stable identity for plans and state. A remote script is keyed by its URL
     # with credentials and query parameters stripped.
     def key : String
       script = @script
       return script if script
+
+      return @name if @content
+
       PublicUrl.from(@url || @name)
     end
   end
@@ -164,10 +183,14 @@ module Fluxion
     getter scripts : Array(ShellScriptItem)
     getter working_dir : String?
 
+    # The interpreter every item in this step uses unless it names its own.
+    getter shell : ShellKind?
+
     def initialize(
       name : String,
       @scripts : Array(ShellScriptItem),
       @working_dir : String? = nil,
+      @shell : ShellKind? = nil,
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
@@ -186,6 +209,23 @@ module Fluxion
 
     def requires_approval?(item_key : String) : Bool
       @scripts.any? { |script| script.name == item_key && script.confirmation_required? }
+    end
+
+    # Which interpreter runs `item`, ignoring the shebang.
+    #
+    # Precedence is item, then step. The shebang is consulted only by the
+    # executor and only for a `script:` or `url:` source, because an inline
+    # body has no shebang to read and no file to open.
+    def shell_for(item : ShellScriptItem) : ShellKind?
+      item.shell || @shell
+    end
+
+    # Inline bodies live in the profile but in no item key, so editing one
+    # would otherwise leave a completed phase looking unchanged and be skipped.
+    def content_digest : String?
+      bodies = @scripts.compact_map(&.content)
+      return if bodies.empty?
+      Digest::SHA256.hexdigest(bodies.join('\0'))
     end
 
     def summary : String

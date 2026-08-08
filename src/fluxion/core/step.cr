@@ -91,19 +91,22 @@ module Fluxion
       true
     end
 
-    # SHA-256 of the config file this step delegates to, when it delegates.
+    # SHA-256 over whatever decides this step's work but is not in its item keys.
     #
-    # The kinds that hand their work to another tool — binstaller, dotbot,
-    # nerd-fonts-installer — carry a path, not a description of the work. Their
-    # item key is that path, so `Fingerprint.of` saw nothing change when the
-    # file behind it changed: once such a step succeeded, editing the config it
-    # points at never ran it again under `--skip-already-installed`.
+    # `Fingerprint.of` hashes step scalars and item keys, which is enough for a
+    # step that names what it installs. It is not enough for two shapes:
     #
-    # The file's *bytes* are hashed, never parsed. Fluxion does not know those
-    # schemas and should not learn them — a new tool, a bumped version or an
-    # edited URL all move the digest, and an upstream field rename cannot break
-    # this. Nil for every step that describes its own work.
-    def external_config_digest : String?
+    # * A delegated kind — binstaller, dotbot, nerd-fonts-installer — whose item
+    #   key is a path to another tool's config. The work changes when that file
+    #   changes, and nothing in the fingerprint saw it, so once the step
+    #   succeeded editing the config never ran it again.
+    # * An inline script body, which lives in the profile but is not part of any
+    #   item key.
+    #
+    # For a delegated config the file's *bytes* are hashed, never parsed:
+    # Fluxion does not know those schemas and should not learn them, and an
+    # upstream field rename cannot break a byte hash. Nil when neither applies.
+    def content_digest : String?
       nil
     end
 

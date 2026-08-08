@@ -135,7 +135,7 @@ module Fluxion::Executor
         # is the one that was applied. The digest is stored in `checksum`, which
         # is otherwise unused for these kinds, so no new state field is needed
         # and an older state file simply reports nil and re-runs once.
-        expected = item.step.try(&.external_config_digest)
+        expected = item.step.try(&.content_digest)
         return if expected && record.checksum != expected
 
         InstallationStatus::InstalledFromState.new(item.key, record.completed_at, record.version)
@@ -151,7 +151,7 @@ module Fluxion::Executor
             item_type: item.item_type.json_name,
             completed_at: Time.utc,
             version: result.detected_version,
-            checksum: result.checksum || item.step.try(&.external_config_digest),
+            checksum: result.checksum || item.step.try(&.content_digest),
           ))
           @dirty = true
         end

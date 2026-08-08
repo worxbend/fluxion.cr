@@ -174,6 +174,14 @@ module Fluxion::Config
         path.ends_with?(".spec.command")
       when "commands"
         path.matches?(/\.spec\.commands\[\d+\]\z/) || path.ends_with?(".run") || path.ends_with?(".shellCommand")
+      when "shell-scripts"
+        # An inline `content:` body is handed straight to an interpreter, so it
+        # is a shell expression by definition. Substituting into it would be
+        # the injection point this rule exists to close — and unlike `script:`,
+        # whose file Fluxion never rewrites, the body is right here in the
+        # profile where a `${}` looks harmless. `args` and `env` still
+        # interpolate: those cross the boundary as separate argv entries.
+        path.ends_with?(".content")
       else
         false
       end

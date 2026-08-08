@@ -161,7 +161,7 @@ describe Fluxion::Config::StepParser do
   describe "shell kinds" do
     it "requires exactly one of script or url" do
       result = parse_step("- name: setup\n  kind: shell-scripts\n  spec: {}\n")
-      result.error_messages.any?(&.includes?("exactly one of script or url")).should be_true
+      result.error_messages.any?(&.includes?("exactly one of script, url or content")).should be_true
     end
 
     it "requires a digest for a remote script" do

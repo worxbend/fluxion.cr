@@ -6,7 +6,7 @@ module Fluxion
   # zip and tar.xz rather than shipping two more archive parsers that handle
   # traversal, symlinks, and decompression bombs.
   module DelegatedConfig
-    def external_config_digest : String?
+    def content_digest : String?
       path = config
       return unless File.file?(path)
       Digest::SHA256.hexdigest(File.read(path))

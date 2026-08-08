@@ -519,9 +519,11 @@ than hiding it in a shell command where nothing verifies it.
 - name: setup-scripts
   kind: shell-scripts
   spec:
+    shell: bash                  # step default: bash, sh or zsh
     scripts:
       - name: local
         script: ./scripts/setup.sh
+        shell: zsh               # per-item override
         args: [--quiet]
         cwd: /tmp
         sudo: false
@@ -530,14 +532,45 @@ than hiding it in a shell command where nothing verifies it.
       - name: remote
         url: https://example.org/install.sh
         sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - name: inline
+        shell: bash              # required here: there is no shebang to read
+        content: |
+          set -euo pipefail
+          loginctl enable-linger "$1"
+        args: ["${USER}"]
 ```
 
-Each item defines exactly one of `script` or `url`. A local `script` is an
-operator-controlled filesystem input and must not carry `sha256`; a remote `url`
-must be HTTPS without user-info and requires the SHA-256 of the exact response
-bytes. Fluxion verifies the digest before execution, including under `sudo`, and
-removes the temporary file afterwards. Redirects may stay on HTTPS, but the
-final URL must not contain user-info.
+Each item defines exactly one of `script`, `url` or `content`.
+
+A local `script` is an operator-controlled filesystem input and must not carry
+`sha256`. A remote `url` must be HTTPS without user-info and requires the
+SHA-256 of the exact response bytes; Fluxion downloads and verifies it before
+execution, including under `sudo`, and removes the temporary file afterwards.
+An inline `content` body is written into the run's private workspace at mode
+`0500` and run as a file — never as `bash -lc <body>`, which would put it in
+process listings and break `$0` and `$@`. It must not carry `sha256`: the bytes
+are already in the profile, which is the trust root.
+
+`${...}` is refused inside `content`, as it is for `commands` and `unless`: the
+body goes straight to an interpreter, so substituting into it would be an
+injection point. Pass data through `args` or `env`, which cross as separate
+argv entries and do interpolate.
+
+### Choosing the interpreter
+
+`shell` accepts `bash`, `sh` or `zsh` — a bare name, not a path. An absolute
+path is refused and points at `commands`, which takes an `argv` for anything
+else. Precedence:
+
+1. the item's `shell`
+2. the step's `shell`
+3. the file's `#!` line, for `script:` and `url:` only
+4. `/bin/bash`
+
+It reaches argv as the bare name so that under `sudo` the target is resolved
+against the root-owned system directories rather than a hardcoded location.
+Editing an inline body changes the phase fingerprint, so the step runs again
+instead of being skipped as already done.
 
 Item fields are `args`, `cwd` or `workingDir`, `env`, `sudo`,
 `allowedExitCodes`, `creates`, `unless`, `confirm`, `timeout`, `timeoutSeconds`,

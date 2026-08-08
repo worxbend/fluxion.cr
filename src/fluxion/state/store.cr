@@ -353,7 +353,7 @@ module Fluxion::State
         # everything above is blind to the work actually changing. Without this
         # a completed binstaller or dotbot phase stayed completed no matter what
         # was edited behind that path.
-        step.external_config_digest.try { |config| append(digest, "config", config) }
+        step.content_digest.try { |config| append(digest, "config", config) }
       end
 
       digest.hexfinal

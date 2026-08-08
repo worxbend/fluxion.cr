@@ -24,12 +24,12 @@ describe "delegated config change detection" do
   describe Fluxion::Step do
     it "reports no digest for a step that describes its own work" do
       step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Dnf, ["git"])
-      step.external_config_digest.should be_nil
+      step.content_digest.should be_nil
     end
 
     it "digests the referenced file's bytes for the delegated kinds" do
       with_config("apiVersion: binstaller.io/v1alpha1\n") do |path|
-        digest = Fluxion::BinstallerProfileStep.new("portable", path).external_config_digest
+        digest = Fluxion::BinstallerProfileStep.new("portable", path).content_digest
         digest.should eq(Digest::SHA256.hexdigest(File.read(path)))
       end
     end
@@ -38,12 +38,12 @@ describe "delegated config change detection" do
       # The fingerprint is bookkeeping; a missing config is the executor's
       # problem to report with a message naming the path.
       Fluxion::BinstallerProfileStep.new("portable", "/nope/absent.yaml")
-        .external_config_digest.should be_nil
+        .content_digest.should be_nil
     end
 
     it "covers dotbot too, which delegates the same way" do
       with_config("- link: {}\n") do |path|
-        Fluxion::DotbotStep.new("dots", path).external_config_digest.should_not be_nil
+        Fluxion::DotbotStep.new("dots", path).content_digest.should_not be_nil
       end
     end
   end

@@ -1,17 +1,39 @@
 module Fluxion::Config
   # Shell-driven kinds and the two human-checkpoint kinds.
   module StepParser
+    # A typed interpreter. `shell-scripts` accepts only the three bare names —
+    # an absolute path belongs to `commands`, which takes an argv rather than
+    # handing a file to an interpreter Fluxion cannot reason about.
+    private def script_shell(context : Context, node : Node) : ShellKind?
+      raw = context.optional_string(node)
+      return unless raw
+
+      if raw.includes?('/')
+        context.error(node.path, "must be a bare shell name, not a path",
+          "one of #{ShellKind.values.map(&.config_name).join(", ")}; use kind: commands with argv for anything else")
+        return
+      end
+
+      shell = ShellKind.from_config?(raw)
+      return shell if shell
+
+      context.error(node.path, "unsupported shell '#{raw}'",
+        "one of #{ShellKind.values.map(&.config_name).join(", ")}")
+      nil
+    end
+
     private def shell_script(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       working_dir = context.local_path(node["workingDir"], required: false)
+      step_shell = script_shell(context, node["shell"])
       scripts_node = node["scripts"]
 
       items = if scripts_node.present?
                 scripts_node.items.map_with_index do |entry, index|
-                  shell_script_item(context, entry, "#{name}[#{index}]", working_dir)
+                  shell_script_item(context, entry, "#{name}[#{index}]", working_dir, step_shell)
                 end.compact
               else
                 # A single script may be declared inline on the step instead.
-                item = shell_script_item(context, node, name, working_dir)
+                item = shell_script_item(context, node, name, working_dir, step_shell)
                 item ? [item] : [] of ShellScriptItem
               end
 
@@ -23,13 +45,15 @@ module Fluxion::Config
 
       ShellScriptStep.new(
         name, items, working_dir,
+        shell: step_shell,
         description: description,
         continue_on_error: context.bool(node["continueOnError"], false),
         probe_command: probe,
       )
     end
 
-    private def shell_script_item(context : Context, node : Node, fallback_name : String, inherited_dir : String?) : ShellScriptItem?
+    private def shell_script_item(context : Context, node : Node, fallback_name : String,
+                                  inherited_dir : String?, step_shell : ShellKind? = nil) : ShellScriptItem?
       # A bare string in the `scripts` list is just a path.
       if node.scalar?
         path = node.string?
@@ -39,11 +63,26 @@ module Fluxion::Config
 
       script_node = node["script"]
       url_node = node["url"]
+      content_node = node["content"]
       has_script = script_node.present?
       has_url = url_node.present?
+      has_content = content_node.present?
 
-      if has_script == has_url
-        context.error(node.path, "must define exactly one of script or url")
+      declared = [has_script, has_url, has_content].count(true)
+      unless declared == 1
+        context.error(node.path, "must define exactly one of script, url or content")
+        return
+      end
+
+      # An inline body has no shebang to read and no file to open, so the
+      # interpreter cannot be inferred and must be stated.
+      shell = script_shell(context, node["shell"])
+      # The step's `shell:` is a default for its items, so it satisfies the
+      # inline requirement just as an item-level one does.
+      if has_content && shell.nil? && step_shell.nil?
+        context.error(node["shell"].path,
+          "is required for an inline content script",
+          "one of #{ShellKind.values.map(&.config_name).join(", ")}; there is no shebang to read")
         return
       end
 
@@ -54,9 +93,9 @@ module Fluxion::Config
           "Fluxion verifies the digest before executing, including under sudo")
         return
       end
-      if has_script && node["sha256"].present?
+      if !has_url && node["sha256"].present?
         context.error(node["sha256"].path, "is only valid for a remote URL",
-          "a local script is an operator-controlled input")
+          "a local script is an operator-controlled input, and an inline body is already in the profile")
       end
 
       url = has_url ? context.https_url(url_node) : nil
@@ -66,6 +105,8 @@ module Fluxion::Config
         name: context.optional_string(node["name"]) || fallback_name,
         script: has_script ? context.local_path(script_node) : nil,
         url: url,
+        content: has_content ? content_node.string? : nil,
+        shell: shell,
         args: node["args"].string_list,
         working_dir: context.local_path(node["cwd", "workingDir"], required: false) || inherited_dir,
         environment: environment(context, node["env"]),

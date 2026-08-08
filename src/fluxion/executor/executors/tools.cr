@@ -207,8 +207,6 @@ module Fluxion::Executor
 
   # `nerd-fonts` — install font families.
   class NerdFontsExecutor < StepExecutor
-    include DownloadSupport
-
     TIMEOUT = 15.minutes
 
     def supports?(step : Step) : Bool
@@ -217,46 +215,28 @@ module Fluxion::Executor
 
     def commands(step : Step, item : StepItem) : Array(Command)
       fonts = step.as(NerdFontsStep)
-      config = fonts.config_path || "<generated from profile>"
-      [Command.new([fonts.binary, "--config", config, "--dry-run"], timeout: TIMEOUT)]
+      # The installer's own dry run, so the preview is its per-family plan
+      # rather than an opaque command string.
+      [Command.new([KnownTools::NERD_FONTS.executable, "--config", fonts.config, "--dry-run"],
+        timeout: TIMEOUT)]
     end
 
     def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       fonts = step.as(NerdFontsStep)
       started = Time.instant
-      executable = ToolBroker.new(runner).resolve(KnownTools::NERD_FONTS)
 
-      with_workspace do |workspace|
-        config = fonts.config_path || render_config(fonts, workspace)
-        unless File.exists?(config)
-          return StepResult::Failure.new(item.key, "nerd-fonts config not found: #{config}", 1)
-        end
-
-        result = runner.run(Command.new([executable, "--config", config], timeout: TIMEOUT)) do |line|
-          sink.call(line)
-        end
-
-        outcome(item, result, started, "nerd-fonts-installer")
+      unless File.exists?(fonts.config)
+        return StepResult::Failure.new(item.key, "nerd-fonts config not found: #{fonts.config}", 1)
       end
+
+      executable = ToolBroker.new(runner).resolve(KnownTools::NERD_FONTS)
+      result = runner.run(Command.new([executable, "--config", fonts.config], timeout: TIMEOUT)) do |line|
+        sink.call(line)
+      end
+
+      outcome(item, result, started, "nerd-fonts-installer")
     rescue error : Error
       StepResult::Failure.new(item.key, "failed to prepare nerd-fonts-installer: #{error.message}", 1)
-    end
-
-    # An inline profile config is rendered into the installer's own format, so
-    # the profile stays the single source of truth for the font set.
-    private def render_config(step : NerdFontsStep, workspace : String) : String
-      config = step.config
-      raise ExecutionError.new("nerd-fonts requires either config or configPath") unless config
-
-      path = File.join(workspace, "nerd-fonts.yaml")
-      File.write(path, String.build do |io|
-        io << "release: " << config.release << '\n'
-        config.destination.try { |destination| io << "destination: " << destination << '\n' }
-        io << "refresh_font_cache: " << config.refresh_font_cache? << '\n'
-        io << "families:\n"
-        config.families.each { |family| io << "  - " << family << '\n' }
-      end)
-      path
     end
   end
 

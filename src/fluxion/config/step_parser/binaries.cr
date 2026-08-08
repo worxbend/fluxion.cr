@@ -163,48 +163,24 @@ module Fluxion::Config
     private def nerd_fonts(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       version = pinned_installer_version(context, node["installerVersion"],
         NerdFontsStep::DEFAULT_INSTALLER_VERSION, "installerVersion")
-      binary = context.optional_string(node["nerdfontBinary"]) || NerdFontsStep::DEFAULT_BINARY
 
-      config_node = node["config"]
-      config_path = context.local_path(node["configPath"], required: false)
-
-      # A textual `config` names an installer config the user maintains; an
-      # object is one Fluxion renders. Either is fine, but not both shapes at
-      # once for the same field.
-      if config_node.scalar?
-        config_path ||= context.resolve_local(config_node.string?.not_nil!)
-        config_node = Node.new(nil, config_node.path)
-      end
-
-      config = nil.as(NerdFontsConfig?)
-      if config_node.present?
-        release = context.require_string(config_node["release"], "release")
-        unless release.empty? || NerdFontsConfig.pinned_release?(release)
-          context.error(config_node["release"].path,
-            "must pin an exact release such as v3.4.0",
-            "a mutable selector would install different bytes on different days")
-        end
-
-        families_node = config_node["families"]
-        families = families_node.string_list
-        context.error(families_node.path, "must contain at least one font family") if families.empty?
-
-        config = NerdFontsConfig.new(
-          release, families,
-          destination: context.optional_string(config_node["destination"]).try { |dest| context.expand_home(dest) },
-          refresh_font_cache: context.bool(config_node["refreshFontCache", "refresh_font_cache"], true),
-        )
-      elsif config_path.nil?
-        context.error(node["config"].path, "either config or configPath is required")
+      # A path, never an inline object. Fluxion used to accept a font list and
+      # render it into the installer's format at run time, which made Fluxion
+      # the owner of a schema it does not control and cannot validate.
+      config_node = node["config", "configPath"]
+      if config_node.mapping?
+        context.error(config_node.path,
+          "must be a path to a nerd-fonts-installer config, not an inline object",
+          "the installer owns that schema; move release, destination and families into that file")
         return
       end
 
+      config = context.local_path(config_node)
+      return unless config
+
       NerdFontsStep.new(
-        name,
-        config: config,
-        config_path: config_path,
+        name, config,
         installer_version: version,
-        binary: binary,
         description: description,
         continue_on_error: context.bool(node["continueOnError"], false),
         probe_command: probe,

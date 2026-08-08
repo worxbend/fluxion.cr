@@ -700,34 +700,30 @@ for this platform.
 - name: nerd-fonts-install
   kind: nerd-fonts
   spec:
-    installerVersion: v1.0.7
-    nerdfontBinary: nerd-fonts-installer
-    config:
-      release: v3.4.0
-      destination: ~/.local/share/fonts/NerdFonts
-      refreshFontCache: true
-      families: [JetBrainsMono, Hack]
+    config: ./nerd-fonts.yaml
     probeCommand: "fc-list | grep -qi JetBrains"
 ```
 
-A textual `config`, or `configPath`, names an installer config you already
-maintain and uses it as-is, which keeps one source of truth for your font set:
+`config` — or `configPath`, an accepted alias — must be a path to a
+nerd-fonts-installer config. Relative paths resolve against the profile's
+directory. An inline object is rejected: the installer owns that schema, and
+the file is in its format, not Fluxion's.
 
 ```yaml
-- name: nerd-fonts-install
-  kind: nerd-fonts
-  spec:
-    config: ~/.config/nerd-fonts-installer/config.yaml
+release: v3.4.0
+destination: ~/.local/share/fonts/NerdFonts
+refresh_font_cache: true
+families: [JetBrainsMono, Hack]
 ```
 
-An inline `config` must pin an exact three-component release such as `v3.4.0`;
-`latest` and other mutable selectors are rejected, because they would install
-different bytes on different days. `families` needs at least one entry.
+Fluxion hashes that file's bytes into the phase fingerprint, so editing it
+re-runs the step; it never parses it to decide what runs. Pinning the font
+release is the installer config's job now — Fluxion used to refuse a mutable
+`latest` here, and that check moved with the work.
 
-The project renamed its binary and release assets at `v1.0.7`. Pinning `v1.0.6`
-or older still works — Fluxion tries the current asset name first and the
-pre-rename name second — but set `nerdfontBinary: nerdfont-install` too, since
-that is what those archives contain.
+The step is one item, not one per family. Fluxion cannot see inside the config
+and the installer applies it as a whole, so `probeCommand` is the way to make
+the step skippable.
 
 ### `dotfiles-apply`
 
@@ -737,7 +733,6 @@ that is what those archives contain.
   spec:
     config: ~/.dotfiles/install.conf.yaml
     installerVersion: v0.4.2
-    dotbotBinary: dotbot
     probeCommand: "test -f ~/.zshrc && test -f ~/.gitconfig"
 ```
 

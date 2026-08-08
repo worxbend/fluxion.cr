@@ -903,21 +903,19 @@ describe Fluxion::Config::Manifest do
             os:
               distribution: fedora
           vars:
-            fontFamily: JetBrainsMono
+            editor: neovim
           phases:
             - name: base
               steps:
-                - name: fonts
-                  kind: nerd-fonts
+                - name: tools
+                  kind: dnf-packages
                   spec:
-                    config:
-                      release: v3.4.0
-                      families: ["${fontFamily}"]
+                    packages: ["${editor}"]
         YAML
 
       result.errors.should be_empty
-      config = result.step("fonts").as(Fluxion::NerdFontsStep).config.not_nil!
-      config.families.should eq(["JetBrainsMono"])
+      step = result.step("tools").as(Fluxion::PackagesStep)
+      step.packages.should eq(["neovim"])
     end
 
     it "reports an unresolved variable with its config path and owning step" do

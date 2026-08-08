@@ -36,7 +36,6 @@ module Fluxion::Executor
         GitConfigProbe.new,
         SystemdUnitProbe.new,
         UserGroupProbe.new,
-        NerdFontProbe.new,
         ConfiguredProbeCommand.new,
       ] of Probe)
     end
@@ -377,25 +376,14 @@ module Fluxion::Executor
     end
   end
 
-  # Installed font families.
-  class NerdFontProbe < Probe
-    def supports?(item : StepItem) : Bool
-      item.item_type.nerd_font?
-    end
-
-    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
-      return InstallationStatus::Unknown.new(item.key, "fc-list is not on PATH") unless runner.command_exists?("fc-list")
-
-      result = runner.run(Command.new(["fc-list", ":", "family"], timeout: SLOW_PROBE_TIMEOUT))
-      unless result.success?
-        return InstallationStatus::Unknown.new(item.key, "fc-list exited #{result.exit_code}")
-      end
-
-      needle = item.key.downcase
-      found = result.stdout.downcase.lines.any?(&.includes?(needle))
-      found ? InstallationStatus::InstalledByProbe.new(item.key) : InstallationStatus::NotInstalled.new(item.key)
-    end
-  end
+  # Deliberately absent: a NerdFontProbe grepping `fc-list` for the item key.
+  #
+  # It only worked while an inline font list made each family its own item.
+  # With the config delegated the key is a path, which `fc-list` will never
+  # report. It also registered ahead of `ConfiguredProbeCommand` with an
+  # unconditional `supports?`, so it silently shadowed any `probeCommand` a
+  # user wrote on this kind — which is now the only way to make the step
+  # skippable.
 
   # The fallback: whatever the step's own `probeCommand` says.
   #

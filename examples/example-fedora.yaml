@@ -102,7 +102,6 @@ spec:
           spec:
             installerVersion: "v0.4.2"
             config: "~/.system-bootstrap/.files/install.conf.yaml"
-            dotbotBinary: dotbot
             probeCommand: "test -f ~/.zshrc && test -f ~/.tmux.conf"
 
     - name: shell-foundation
@@ -302,17 +301,7 @@ spec:
         - name: nerd-fonts-install
           kind: nerd-fonts
           spec:
-            installerVersion: "v1.0.7"
-            nerdfontBinary: "nerd-fonts-installer"
-            config:
-              release: "v3.4.0"
-              destination: "~/.fonts"
-              refreshFontCache: true
-              families:
-                - JetBrainsMono
-                - Hack
-                - FiraCode
-                - CascadiaCode
+            config: ./nerd-fonts/example-fedora.yaml
             probeCommand: "fc-list | grep -qi 'JetBrainsMono Nerd'"
 
     - name: desktop-apps

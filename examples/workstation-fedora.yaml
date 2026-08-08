@@ -132,7 +132,6 @@ spec:
           spec:
             config: ${HOME}/.dotfiles/install.conf.yaml
             installerVersion: v0.4.2
-            dotbotBinary: dotbot
 
     - name: finalisation
       description: Configuration files, one-off commands, and the relogin checkpoint

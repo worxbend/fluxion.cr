@@ -1,0 +1,12 @@
+# nerd-fonts-installer configuration for workstation-ubuntu.
+#
+# Fluxion points at this file and runs the installer; the installer owns
+# this schema. Previously these fields lived inline in the profile and
+# Fluxion rendered them into exactly this shape at run time.
+
+release: v3.4.0
+destination: ~/.local/share/fonts/NerdFonts
+refresh_font_cache: true
+families:
+  - JetBrainsMono
+  - Hack

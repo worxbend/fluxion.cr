@@ -575,7 +575,11 @@ describe Fluxion::Config::StepParser do
   end
 
   describe "pinned installers" do
-    it "requires an exact Nerd Fonts release" do
+    it "refuses an inline Nerd Fonts config and points at the installer's own" do
+      # Fluxion used to accept release/families here and render them into the
+      # installer's format at run time, which made it the owner of a schema it
+      # does not control. Pinning the font release is now the installer config's
+      # job — the guarantee moved with the work.
       result = parse_step(<<-STEP)
         - name: fonts
           kind: nerd-fonts
@@ -585,8 +589,33 @@ describe Fluxion::Config::StepParser do
               families: [JetBrainsMono]
         STEP
 
-      message = result.error_messages.find!(&.includes?("exact release"))
-      message.should contain("different bytes on different days")
+      message = result.error_messages.find!(&.includes?("not an inline object"))
+      message.should contain("nerd-fonts-installer config")
+    end
+
+    it "accepts a path to the installer's config" do
+      result = parse_step(<<-STEP)
+        - name: fonts
+          kind: nerd-fonts
+          spec:
+            config: ./nerd-fonts.yaml
+        STEP
+
+      result.errors.should be_empty
+      result.step("fonts").as(Fluxion::NerdFontsStep).config.should end_with("nerd-fonts.yaml")
+    end
+
+    it "yields one item for the whole config, not one per family" do
+      # The executor ignores the item and runs the whole installer, so a
+      # profile naming 42 families used to invoke it 42 times.
+      result = parse_step(<<-STEP)
+        - name: fonts
+          kind: nerd-fonts
+          spec:
+            config: ./nerd-fonts.yaml
+        STEP
+
+      result.step("fonts").items.size.should eq(1)
     end
 
     it "requires a full commit for oh-my-zsh" do

@@ -191,57 +191,24 @@ module Fluxion
     end
   end
 
-  # An inline Nerd Fonts installer configuration.
-  #
-  # `release` must be an exact three-component tag: `latest` would make the
-  # same profile install different bytes on different days, which is the
-  # opposite of what a bootstrap profile is for.
-  struct NerdFontsConfig
-    RELEASE_PATTERN = /\Av\d+\.\d+\.\d+\z/
-
-    getter release : String
-    getter destination : String?
-    getter? refresh_font_cache : Bool
-    getter families : Array(String)
-
-    def initialize(
-      @release : String,
-      @families : Array(String),
-      @destination : String? = nil,
-      @refresh_font_cache : Bool = true,
-    )
-    end
-
-    def self.pinned_release?(release : String) : Bool
-      release.matches?(RELEASE_PATTERN)
-    end
-  end
-
   # `type: nerd-fonts` — install Nerd Font families via `nerd-fonts-installer`.
   #
   # Either an inline `config` Fluxion renders, or a `configPath` to an
   # installer config the user already maintains — in which case that file, not
   # Fluxion, is the trust boundary.
   class NerdFontsStep < Step
+    include DelegatedConfig
+
     DEFAULT_INSTALLER_VERSION = "v1.0.7"
-    DEFAULT_BINARY            = "nerd-fonts-installer"
 
-    # The project renamed its binary and release assets at v1.0.7. Pinning an
-    # older release still works because Fluxion tries the current asset name
-    # first and the pre-rename name second.
-    LEGACY_BINARY = "nerdfont-install"
-
+    # Path to a nerd-fonts-installer config, in that tool's own format.
+    getter config : String
     getter installer_version : String
-    getter binary : String
-    getter config : NerdFontsConfig?
-    getter config_path : String?
 
     def initialize(
       name : String,
-      @config : NerdFontsConfig? = nil,
-      @config_path : String? = nil,
+      @config : String,
       @installer_version : String = DEFAULT_INSTALLER_VERSION,
-      @binary : String = DEFAULT_BINARY,
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
@@ -254,16 +221,19 @@ module Fluxion
       "nerd-fonts"
     end
 
+    # One item, not one per family.
+    #
+    # Fluxion used to expand an inline font list into an item each, but the
+    # executor ignores the item and runs the whole installer — so a profile
+    # naming 42 families invoked the installer 42 times, each one doing all 42.
+    # A config path is opaque by design, and this step either ran the installer
+    # or it did not.
     def items : Array(ItemRef)
-      config = @config
-      return [item(@name, "nerd-fonts")] unless config
-      config.families.map { |family| item(family, "nerd-font") }
+      [item(@config, "nerd-fonts", @name)]
     end
 
     def summary : String
-      config = @config
-      return "nerd fonts from #{@config_path}" unless config
-      "#{config.families.size} nerd font famil#{config.families.size == 1 ? "y" : "ies"} @ #{config.release}"
+      "nerd fonts from #{File.basename(@config)}"
     end
   end
 

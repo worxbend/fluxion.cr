@@ -102,7 +102,6 @@ spec:
           spec:
             installerVersion: "v0.4.2"
             config: "~/system-bootstrap/.files/install.conf.yaml"
-            dotbotBinary: dotbot
             probeCommand: "test -f ~/.zshrc && test -f ~/.tmux.conf"
 
     - name: shell-foundation
@@ -641,55 +640,7 @@ spec:
         - name: nerd-fonts-install
           kind: nerd-fonts
           spec:
-            installerVersion: "v1.0.7"
-            nerdfontBinary: "nerd-fonts-installer"
-            config:
-              release: "v3.4.0"
-              destination: "~/.fonts"
-              refreshFontCache: true
-              families:
-                - JetBrainsMono
-                - MPlus
-                - Terminus
-                - FantasqueSansMono
-                - Noto
-                - Hack
-                - HeavyData
-                - 3270
-                - FiraCode
-                - LiberationMono
-                - RobotoMono
-                - Mononoki
-                - Ubuntu
-                - DroidSansMono
-                - Monoid
-                - SpaceMono
-                - SourceCodePro
-                - ComicShannsMono
-                - SymbolsOnly
-                - DaddyTimeMono
-                - UbuntuMono
-                - Meslo
-                - FiraMono
-                - CodeNewRoman
-                - CascadiaCode
-                - Hasklig
-                - DejaVuSansMono
-                - ZedMono
-                - Inconsolata
-                - Hermit
-                - CommitMono
-                - Agave
-                - GeistMono
-                - Monaspace
-                - ShareTechMono
-                - Recursive
-                - D2Coding
-                - EnvyCodeR
-                - IosevkaTerm
-                - Lekton
-                - Lilex
-                - VictorMono
+            config: ./nerd-fonts/system-bootstrap-fedora.yaml
             probeCommand: "fc-list | grep -qi 'JetBrainsMono Nerd'"
 
     - name: flatpaks

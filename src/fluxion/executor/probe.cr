@@ -197,6 +197,10 @@ module Fluxion::Executor
 
   # Anything identified by an absolute path existing.
   class PathProbe < Probe
+    # `CompiledBinary` is retained for the same reason the enum member is:
+    # nothing produces it since `binary-downloads` was removed, but state files
+    # previous runs wrote still contain it, and `status` should answer for
+    # those rather than reporting "no probe registered".
     TYPES = [ItemType::CompiledBinary, ItemType::FileWrite, ItemType::OhMyZsh, ItemType::GpgKey]
 
     def supports?(item : StepItem) : Bool

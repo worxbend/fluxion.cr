@@ -47,36 +47,61 @@ targeting Fedora.
 
 ## A binary that is not packaged
 
-Pin the digest. Without it Fluxion refuses the download:
+Binaries are installed by [binstaller](https://github.com/worxbend/binstaller),
+which reads its own profile. Fluxion points at it:
 
 ```yaml
-- name: kubectl
-  kind: binary-downloads
+- name: portable-tools
+  kind: binstaller-profile
   spec:
-    binaryName: kubectl
-    url: https://dl.k8s.io/release/v1.30.2/bin/linux/amd64/kubectl
-    checksum:
-      algorithm: sha256
-      value: c6e9c45ce3f82c90663e3c30db3b27c167e8b19d83ed4048b61c1013f6a7c66e
-    installPath: /usr/local/bin/kubectl
+    config: ./binstaller.yaml
 ```
-
-From an archive, name the exact member — Fluxion never matches by basename,
-because two members can share one:
 
 ```yaml
-- name: ripgrep
-  kind: binary-downloads
-  spec:
-    binaryName: rg
-    url: https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz
-    archivePath: rg
-    stripComponents: 1
-    checksum:
-      algorithm: sha256
-      value: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
-    installPath: ~/.local/bin/rg
+# binstaller.yaml
+apiVersion: binstaller.io/v1alpha1
+kind: BinaryDistributionProfile
+spec:
+  policy:
+    # strict refuses missing checksums, mutable URLs, sudo symlinks and tar.xz.
+    mode: strict
+    appsDir: "${HOME}/.apps"
+  plan:
+    - name: kubectl
+      kind: binary-tool
+      spec:
+        installDir: "${HOME}/.local/bin"
+        download:
+          url: https://dl.k8s.io/release/v1.30.2/bin/linux/amd64/kubectl
+          checksum:
+            algorithm: sha256
+            value: c6e9c45ce3f82c90663e3c30db3b27c167e8b19d83ed4048b61c1013f6a7c66e
+        executables:
+          - path: kubectl
+
+    # From an archive, name the exact member.
+    - name: ripgrep
+      kind: binary-tool
+      spec:
+        installDir: "${HOME}/.local/bin"
+        download:
+          url: https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz
+          checksum:
+            algorithm: sha256
+            value: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+          archive:
+            type: tar.gz
+            stripComponents: 1
+            extract:
+              files:
+                - from: rg
+                  to: rg
+        executables:
+          - path: rg
 ```
+
+Fluxion hashes that file, so editing it re-runs the step. `fluxion lint` warns
+if it is not in strict mode or if an entry declares no checksum.
 
 ## Docker, without hiding the repository in a shell step
 

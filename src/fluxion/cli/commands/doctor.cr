@@ -14,7 +14,7 @@ module Fluxion::CLI
     end
 
     def usage : String
-      "fluxion doctor [-c FILE] [--skip-network]"
+      "fluxion doctor [-c FILE]"
     end
 
     enum Level
@@ -25,11 +25,9 @@ module Fluxion::CLI
 
     record Check, level : Level, name : String, detail : String
 
-    @skip_network = false
     @profile_name = "default"
 
     def register(parser : OptionParser) : Nil
-      parser.on("--skip-network", "Skip reachability checks for remote artifacts") { @skip_network = true }
       parser.on("--profile=NAME", "State profile name [default: default]") { |value| @profile_name = value }
     end
 
@@ -121,7 +119,16 @@ module Fluxion::CLI
     # than validating someone else's schema.
     private def delegated_check(step : Step, config : String) : Check
       info = File.info?(config)
-      return Check.new(Level::Fail, "#{step.kind} config", "#{config} does not exist") unless info
+      unless info
+        # A warning, not a failure. A delegated config is routinely produced by
+        # an earlier phase of the same run — `dotfiles-apply` pointing at a
+        # repo that `git-repo` clones is the shipped example — and `doctor` is
+        # the command you run on the fresh machine before any of that has
+        # happened. `lint` already takes this position one screen away.
+        return Check.new(Level::Warn, "#{step.kind} config", "#{config} does not exist yet")
+      end
+
+      # Existing but not a regular file is unambiguous.
       return Check.new(Level::Fail, "#{step.kind} config", "#{config} is not a regular file") unless info.file?
       Check.new(Level::Pass, "#{step.kind} config", config)
     end
@@ -164,7 +171,6 @@ module Fluxion::CLI
       when GitConfigStep     then ["git"]
       when SystemdUnitStep   then ["systemctl"]
       when GpgKeyStep        then ["gpg"]
-      when NerdFontsStep     then ["fc-list"]
       else                        [] of String
       end
     end
@@ -172,21 +178,6 @@ module Fluxion::CLI
     private def command_check(command : String, required : Bool = true) : Check
       return Check.new(Level::Pass, "#{command} command", command) if Host.command_exists?(command)
       Check.new(required ? Level::Fail : Level::Warn, "#{command} command", "not found on PATH")
-    end
-
-    private def reachable?(url : String) : Bool
-      uri = URI.parse(url)
-      client = HTTP::Client.new(uri)
-      client.connect_timeout = 3.seconds
-      client.read_timeout = 3.seconds
-      begin
-        response = client.head(uri.request_target)
-        response.status.success? || response.status.redirection?
-      ensure
-        client.close rescue nil
-      end
-    rescue
-      false
     end
   end
 
@@ -211,6 +202,11 @@ module Fluxion::CLI
     # The only piece of binstaller's schema Fluxion knows, and it is used to
     # decide whether to say anything at all rather than to validate.
     BINSTALLER_API_VERSION = "binstaller.io/v1alpha1"
+
+    # A profile is a hand-written manifest; anything larger is not one, and
+    # `lint` should not read an arbitrary file from the profile's directory
+    # without a ceiling.
+    MAX_DELEGATED_CONFIG_BYTES = 4_i64 * 1024 * 1024
 
     record Finding, severity : Diagnostic::Severity, rule : String, step : String, message : String
 
@@ -242,22 +238,31 @@ module Fluxion::CLI
     # validate. Anything unreadable or unrecognised is simply not reported.
     private def binstaller_findings(step : BinstallerProfileStep) : Array(Finding)
       findings = [] of Finding
-      body = File.read(step.config) rescue return findings
-      document = YAML.parse(body) rescue return findings
 
-      return findings unless document["apiVersion"]?.try(&.as_s?) == BINSTALLER_API_VERSION
+      info = File.info?(step.config)
+      return findings unless info && info.file? && info.size <= MAX_DELEGATED_CONFIG_BYTES
 
-      mode = document["spec"]?.try(&.["policy"]?).try(&.["mode"]?).try(&.as_s?)
+      body = File.read(step.config)
+      document = YAML.parse(body)
+      return findings unless document.as_h?.try(&.[]?(YAML::Any.new("apiVersion"))).try(&.as_s?) == BINSTALLER_API_VERSION
+
+      spec = document.as_h?.try(&.[]?(YAML::Any.new("spec"))).try(&.as_h?)
+      mode = spec.try(&.[]?(YAML::Any.new("policy"))).try(&.as_h?)
+        .try(&.[]?(YAML::Any.new("mode"))).try(&.as_s?)
       unless mode == "strict"
         findings << Finding.new(Diagnostic::Severity::Warning, "binstaller-not-strict", step.name,
           "#{File.basename(step.config)} does not set spec.policy.mode: strict, " \
           "so missing checksums and mutable URLs are only flagged rather than refused")
       end
 
-      unpinned = document["spec"]?.try(&.["plan"]?).try(&.as_a?).try do |plan|
+      unpinned = spec.try(&.[]?(YAML::Any.new("plan"))).try(&.as_a?).try do |plan|
         plan.compact_map do |entry|
-          next if entry["spec"]?.try(&.["download"]?).try(&.["checksum"]?)
-          entry["name"]?.try(&.as_s?)
+          mapping = entry.as_h?
+          next unless mapping
+          download = mapping[YAML::Any.new("spec")]?.try(&.as_h?)
+            .try(&.[]?(YAML::Any.new("download"))).try(&.as_h?)
+          next if download.try(&.[]?(YAML::Any.new("checksum")))
+          mapping[YAML::Any.new("name")]?.try(&.as_s?)
         end
       end
 
@@ -268,6 +273,13 @@ module Fluxion::CLI
       end
 
       findings
+    rescue
+      # Advisory by contract. The file belongs to another tool, is written by
+      # hand, and an empty placeholder or a plan of bare tool names is an
+      # ordinary state for it to be in — `YAML::Any#[]` raises rather than
+      # returning nil for those, which turned `lint` into a crash with a
+      # contextless message naming neither the file nor the step.
+      [] of Finding
     end
 
     private def analyse(profile : Profile) : Array(Finding)
@@ -278,6 +290,7 @@ module Fluxion::CLI
         when ShellCommandStep
           findings.concat(command_findings(step))
         when ShellScriptStep
+          findings.concat(script_findings(step))
           step.scripts.each do |script|
             next unless script.remote?
             findings << Finding.new(Diagnostic::Severity::Info, "remote-script", step.name,
@@ -310,26 +323,35 @@ module Fluxion::CLI
     EMBEDDED_SUDO = /(^|\s)sudo\s/
 
     private def command_findings(step : ShellCommandStep) : Array(Finding)
+      shell_text_findings(step.name, step.commands.compact_map(&.shell_command))
+    end
+
+    # An inline `content:` body is shell text handed straight to an
+    # interpreter, so it earns the same reading as a `commands` entry. It used
+    # to be invisible here: a body could pipe curl into sh and lint said
+    # nothing, while the identical text in a `commands` step was flagged.
+    private def script_findings(step : ShellScriptStep) : Array(Finding)
+      shell_text_findings(step.name, step.scripts.compact_map(&.content))
+    end
+
+    private def shell_text_findings(name : String, texts : Array(String)) : Array(Finding)
       findings = [] of Finding
 
-      step.commands.each do |command|
-        text = command.shell_command
-        next unless text
-
+      texts.each do |text|
         if text.matches?(PIPE_TO_SHELL)
           # The whole point of the typed kinds is that a remote script gets
           # pinned and verified; a pipe to a shell opts out of all of it.
-          findings << Finding.new(Diagnostic::Severity::Warning, "pipe-to-shell", step.name,
+          findings << Finding.new(Diagnostic::Severity::Warning, "pipe-to-shell", name,
             "pipes downloaded content into a shell; use a shell-script step with a sha256 instead")
         end
 
         if text.matches?(DESTRUCTIVE)
-          findings << Finding.new(Diagnostic::Severity::Warning, "destructive-command", step.name,
+          findings << Finding.new(Diagnostic::Severity::Warning, "destructive-command", name,
             "looks destructive; consider a confirm guard so it needs --yes")
         end
 
         if text.matches?(EMBEDDED_SUDO)
-          findings << Finding.new(Diagnostic::Severity::Info, "embedded-sudo", step.name,
+          findings << Finding.new(Diagnostic::Severity::Info, "embedded-sudo", name,
             "embeds sudo; set sudo: true so Fluxion can authenticate once up front")
         end
       end

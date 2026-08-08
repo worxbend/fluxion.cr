@@ -65,9 +65,11 @@ module Fluxion
 
   # One script inside a `shell-script` step.
   #
-  # Exactly one of `script` (an operator-controlled local file) or `url` (a
-  # remote artifact that must be pinned by `sha256`). The asymmetry is
-  # deliberate: a local path is already inside the trust boundary, a URL is not.
+  # Exactly one of three sources: `script`, an operator-controlled local file;
+  # `url`, a remote artifact that must be pinned by `sha256`; or `content`, a
+  # body written inline in the profile. The asymmetry is deliberate — a local
+  # path and an inline body are already inside the trust boundary, a URL is
+  # not, which is why only the URL carries a digest.
   struct ShellScriptItem
     include ShellItemFields
 
@@ -214,8 +216,9 @@ module Fluxion
     # Which interpreter runs `item`, ignoring the shebang.
     #
     # Precedence is item, then step. The shebang is consulted only by the
-    # executor and only for a `script:` or `url:` source, because an inline
-    # body has no shebang to read and no file to open.
+    # executor and only for a local `script:` — the one source whose bytes
+    # exist when the preview is built, so that `plan` and `apply` cannot name
+    # different interpreters.
     def shell_for(item : ShellScriptItem) : ShellKind?
       item.shell || @shell
     end
@@ -223,9 +226,15 @@ module Fluxion
     # Inline bodies live in the profile but in no item key, so editing one
     # would otherwise leave a completed phase looking unchanged and be skipped.
     def content_digest : String?
-      bodies = @scripts.compact_map(&.content)
-      return if bodies.empty?
-      Digest::SHA256.hexdigest(bodies.join('\0'))
+      # Inline bodies live in the profile but in no item key. A remote script's
+      # `sha256` is the same shape of problem: the item key is the URL, so
+      # re-pinning to a new release left the step looking unchanged.
+      inputs = @scripts.compact_map do |script|
+        digest = script.sha256
+        script.content || digest.try(&.value)
+      end
+      return if inputs.empty?
+      Digest::SHA256.hexdigest(inputs.join('\0'))
     end
 
     def summary : String

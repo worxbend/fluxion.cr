@@ -180,10 +180,13 @@ module Fluxion::Executor
     end
 
     def commands(step : Step, item : StepItem) : Array(Command)
-      dotbot = step.as(DotbotStep)
-      # The preview is dotbot's own dry run rather than an opaque command
-      # string, so what is shown is dotbot's per-link plan.
-      [Command.new([dotbot.binary, "-c", dotbot.config, "--dry-run"], timeout: TIMEOUT)]
+      # dotbot's own dry run, so the preview is its per-link plan rather than an
+      # opaque command string. Same flag spelling as the run: the preview used
+      # `-c` where `execute` uses `--config`, and took its executable from a
+      # `dotbotBinary` field the run ignored — so the two could name a
+      # different program with a different flag.
+      [Command.new(argv(step.as(DotbotStep), KnownTools::DOTBOT.executable, dry_run: true),
+        timeout: TIMEOUT)]
     end
 
     def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
@@ -195,13 +198,19 @@ module Fluxion::Executor
       end
 
       executable = ToolBroker.new(runner).resolve(KnownTools::DOTBOT)
-      result = runner.run(Command.new([executable, "--config", dotbot.config], timeout: TIMEOUT)) do |line|
+      result = runner.run(Command.new(argv(dotbot, executable), timeout: TIMEOUT)) do |line|
         sink.call(line)
       end
 
       outcome(item, result, started, "dotbot")
     rescue error : Error
       StepResult::Failure.new(item.key, "failed to prepare dotbot: #{error.message}", 1)
+    end
+
+    private def argv(step : DotbotStep, executable : String, dry_run : Bool = false) : Array(String)
+      argv = [executable, "--config", step.config]
+      argv << "--dry-run" if dry_run
+      argv
     end
   end
 

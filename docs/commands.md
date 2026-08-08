@@ -171,12 +171,15 @@ Whether this host can run this profile.
 
 ```bash
 fluxion doctor
-fluxion doctor --skip-network
 ```
 
 Checks the config, host detection, the state directory, `sudo`, every command
-the profile's steps require, configured shells, and the reachability of remote
-artifacts. Any failing check exits 5.
+the profile's steps require, configured shells, and that each delegated
+installer config exists. Any failing check exits 5.
+
+A delegated config that is missing is a warning rather than a failure: one is
+routinely produced by an earlier phase of the same run, and this is the command
+you run before any of that has happened.
 
 Answering before a run rather than during one matters: a missing `flatpak`
 found halfway through an apply has already left the machine half-configured.

@@ -117,3 +117,45 @@ describe "delegated config checks" do
     end
   end
 end
+
+private def doctor(path : String) : {Fluxion::CLI::ExitCode, String}
+  output = IO::Memory.new
+  code = Fluxion::CLI::Style.with_color(false) do
+    Fluxion::CLI::App.new(Fluxion::CLI::GlobalOptions.new, output, IO::Memory.new)
+      .run(["doctor", "-c", path])
+  end
+  {code, output.to_s}
+end
+
+describe "doctor" do
+  it "warns rather than fails when a delegated config is not there yet" do
+    # One is routinely produced by an earlier phase of the same run — dotbot
+    # pointing at a repo `git-repo` clones is the shipped example — and doctor
+    # is the command you run on the fresh machine before any of that happened.
+    with_pair(STRICT_PINNED) do |path|
+      File.delete(File.join(File.dirname(path), "binstaller.yaml"))
+      _, report = doctor(path)
+
+      report.should contain("does not exist yet")
+      report.should_not contain("[fail] binstaller-profile config")
+    end
+  end
+
+  it "passes when the config is there" do
+    with_pair(STRICT_PINNED) do |path|
+      _, report = doctor(path)
+      report.should contain("[pass] binstaller-profile config")
+    end
+  end
+
+  it "fails when the config is a directory, which is unambiguous" do
+    with_pair(STRICT_PINNED) do |path|
+      config = File.join(File.dirname(path), "binstaller.yaml")
+      File.delete(config)
+      Dir.mkdir_p(config)
+
+      _, report = doctor(path)
+      report.should contain("is not a regular file")
+    end
+  end
+end

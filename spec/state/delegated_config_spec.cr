@@ -34,11 +34,31 @@ describe "delegated config change detection" do
       end
     end
 
-    it "reports nil rather than raising when the config is missing" do
-      # The fingerprint is bookkeeping; a missing config is the executor's
-      # problem to report with a message naming the path.
-      Fluxion::BinstallerProfileStep.new("portable", "/nope/absent.yaml")
-        .content_digest.should be_nil
+    it "digests a missing config as absent rather than reporting no digest" do
+      # Nil would make `Recorder#recorded` skip the comparison and report the
+      # step still installed, which is the opposite of what a vanished config
+      # means. It must also differ from any real content.
+      absent = Fluxion::BinstallerProfileStep.new("portable", "/nope/absent.yaml").content_digest
+      absent.should_not be_nil
+
+      with_config("apiVersion: binstaller.io/v1alpha1\n") do |path|
+        absent.should_not eq(Fluxion::BinstallerProfileStep.new("portable", path).content_digest)
+      end
+    end
+
+    it "changes when only, skip, locked or lockFile change" do
+      # These live on the step, not in the item key (the config path) and not
+      # in the file, so a digest over the file alone left them invisible.
+      with_config("versions:\n  lazygit: 0.61.0\n") do |path|
+        plain = Fluxion::BinstallerProfileStep.new("portable", path).content_digest
+
+        Fluxion::BinstallerProfileStep.new("portable", path, only: ["yazi"])
+          .content_digest.should_not eq(plain)
+        Fluxion::BinstallerProfileStep.new("portable", path, skip: ["zig"])
+          .content_digest.should_not eq(plain)
+        Fluxion::BinstallerProfileStep.new("portable", path, locked: true, lock_file: "/tmp/l.json")
+          .content_digest.should_not eq(plain)
+      end
     end
 
     it "covers dotbot too, which delegates the same way" do

@@ -725,16 +725,30 @@ already maintain and maps its own verbs onto binstaller's.
     skip: [zig]                 # optional
     locked: true                # optional; requires lockFile
     lockFile: ~/binstaller.lock.json
-    installerVersion: v0.2.0    # binstaller release Fluxion installs if it is not on PATH
+    installerVersion: v0.2.0    # assertion, not a choice — see below
     continueOnError: false
 ```
 
 Resolution order is an installation already on `PATH`, then Fluxion's cache
-under `~/.cache/fluxion/tools`, then a download whose SHA-256 is verified against
-the release's `.sha256` sidecar. Fluxion never shadows a `binstaller` you manage
-yourself. `config` must be a path — an inline profile object is rejected — and
-`locked: true` requires `lockFile`, since a lock without a lock file pins
-nothing.
+under `~/.cache/fluxion/tools`, then a download verified against a SHA-256 held
+in Fluxion's own pinned catalog — not a sidecar served alongside the release,
+which would prove nothing. Fluxion never shadows a `binstaller` you manage
+yourself.
+
+`config` must be a path; an inline profile object is rejected, because
+binstaller owns that schema. `locked: true` requires `lockFile`, since a lock
+without a lock file pins nothing — but `lockFile` alone is honoured and passed
+through.
+
+`installerVersion` is an assertion rather than a knob: Fluxion holds a digest
+for exactly one release, so naming another is a validation error that says
+which one it has. Omit it to take the pinned release.
+
+Fluxion hashes the referenced config's bytes — and `only`, `skip`, `locked` and
+`lockFile` — into the phase fingerprint, so changing any of them re-runs the
+step. It never parses the file to decide what runs. `fluxion lint` reads it
+best-effort and warns when it does not set `spec.policy.mode: strict` or when
+an entry declares no checksum; `fluxion doctor` checks it exists.
 
 ### `user-groups`
 
@@ -1242,8 +1256,12 @@ reported at once, so a profile with five mistakes takes one run to fix.
 - Every remote URL must be HTTPS without user-info.
 - A remote script, a signing key, and a Flatpak descriptor each require their
   digest.
-- `installPath` and `symlinkPath` must be absolute, normalized paths, and an
-  archive download requires a normalized relative POSIX `archivePath`.
+- A delegated installer's `config` must be a path, never an inline object: the
+  tool that reads it owns that schema.
+- `installerVersion`, where a kind accepts it, must name the release Fluxion
+  holds a verified digest for.
+- A `shell-scripts` item declares exactly one of `script`, `url` or `content`,
+  and `shell` is one of `bash`, `sh`, `zsh`.
 
 ---
 

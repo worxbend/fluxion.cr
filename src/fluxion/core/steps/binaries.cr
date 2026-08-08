@@ -1,17 +1,34 @@
 module Fluxion
-  # Artifact shapes a `compiled-binary` URL may point at.
+  # Shared by the kinds that hand their work to another tool.
   #
-  # The split between locally extracted and delegated formats is deliberate:
-  # Fluxion implements tar.gz itself with hard bounds, and refuses to guess at
-  # zip and tar.xz rather than shipping two more archive parsers that handle
-  # traversal, symlinks, and decompression bombs.
+  # Each carries a path to that tool's own config rather than a description of
+  # the work, so the item key says nothing about what will actually happen.
+  # This is what lets the fingerprint see through the path to the file — and to
+  # the step's own knobs — without Fluxion learning a schema it does not own.
   module DelegatedConfig
     def content_digest : String?
       path = config
-      return unless File.file?(path)
-      Digest::SHA256.hexdigest(File.read(path))
+      digest = Digest::SHA256.new
+      # A missing config digests as its absence rather than as "no digest".
+      # Returning nil would make `Recorder#recorded` skip the comparison and
+      # report the step still installed, which is the opposite of what a
+      # vanished config means.
+      digest << (File.file?(path) ? File.read(path) : "\0missing")
+      # The knobs that change what the delegate is asked to do live on the step,
+      # not in the item key (which is the config path) and not in the file. A
+      # digest over the file alone left `only:`, `skip:`, `locked:` and
+      # `lockFile:` invisible to the fingerprint, so narrowing a profile to two
+      # tools left a completed phase looking unchanged.
+      delegation_inputs.each { |value| digest << "\0" << value }
+      digest.hexfinal
     rescue File::Error
       nil
+    end
+
+    # Anything beyond the config path that changes the delegated invocation.
+    # Empty for a kind whose only input is the path.
+    def delegation_inputs : Array(String)
+      [] of String
     end
   end
 
@@ -42,6 +59,13 @@ module Fluxion
       super(name, description, continue_on_error, probe_command, condition)
     end
 
+    def delegation_inputs : Array(String)
+      inputs = @only + @skip
+      inputs << "locked" if @locked
+      @lock_file.try { |lock| inputs << lock }
+      inputs
+    end
+
     def kind : String
       "binstaller-profile"
     end
@@ -58,9 +82,10 @@ module Fluxion
 
   # `type: nerd-fonts` — install Nerd Font families via `nerd-fonts-installer`.
   #
-  # Either an inline `config` Fluxion renders, or a `configPath` to an
-  # installer config the user already maintains — in which case that file, not
-  # Fluxion, is the trust boundary.
+  # A path to an installer config, never an inline font list: that file is the
+  # installer's schema and its trust boundary, not Fluxion's. Fluxion used to
+  # accept the list and render it at run time, which made it the owner of a
+  # schema it could neither validate nor keep in step with upstream.
   class NerdFontsStep < Step
     include DelegatedConfig
 
@@ -106,17 +131,14 @@ module Fluxion
   class DotbotStep < Step
     include DelegatedConfig
     DEFAULT_INSTALLER_VERSION = "v0.4.2"
-    DEFAULT_BINARY            = "dotbot"
 
     getter config : String
     getter installer_version : String
-    getter binary : String
 
     def initialize(
       name : String,
       @config : String,
       @installer_version : String = DEFAULT_INSTALLER_VERSION,
-      @binary : String = DEFAULT_BINARY,
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,

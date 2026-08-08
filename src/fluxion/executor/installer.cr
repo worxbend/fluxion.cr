@@ -47,15 +47,19 @@ module Fluxion::Executor
     # to re-verify after staging, and staging is exactly where a swap would
     # happen.
     def install(source : String, destination : String, mode : String = "0755",
-                digest : String? = nil, symlink : String? = nil) : Nil
+                digest : String? = nil) : Nil
+      # Deliberately absent: a `symlink` parameter threaded through both
+      # branches. Its only caller was the `binary-downloads` executor, which
+      # created a convenience link beside an installed binary; binstaller owns
+      # that now via its own `executables` list.
       case privilege_for(destination)
-      in Privilege::User then install_unprivileged(source, destination, mode, symlink)
-      in Privilege::Root then install_privileged(source, destination, mode, digest, symlink)
+      in Privilege::User then install_unprivileged(source, destination, mode)
+      in Privilege::Root then install_privileged(source, destination, mode, digest)
       end
     end
 
     private def install_unprivileged(source : String, destination : String,
-                                     mode : String, symlink : String?) : Nil
+                                     mode : String) : Nil
       staged = "#{destination}.fluxion-#{Random::Secure.hex(8)}"
       begin
         File.copy(source, staged)
@@ -67,12 +71,10 @@ module Fluxion::Executor
         File.delete(staged) rescue nil
         raise ExecutionError.new("Failed to install #{destination}: #{error.message}")
       end
-
-      link(destination, symlink)
     end
 
     private def install_privileged(source : String, destination : String, mode : String,
-                                   digest : String?, symlink : String?) : Nil
+                                   digest : String?) : Nil
       unless digest
         raise TrustError.new(
           "Privileged installation requires a verified digest for #{destination}")
@@ -94,8 +96,6 @@ module Fluxion::Executor
         run(["sudo", "rm", "-f", "--", anchor])
         raise error
       end
-
-      link(destination, symlink)
     end
 
     # Re-digests the file where it now sits, root-owned.
@@ -116,21 +116,6 @@ module Fluxion::Executor
         "Staged artifact failed verification: expected #{expected} but got #{actual}")
     end
 
-    private def link(destination : String, symlink : String?) : Nil
-      return unless symlink
-
-      case privilege_for(symlink)
-      in Privilege::User
-        staged = "#{symlink}.fluxion-#{Random::Secure.hex(8)}"
-        File.symlink(destination, staged)
-        File.rename(staged, symlink)
-      in Privilege::Root
-        run!(["sudo", "ln", "-sfn", "--", destination, symlink], "link #{symlink}")
-      end
-    rescue error : File::Error
-      raise ExecutionError.new("Failed to create symlink #{symlink}: #{error.message}")
-    end
-
     # Writes text to a destination, honouring the same privilege split.
     def write(content : String, destination : String, mode : String = "0644",
               owner : String? = nil, group : String? = nil) : Nil
@@ -141,7 +126,7 @@ module Fluxion::Executor
 
         case privilege_for(destination)
         in Privilege::User
-          install_unprivileged(temporary, destination, mode, nil)
+          install_unprivileged(temporary, destination, mode)
           chown_unprivileged(destination, owner, group)
         in Privilege::Root
           run!(["sudo", "install", "-m", mode, "--", temporary, destination],

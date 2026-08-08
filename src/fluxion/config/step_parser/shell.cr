@@ -68,6 +68,12 @@ module Fluxion::Config
       has_url = url_node.present?
       has_content = content_node.present?
 
+      if has_content && content_node.string?.nil?
+        context.error(content_node.path, "must be a string",
+          "a script body, usually written as a YAML block with |")
+        return
+      end
+
       declared = [has_script, has_url, has_content].count(true)
       unless declared == 1
         context.error(node.path, "must define exactly one of script, url or content")

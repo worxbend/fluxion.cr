@@ -44,9 +44,3 @@ describe Fluxion::Executor::Downloader do
     end
   end
 end
-
-private def runner_with(stdout : String, exit_code : Int32 = 0)
-  Fluxion::Executor::FakeShellRunner.new
-    .available("gpg")
-    .default(Fluxion::ProcessResult.new(exit_code, stdout))
-end

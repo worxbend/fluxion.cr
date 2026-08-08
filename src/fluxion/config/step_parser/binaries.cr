@@ -108,7 +108,6 @@ module Fluxion::Config
       DotbotStep.new(
         name, config,
         installer_version: version,
-        binary: context.optional_string(node["dotbotBinary"]) || DotbotStep::DEFAULT_BINARY,
         description: description,
         continue_on_error: context.bool(node["continueOnError"], false),
         probe_command: probe,

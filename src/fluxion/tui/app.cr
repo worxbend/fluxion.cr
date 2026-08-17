@@ -6,9 +6,12 @@ module Fluxion::TUI
   # exception — so a crash never leaves the user with an invisible cursor and
   # no echo.
   class App
-    FRAME_INTERVAL = 80.milliseconds
+    # 20 frames a second. Fast enough that a spinner reads as a spinner and a
+    # gradient as a slide rather than a stutter, slow enough that a full-screen
+    # diff is nowhere near the cost of the run it is describing.
+    FRAME_INTERVAL = 50.milliseconds
 
-    def initialize(@profile : Profile, @options : Executor::RunOptions)
+    def initialize(@profile : Profile, @options : Executor::RunOptions, @resume : Resume = Resume.none)
     end
 
     # True when the terminal can support the UI at all.
@@ -27,28 +30,62 @@ module Fluxion::TUI
       execute(profile, orchestrator, cancellation)
     end
 
+    # Keys, read on their own fiber, for every screen this app shows.
+    #
+    # Input and animation cannot both own the loop: a screen that blocks on
+    # `read` stops animating between keypresses, and one that polls with a
+    # timeout burns the CPU. Keys arrive on a channel instead, and each screen
+    # waits for whichever comes first — a key or the next frame deadline.
+    #
+    # One reader for the whole run, not one per screen. A fiber blocked in
+    # `STDIN.read` cannot be called off, so a second reader started for the
+    # execution screen left two fibers racing for the same keyboard — and the
+    # one still holding the selector's channel won often enough that keys
+    # pressed during the run simply vanished.
+    private def keys : Channel(CryTUI::KeyEvent)
+      @keys ||= start_key_reader
+    end
+
+    @keys : Channel(CryTUI::KeyEvent)? = nil
+
+    private def start_key_reader : Channel(CryTUI::KeyEvent)
+      keys = Channel(CryTUI::KeyEvent).new(64)
+
+      spawn do
+        parser = CryTUI::InputParser.new
+        buffer = Bytes.new(1024)
+        loop do
+          read = STDIN.read(buffer)
+          break if read.zero?
+          parser.feed(String.new(buffer[0, read])).each do |event|
+            keys.send(event) if event.is_a?(CryTUI::KeyEvent)
+          end
+        end
+      rescue IO::Error
+        # The terminal went away mid-run. The draw loop notices when the
+        # channel stops producing and carries on animating, which is the same
+        # thing that happens when nobody is typing.
+      end
+
+      keys
+    end
+
     # Returns false when the user cancelled.
     private def choose(selection : Selection) : Bool
-      screen = SelectorScreen.new(selection)
+      screen = SelectorScreen.new(selection, @resume)
       outcome = SelectorScreen::Outcome::Continue
 
       terminal do |terminal|
-        parser = CryTUI::InputParser.new
-        buffer = Bytes.new(1024)
-
         loop do
           terminal.draw { |frame| screen.render(frame) }
 
-          read = STDIN.read(buffer)
-          break if read.zero?
-
-          events = parser.feed(String.new(buffer[0, read]))
-          events.each do |event|
-            next unless event.is_a?(CryTUI::KeyEvent)
+          select
+          when event = keys.receive
             outcome = screen.handle(event)
+            break unless outcome.continue?
+          when timeout(FRAME_INTERVAL)
+            # Nothing pressed; redraw the next animation frame.
           end
-
-          break unless outcome.continue?
         end
       end
 
@@ -74,28 +111,51 @@ module Fluxion::TUI
         done.send(nil)
       end
 
-      terminal do |terminal|
-        until screen.finished?
-          terminal.draw { |frame| screen.render(frame) }
-          sleep FRAME_INTERVAL
-        end
-
-        done.receive
-        terminal.draw { |frame| screen.render(frame) }
-        # Held on screen until acknowledged: a summary that vanished the
-        # instant the run ended would be useless.
-        wait_for_key
-      end
+      drive(screen, cancellation, done)
 
       raise failure.not_nil! if failure
 
       Outcome.new(summary, cancellation.cancelled?)
     end
 
-    private def wait_for_key : Nil
-      buffer = Bytes.new(16)
-      STDIN.read(buffer)
-    rescue IO::Error
+    # Draws the execution screen until the run ends and the user has read the
+    # summary.
+    #
+    # The screen is held after the run finishes rather than torn down with it:
+    # a summary that vanished the instant the last item completed would be
+    # useless, and the output of every step is still there to be read.
+    private def drive(screen : ExecutionScreen, cancellation : CancellationSignal,
+                      done : Channel(Nil)) : Nil
+      leaving = false
+
+      terminal do |terminal|
+        until leaving
+          terminal.draw { |frame| screen.render(frame) }
+
+          select
+          when event = keys.receive
+            case screen.handle(event)
+            when .cancel?
+              # Cooperative: the executor stops at the next item boundary, and
+              # the screen says so meanwhile.
+              cancellation.cancel
+              screen.cancelling
+            when .exit?
+              # Only once there is nothing left to stop. Before that the same
+              # key means "stop the run", which the branch above handled.
+              leaving = screen.finished?
+            end
+          when done.receive
+            # The run is over. The screen stays up until it is dismissed.
+          when timeout(FRAME_INTERVAL)
+            # Nothing pressed; redraw the next animation frame.
+          end
+        end
+
+        # One last frame, so what is left on screen is the final state rather
+        # than whatever was drawn just before the key that dismissed it.
+        terminal.draw { |frame| screen.render(frame) }
+      end
     end
 
     # Enters the alternate screen in raw mode and always restores both.

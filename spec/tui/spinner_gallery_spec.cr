@@ -76,12 +76,19 @@ describe Fluxion::TUI::ExecutionScreen do
     markers.each { |marker| CryTUI::Widgets::FluxFrames::BRAILLE.should contain(marker) }
   end
 
-  it "stops the activity bar once the run is finished" do
+  it "stops animating once the run is finished" do
+    # A finished run must not keep a spinner turning beside it: motion on a
+    # screen nothing is happening on reads as a run that has hung.
     screen = Fluxion::TUI::ExecutionScreen.new(empty_profile, "live")
     screen.finish
 
-    buffer = CryTUI::Buffer.new(CryTUI::Rect.new(0, 0, 60, 16))
-    screen.render(CryTUI::Frame.new(buffer.area, buffer))
-    buffer.lines[2].strip.should be_empty
+    frames = (0..3).map do
+      buffer = CryTUI::Buffer.new(CryTUI::Rect.new(0, 0, 60, 16))
+      screen.render(CryTUI::Frame.new(buffer.area, buffer))
+      buffer.lines.join("\n")
+    end
+
+    frames.uniq.size.should eq(1)
+    frames.first.should contain("done")
   end
 end

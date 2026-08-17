@@ -94,7 +94,13 @@ module Fluxion::CLI
     private def run_with_tui(profile : Profile, options : Executor::RunOptions,
                              orchestrator : Executor::Orchestrator,
                              cancellation : CancellationSignal) : ExitCode
-      outcome = TUI::App.new(profile, options).run(orchestrator, cancellation)
+      # What a previous run of this profile already finished, so the selector
+      # can offer to skip it. Read here rather than inside the UI because the
+      # state store is a dependency of the command, and the TUI should not have
+      # to know where state lives.
+      resume = TUI::Resume.load(deps.store, profile, options.profile_name)
+
+      outcome = TUI::App.new(profile, options, resume).run(orchestrator, cancellation)
       # Nil means the user backed out of the selector, which is a decision
       # rather than a failure.
       return ExitCode::Success unless outcome

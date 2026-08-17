@@ -51,6 +51,70 @@ module Fluxion::TUI
       @steps.each_key { |name| @steps[name] = false }
     end
 
+    # Flips every step, then re-derives the phases from what survived.
+    #
+    # Useful for the "everything except these three" case, which otherwise
+    # means deselecting all and toggling back most of the list by hand.
+    def invert : Nil
+      @steps.each_key { |name| @steps[name] = !@steps[name] }
+      resync_phases
+    end
+
+    # Narrows the run to one phase, or to one step within it.
+    #
+    # The counterpart to `invert`: sometimes the whole selector is one step
+    # away from what you want, and sometimes it is one step's worth of what you
+    # want.
+    def select_only(phase : Phase, step : Step? = nil) : Nil
+      select_none
+      if step
+        @steps[step.name] = true
+      else
+        phase.steps.each { |candidate| @steps[candidate.name] = true }
+      end
+      resync_phases
+    end
+
+    # Back to the profile as written.
+    def reset : Nil
+      select_all
+    end
+
+    # Deselects the phases a previous run already finished, leaving the rest.
+    #
+    # Returns the number of phases it turned off, so the caller can say what
+    # happened — an offer that appears to do nothing, because the last run
+    # finished nothing, should say so rather than look broken.
+    def resume_from(resume : Resume) : Int32
+      turned_off = 0
+      @profile.phases.each do |phase|
+        next unless resume.completed?(phase.name)
+        next unless phase?(phase.name)
+        toggle_phase(phase)
+        turned_off += 1
+      end
+      turned_off
+    end
+
+    # How many of a phase's steps are currently selected.
+    def selected_steps(phase : Phase) : Int32
+      phase.steps.count { |step| step?(step.name) }
+    end
+
+    # How many items a phase's selected steps would touch.
+    def selected_items(phase : Phase) : Int32
+      phase.steps.sum { |step| step?(step.name) ? step.items.size : 0 }
+    end
+
+    # A phase is selected exactly when at least one of its steps is. Derived
+    # rather than stored so no sequence of toggles can leave a phase marked
+    # selected with nothing under it.
+    private def resync_phases : Nil
+      @profile.phases.each do |phase|
+        @phases[phase.name] = phase.steps.any? { |step| step?(step.name) }
+      end
+    end
+
     def any_selected? : Bool
       @phases.any? { |_, enabled| enabled }
     end

@@ -115,7 +115,7 @@ describe Fluxion::TUI::SelectorScreen do
     selection = Fluxion::TUI::Selection.new(sample_profile)
     screen = Fluxion::TUI::SelectorScreen.new(selection)
 
-    screen.handle(key(' '))
+    screen.handle(key('x'))
     selection.phase?("base").should be_false
   end
 
@@ -125,7 +125,7 @@ describe Fluxion::TUI::SelectorScreen do
 
     # Row 0 is the base phase; row 1 is its first step.
     screen.handle(key('j'))
-    screen.handle(key(' '))
+    screen.handle(key('x'))
 
     selection.step?("tools").should be_false
     selection.phase?("base").should be_true
@@ -181,7 +181,7 @@ describe Fluxion::TUI::SelectorScreen do
     rendered.should contain("base")
     rendered.should contain("tools")
     rendered.should contain("apps")
-    rendered.should contain("Fluxion")
+    rendered.should contain("FLUXION")
   end
 
   it "keeps the cursor on screen in a list taller than the terminal" do

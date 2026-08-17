@@ -37,10 +37,13 @@ it is safe to parse without passing a flag.
 | `NO_COLOR` | Set to anything and colour goes away |
 | `FORCE_COLOR` | Colour even when the output is a pipe |
 | `FLUXION_SPINNER` | Which animation marks work in flight — see [`spinners`](#spinners) |
+| `FLUXION_THEME` | Which colour palette the terminal UI draws in — see [the terminal UI](#the-terminal-ui) |
+| `FLUXION_ASCII` | Set to anything and the terminal UI draws in plain ASCII |
 
 `FLUXION_SPINNER` is read by both the plain reporter and the terminal UI, so
 they always agree. An unrecognised name falls back to the default rather than
-failing the run.
+failing the run, and so does an unrecognised `FLUXION_THEME` — no run should
+ever stop over decoration.
 
 ## Exit codes
 
@@ -81,8 +84,9 @@ fluxion apply --from-phase development --skip-already-installed
 --profile=NAME            State profile name [default: default]
 ```
 
-With a real terminal on both ends, `apply` opens the selector first. Use
-`--no-tui` for plain output, which happens automatically in CI or a pipe.
+With a real terminal on both ends, `apply` opens the selector first — see
+[the terminal UI](#the-terminal-ui). Use `--no-tui` for plain output, which
+happens automatically in CI or a pipe.
 
 `apply` refuses to run as root: there is no safe way to drop back to your
 account for the steps that must not be root-owned.
@@ -92,6 +96,105 @@ either mode — a run that waits for input is a run that hangs unattended.
 
 The first Ctrl-C asks for a clean stop at the next item boundary and records
 where to resume; the second exits immediately.
+
+## The terminal UI
+
+`apply` and `dry-run` open a full-screen interface when both stdin and stdout
+are a terminal. It has two screens, and everything on both is driven from the
+keyboard.
+
+### Choosing what to run
+
+The profile is drawn as a fold tree: phases, with their steps underneath.
+Everything starts selected, because the common case is running the profile as
+written — the selector exists to take things out of that.
+
+- The pane on the right shows what the highlighted row would actually do: a
+  step's items, or a phase's steps.
+- A phase with only some of its steps selected is marked `[◼]` rather than
+  `[✔]`, so the checkbox never claims more than is true.
+- If a previous run of this profile finished some phases, the header says so
+  and `R` deselects them. A phase only counts as finished while its
+  configuration is unchanged — the same rule the executor uses, so editing a
+  package list makes the phase run again.
+
+### Watching it run
+
+The left pane is the same tree, filling in as the run walks it. The right pane
+is command output: the live tail of the whole run, or one step's own output
+once you pin it with `enter`.
+
+The progress bar is a real fraction, not a sweep — by the time the run starts,
+the selector has counted every item it will touch, so the bar can say how much
+is behind you and roughly how long is left.
+
+`q` means "stop after the current item" while the run is going and "close this"
+once it is over. The screen is held after the run finishes, so the summary and
+every step's output are still there to read.
+
+### Keys
+
+Vim motions, with a space leader and a which-key menu, in the shape an
+AstroNvim user already has in their fingers. Press `?` on either screen for the
+full list, or `space` and wait to see what can be pressed next.
+
+| Keys | What they do |
+|---|---|
+| `j` `k`, `↓` `↑` | Next and previous row |
+| `gg` `G` | First and last row |
+| `gj` `gk` | Next and previous phase |
+| `<C-d>` `<C-u>` | Half page down and up |
+| `h` `l`, `←` `→` | Close and open a fold; move out of a row that has none |
+| `za` `zR` `zM` | Toggle this fold; open every fold; close every fold |
+| `tab`, `<C-w>w` | Move between the two panes |
+| `?` | The full keybinding list |
+| `space` | The which-key menu |
+| `<leader>ut` | Next colour palette |
+| `q` | Leave, or stop the run |
+
+On the selector:
+
+| Keys | What they do |
+|---|---|
+| `x`, `<leader><leader>` | Select or deselect this phase or step |
+| `a` `n` `i` | Select all, select none, invert |
+| `o` | Select only the row under the cursor |
+| `R` | Deselect the phases a previous run finished |
+| `/` | Find phases, steps and items |
+| `enter`, `r` | Start the run |
+
+While it runs:
+
+| Keys | What they do |
+|---|---|
+| `enter` | Pin this step's output to the right-hand pane |
+| `esc` | Back to the live tail of the whole run |
+| `f` | Follow the newest output again |
+| `e` | Show only what failed |
+| `o` | Hide or show the output pane |
+
+Space is the leader, so it cannot also be the checkbox key; `x` toggles a row
+without any sequence, and `<leader><leader>` does the same for anyone who
+reaches for the menu first.
+
+### Colours
+
+`FLUXION_THEME` picks a palette:
+
+```bash
+FLUXION_THEME=tokyo-night fluxion apply
+```
+
+`ember` (the default), `tokyo-night`, `catppuccin-mocha`, `gruvbox`, `nord`,
+`dracula`, `one-dark`, `rose-pine`, `kanagawa-wave`, `everforest-dark`,
+`github-dark`, `solarized-light`, `catppuccin-latte`, `toxic-violet`,
+`acid-rain`, `hyperdrive`, `magma-core`, and `mono`.
+
+`mono` is for terminals with only the sixteen ANSI colours: it keeps a solid
+selection bar and plain ASCII box drawing, where the others use a tinted bar
+and rounded borders. `FLUXION_ASCII=1` asks for the plain drawing on any
+palette. `<leader>ut` cycles palettes while the interface is open, so you can
+see them rather than guess.
 
 ## `dry-run`
 

@@ -132,6 +132,26 @@ Arch — see [docs/config-schema.md](docs/config-schema.md).
 
 Full reference: [docs/commands.md](docs/commands.md).
 
+### The terminal UI
+
+With a real terminal on both ends, `apply` and `dry-run` open a full-screen
+interface instead of printing lines.
+
+You get a fold tree of phases and their steps to select from — with a pane
+beside it showing what each row would actually do — then a live view of the run
+with a real progress bar, a spinner on whatever is in flight, and the command
+output of every step. If a previous run finished part of the profile, the
+selector offers to skip that rather than doing it silently.
+
+Everything is driven from the keyboard, with Vim motions, folds, a `space`
+leader and a which-key menu. Press `?` for the full list. `FLUXION_THEME` picks
+one of eighteen colour palettes, `FLUXION_ASCII=1` drops to plain characters
+for a terminal that cannot draw the rest, and `--no-tui` skips the interface
+altogether — which happens automatically in CI or a pipe.
+
+See [the terminal UI](docs/commands.md#the-terminal-ui) for the keys and the
+palettes.
+
 ### Shared profiles
 
 Profiles you want on more than one machine can live in a git repository and be

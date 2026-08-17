@@ -95,8 +95,22 @@ rather than at the first `apply`.
 ### `tui` and `cli` — the two front ends
 
 Both consume the same `ExecutionEvent` stream. The CLI reporter opens a line
-per item and closes it with the outcome; the TUI keeps a live item list and a
-bounded log. Neither knows anything about how work is performed.
+per item and closes it with the outcome. The TUI files each event into a tree
+of phases, steps and items, and keeps command output in one bounded log tagged
+with where each line came from — which is what lets the output pane show either
+the whole run or a single pinned step without keeping two copies of the text.
+Neither knows anything about how work is performed.
+
+Inside `tui`, the layers are deliberately separate: `Palette` holds colours,
+`Theme` turns them into the roles the screens ask for, `Anim` provides the
+motion, `Chrome` draws the furniture every screen shares, and `Keymap` is the
+one table both the key resolver and the which-key menu read — a binding cannot
+be dispatchable but missing from the menu, or listed but unbound. The screens
+themselves hold no colours and no key names.
+
+Events arrive on the executor's fiber and rendering happens on the drawing
+fiber, so `ExecutionScreen`'s state is behind one mutex. A slow terminal is
+never back-pressure on the run itself.
 
 ## Trust boundaries
 
@@ -182,7 +196,7 @@ src/fluxion/
   state/         what previous runs recorded
   registry/      manifest, git mirror, and installed configurations
   cli/           commands, colour, the plain reporter
-  tui/           screens, built on the vendored CryTUI
+  tui/           screens, palette, keymap and widgets, on the vendored CryTUI
 src/crytui/      vendored TUI toolkit (see VENDORED.md)
   spinner/       animated spinner widgets, ported from tui-spinner
 ```

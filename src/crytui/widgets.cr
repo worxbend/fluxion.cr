@@ -216,6 +216,13 @@ module CryTUI
     end
 
     struct List
+      # Contrast a span must clear against the selected row's background to
+      # keep its own colour. 3:1 is the WCAG floor for large text and for
+      # non-text interface elements, which is the right bar for short coloured
+      # labels — an item count, a shortcut, a status tag — rather than the
+      # 4.5:1 that body copy is held to.
+      SELECTED_ROW_MINIMUM_CONTRAST = 3.0
+
       getter items : Array(ListItem)
       getter style : Style
       getter highlight_style : Style
@@ -242,11 +249,29 @@ module CryTUI
           if selected
             buffer.set_style(Rect.new(content.x, y, content.width, visible_height), inherited)
           end
+          # The selected row is repainted in the highlight colours, so a span
+          # colour chosen for the ordinary background may no longer be readable
+          # on it — a `muted` grey can land within 1.05:1 of a dim selection
+          # bar. Spans that still read well keep their colour, so a failing
+          # item's red or an amber shortcut stays meaningful on the selected
+          # row; only the illegible ones fall back to the highlight foreground.
+          guard = selected ? foreground_guard(inherited) : nil
           item.lines.first(visible_height).each do |line|
-            line.render(buffer, Rect.new(content.x, y, content.width, 1), inherited)
+            line.render(buffer, Rect.new(content.x, y, content.width, 1), inherited, guard: guard)
             y += 1
           end
         end
+      end
+
+      # Builds the readability guard for the selected row, or nil when there is
+      # nothing to measure against — no highlight foreground to fall back to,
+      # or no resolved background to compare with.
+      private def foreground_guard(row_style : Style) : ForegroundGuard?
+        replacement = @highlight_style.foreground
+        background = row_style.background
+        return unless replacement && background
+
+        ForegroundGuard.new(replacement, background, SELECTED_ROW_MINIMUM_CONTRAST)
       end
 
       private def clamp_state(state : ListState, height : Int32)
@@ -255,7 +280,11 @@ module CryTUI
         selected = selected.clamp(0, @items.size - 1)
         state.selected = selected
         state.offset = {state.offset, selected}.min.clamp(0, Int32::MAX)
-        while item_rows(state.offset, selected) > height
+        # Scroll until the selected item fits, but never past it: an item
+        # taller than the whole pane can never fit, and letting the offset run
+        # past it left the renderer starting after the only row it was asked to
+        # show — a pane that drew nothing at all.
+        while state.offset < selected && item_rows(state.offset, selected) > height
           state.offset += 1
         end
       end

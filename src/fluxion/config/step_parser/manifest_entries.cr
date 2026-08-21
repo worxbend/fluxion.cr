@@ -67,6 +67,11 @@ module Fluxion::Config
       if app_ids.empty?
         context.error(spec["apps"].path, "must contain at least one item")
       end
+      # An app id lands in `flatpak install -y <remote> <id>`, so it is held to
+      # the same rule as a package name.
+      app_ids.each_with_index do |app_id, index|
+        validate_package_name(context, "#{ids_node.path}[#{index}]", app_id)
+      end
 
       FlatpakStep.new(
         name, app_ids,

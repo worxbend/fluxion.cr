@@ -110,6 +110,12 @@ module Fluxion::Config
       if packages.empty?
         context.error(packages_node.path, "must contain at least one package")
       end
+      # Same guard the system package kinds have always had. These names go
+      # into argv positions too — `npm install -g <name>`, `cargo install
+      # --locked <name>` — so a name reading as an option is an option.
+      packages.each_with_index do |package, index|
+        validate_package_name(context, "#{packages_node.path}[#{index}]", package.name)
+      end
       report_duplicates(context, packages_node.path, packages.map(&.name), "package")
 
       ToolPackagesStep.new(

@@ -553,6 +553,64 @@ describe Fluxion::Config::Manifest do
       message.should contain("check-update")
     end
 
+    it "refuses a tool package that would be read as an option" do
+      # `npm install -g --force` is not an install of something called
+      # "--force". The system package kinds have refused this since the check
+      # was written; tool-packages and flatpak were simply never wired to it,
+      # even though their names land in argv positions the same way.
+      result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+        - name: tools
+          kind: tool-packages
+          spec:
+            backend: npm-global
+            packages:
+              - "--force"
+        STEPS
+
+      result.error_messages.any?(&.includes?("must not be interpreted as an option")).should be_true
+    end
+
+    it "refuses a blank tool package name" do
+      result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+        - name: tools
+          kind: tool-packages
+          spec:
+            backend: npm-global
+            packages:
+              - ""
+        STEPS
+
+      result.error_messages.any?(&.includes?("must not be blank")).should be_true
+    end
+
+    it "still accepts the shapes real tool package names take" do
+      # A scoped npm name and a go module path both contain characters the
+      # check must not object to, or the guard would break legitimate profiles.
+      result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+        - name: tools
+          kind: tool-packages
+          spec:
+            backend: npm-global
+            packages:
+              - "@angular/cli"
+              - "typescript@5.4.5"
+        STEPS
+
+      result.errors.should be_empty
+    end
+
+    it "refuses a flatpak app id that would be read as an option" do
+      result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+        - name: apps
+          kind: flatpak-packages
+          spec:
+            apps:
+              - "--assumeyes"
+        STEPS
+
+      result.error_messages.any?(&.includes?("must not be interpreted as an option")).should be_true
+    end
+
     it "accepts sdkman candidates as strings or objects" do
       result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
         - name: sdks

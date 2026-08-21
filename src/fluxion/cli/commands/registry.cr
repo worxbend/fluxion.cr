@@ -362,8 +362,7 @@ module Fluxion::CLI
 
       catalogue = store(target)
       stale = parsed.entries.select do |entry|
-        catalogue.installed?(entry) &&
-          {Registry::Store::Drift::Upstream, Registry::Store::Drift::Both}.includes?(catalogue.drift(entry))
+        catalogue.installed?(entry) && catalogue.drift(entry).upstream_changed?
       end
       return if stale.empty?
 
@@ -709,8 +708,7 @@ module Fluxion::CLI
         @error_output.puts error.message
       end
 
-      case catalogue.drift(found)
-      when .local?, .both?
+      if catalogue.drift(found).locally_edited?
         puts Style.dim("  fluxion registry publish  to send this back to #{target.name}")
       end
 
@@ -817,7 +815,7 @@ module Fluxion::CLI
 
       candidates = parsed.entries.select do |entry|
         next false unless @ids.empty? || @ids.includes?(entry.id)
-        {Registry::Store::Drift::Local, Registry::Store::Drift::Both}.includes?(catalogue.drift(entry))
+        catalogue.drift(entry).locally_edited?
       end
 
       if candidates.empty?

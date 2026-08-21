@@ -94,6 +94,21 @@ module Fluxion::Registry
       Both
       # Not installed.
       Absent
+
+      # Whether the installed copy has been changed since it was installed.
+      #
+      # Named rather than left as `local? || both?` at each call site: three
+      # commands ask this question, and spelling it as a pair of enum tests
+      # made adding `Both` a hunt for every place that had only asked about
+      # `Local`.
+      def locally_edited? : Bool
+        local? || both?
+      end
+
+      # Whether the registry's copy has moved on since it was installed.
+      def upstream_changed? : Bool
+        upstream? || both?
+      end
     end
 
     # How an installed copy compares to the registry.
@@ -129,10 +144,9 @@ module Fluxion::Registry
       destination = installed_path(entry)
 
       if File.exists?(destination) && !force
-        case drift(entry)
-        when Drift::Current
-          return destination
-        when Drift::Local, Drift::Both
+        state = drift(entry)
+        return destination if state.current?
+        if state.locally_edited?
           raise ExecutionError.new(
             "#{destination} has local edits. Pass --force to overwrite them, " \
             "or `fluxion registry publish` to send them upstream.")

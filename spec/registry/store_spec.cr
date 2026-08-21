@@ -245,4 +245,22 @@ describe Fluxion::Registry::Store do
       Dir.children(sandbox.source.install_path).should contain(".fluxion")
     end
   end
+
+  describe Drift do
+    it "reads a local edit the same way whether or not upstream also moved" do
+      Drift::Local.locally_edited?.should be_true
+      Drift::Both.locally_edited?.should be_true
+      Drift::Upstream.locally_edited?.should be_false
+      Drift::Current.locally_edited?.should be_false
+      Drift::Absent.locally_edited?.should be_false
+    end
+
+    it "reads an upstream change the same way whether or not it was edited locally" do
+      Drift::Upstream.upstream_changed?.should be_true
+      Drift::Both.upstream_changed?.should be_true
+      Drift::Local.upstream_changed?.should be_false
+      Drift::Current.upstream_changed?.should be_false
+      Drift::Absent.upstream_changed?.should be_false
+    end
+  end
 end

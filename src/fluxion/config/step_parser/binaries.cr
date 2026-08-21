@@ -124,12 +124,8 @@ module Fluxion::Config
       end
 
       url = context.https_url(node["installScriptUrl", "installScript"])
-      sha256 = context.sha256(node["sha256"])
-      if sha256.nil? && node["sha256"].missing?
-        context.error(node["sha256"].path,
-          "is required",
-          "installer updates are fail-closed on purpose: review the new script and update the digest")
-      end
+      sha256 = required_sha256(context, node, "is required",
+        "installer updates are fail-closed on purpose: review the new script and update the digest")
       return unless url && sha256
 
       ToolchainStep.new(
@@ -142,6 +138,31 @@ module Fluxion::Config
       )
     end
 
+    # The digest for a kind that downloads one fixed artifact, complaining when
+    # the field is absent.
+    #
+    # Both callers had this pair of statements written out, including the
+    # `.missing?` half — which is there so that a digest that IS present but
+    # malformed produces one complaint rather than two: `Context#sha256` has
+    # already said the value is not a digest, and "is required" on top of that
+    # reads as a second, different fault. That is exactly the kind of
+    # non-obvious detail that goes wrong when it is copied, so it is written
+    # once.
+    #
+    # The wording stays per-caller: each kind explains its own reason for
+    # insisting, and the two happen to spell it differently — toolchain puts
+    # the explanation in a hint, oh-my-zsh in the message. Folding those into
+    # one phrasing would be a change to what users read, which is not what this
+    # helper is for.
+    private def required_sha256(context : Context, node : Node,
+                                message : String, hint : String? = nil) : Checksum?
+      digest = context.sha256(node["sha256"])
+      if digest.nil? && node["sha256"].missing?
+        context.error(node["sha256"].path, message, hint)
+      end
+      digest
+    end
+
     private def oh_my_zsh(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       revision = context.require_string(node["revision"], "revision")
       unless revision.empty? || OhMyZshStep.commit?(revision)
@@ -150,10 +171,7 @@ module Fluxion::Config
           "a branch or mutable tag would make the sha256 meaningless")
       end
 
-      sha256 = context.sha256(node["sha256"])
-      if sha256.nil? && node["sha256"].missing?
-        context.error(node["sha256"].path, "is required to verify the installer at that revision")
-      end
+      sha256 = required_sha256(context, node, "is required to verify the installer at that revision")
       return if revision.empty? || sha256.nil?
 
       install_dir = context.optional_string(node["installDir"]) || OhMyZshStep::DEFAULT_INSTALL_DIR

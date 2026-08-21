@@ -467,6 +467,34 @@ describe Fluxion::Config::StepParser do
       result.error_messages.any?(&.includes?("40-character commit")).should be_true
     end
 
+    it "requires a pinned digest for oh-my-zsh too" do
+      # The digest is what makes a pinned revision mean anything: without it
+      # the installer at that commit is fetched and run unverified.
+      result = parse_step(<<-STEP)
+        - name: omz
+          kind: oh-my-zsh
+          spec:
+            revision: #{"a" * 40}
+        STEP
+
+      result.error_messages.find!(&.includes?("sha256")).should contain("is required")
+    end
+
+    it "does not repeat the sha256 error when the digest is present but malformed" do
+      # One complaint per problem: `Context#sha256` has already said the value
+      # is not a digest, and adding "is required" on top would read as two
+      # separate faults.
+      result = parse_step(<<-STEP)
+        - name: omz
+          kind: oh-my-zsh
+          spec:
+            revision: #{"a" * 40}
+            sha256: "not-a-digest"
+        STEP
+
+      result.error_messages.count(&.includes?("sha256")).should eq(1)
+    end
+
     it "requires a pinned digest for a toolchain installer" do
       result = parse_step(<<-STEP)
         - name: rust

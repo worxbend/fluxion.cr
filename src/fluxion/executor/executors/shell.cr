@@ -169,7 +169,7 @@ module Fluxion::Executor
           result.exit_code, Time.instant - started)
       end
     rescue error : Error
-      StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+      failure(item, error)
     end
 
     # One builder for the preview and the run, so they cannot describe

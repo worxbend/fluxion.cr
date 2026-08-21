@@ -71,6 +71,11 @@ module Fluxion::Executor
         "#{label} exited #{result.exit_code}: #{result.detail}", result.exit_code, elapsed)
     end
 
+    protected def failure(item : StepItem, error : Exception, prefix : String? = nil) : StepResult::Failure
+      StepResult::Failure.new(item.key,
+        prefix ? "#{prefix}: #{error.message}" : (error.message || error.class.name), 1)
+    end
+
     private def failure_message(command : Command, result : ProcessResult) : String
       detail = result.detail
       summary = "#{command.preview.join(' ')} exited #{result.exit_code}"

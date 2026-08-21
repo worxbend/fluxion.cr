@@ -84,7 +84,7 @@ module Fluxion::Executor
         outcome(item, result, started, "apt-get update")
       end
     rescue error : Error
-      StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+      failure(item, error)
     end
   end
 
@@ -134,7 +134,7 @@ module Fluxion::Executor
         outcome(item, result, started, "metadata refresh")
       end
     rescue error : Error
-      StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+      failure(item, error)
     end
 
     # The generated file points at the *installed local* key, never the remote
@@ -216,7 +216,7 @@ module Fluxion::Executor
       result = refresh(runner, ["sudo", "pacman", "-Sy"], ->(line : String) { sink.call(line) })
       outcome(item, result, started, "pacman -Sy")
     rescue error : Error
-      StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+      failure(item, error)
     end
 
     private def read_config(path : String) : String
@@ -277,7 +277,7 @@ module Fluxion::Executor
         outcome(item, result, started, "flatpak remote-add")
       end
     rescue error : Error
-      StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+      failure(item, error)
     end
   end
 
@@ -338,7 +338,7 @@ module Fluxion::Executor
         StepResult::Success.new(item.key, Time.instant - started)
       end
     rescue error : Error
-      StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+      failure(item, error)
     end
 
     # A `file:` key is an operator-controlled local input; anything else has to

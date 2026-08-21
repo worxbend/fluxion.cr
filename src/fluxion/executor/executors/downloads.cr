@@ -69,7 +69,7 @@ module Fluxion::Executor
         outcome(item, result, started, "toolchain installer")
       end
     rescue error : Error
-      StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+      failure(item, error)
     end
 
     # Each installer reads its own variables, and leaving them unset makes them
@@ -135,7 +135,7 @@ module Fluxion::Executor
         outcome(item, result, started, "oh-my-zsh installer")
       end
     rescue error : Error
-      StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+      failure(item, error)
     end
 
     private def installer_url(step : OhMyZshStep) : String
@@ -181,7 +181,7 @@ module Fluxion::Executor
 
       StepResult::Success.new(item.key, Time.instant - started)
     rescue error : Error
-      StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+      failure(item, error)
     end
 
     private def find(step : Step, item : StepItem) : FileWriteItem?

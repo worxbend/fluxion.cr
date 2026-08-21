@@ -31,6 +31,46 @@ private def zypper_step(auto_refresh : Bool = true)
   )
 end
 
+# Nothing exercised `execute` on this executor, so the sequence it exists to
+# enforce — fetch the key unprivileged, verify it, install it locally, and only
+# then point the generated file at the *local* copy — was asserted by nothing.
+#
+# The key directory is a constant naming a root-owned path, so the spec
+# overrides it to a temp directory. That is the only production behaviour bent
+# here: the fetch, the digest verification, the `Installer` privilege decision,
+# and the rendered bytes are all the real ones.
+# A scratch directory that always goes away, matching spec/executor/archive_spec.cr.
+private def with_directory(& : String ->) : Nil
+  directory = File.tempname("fluxion-repo-spec")
+  Dir.mkdir_p(directory)
+  begin
+    yield directory
+  ensure
+    FileUtils.rm_rf(directory) rescue nil
+  end
+end
+
+private class ExecutingRpmExecutor < Fluxion::Executor::RpmStyleRepositoryExecutor
+  def initialize(@transport : Fluxion::Executor::FakeHttpTransport, @key_dir : String)
+    super()
+  end
+
+  protected def http_transport : Fluxion::Executor::HttpTransport
+    @transport
+  end
+
+  private def key_directory(step : Fluxion::Step) : String
+    @key_dir
+  end
+end
+
+private KEY_BODY = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nnot really a key\n"
+
+private def signing_key(url : String, body : String = KEY_BODY) : Fluxion::SigningKey
+  Fluxion::SigningKey.new(url,
+    Fluxion::Checksum.new(Fluxion::ChecksumAlgorithm::Sha256, Digest::SHA256.hexdigest(body)))
+end
+
 describe Fluxion::Executor::RpmStyleRepositoryExecutor do
   executor = ExposedRpmExecutor.new
 
@@ -86,6 +126,84 @@ describe Fluxion::Executor::RpmStyleRepositoryExecutor do
 
     it "omits gpgkey entirely when no key was installed" do
       executor.rendered(rpm_step).should_not contain("gpgkey")
+    end
+  end
+
+  describe "execute" do
+    it "installs the key locally and points the repository file at that copy" do
+      with_directory do |directory|
+        url = "https://download.docker.com/linux/fedora/gpg"
+        repo_file = File.join(directory, "docker.repo")
+        key_dir = File.join(directory, "keys")
+        Dir.mkdir_p(key_dir)
+
+        transport = Fluxion::Executor::FakeHttpTransport.new.on(url, KEY_BODY)
+        step = Fluxion::RpmRepositoryStep.new(
+          name: "docker", id: "docker-ce",
+          base_url: "https://download.docker.com/linux/fedora/$releasever/$basearch/stable",
+          repo_file: repo_file, signing_key: signing_key(url))
+
+        runner = Fluxion::Executor::FakeShellRunner.new
+        subject = ExecutingRpmExecutor.new(transport, key_dir)
+        result = subject.execute(step, subject.items(step).first, runner) { }
+
+        result.should be_a(Fluxion::StepResult::Success)
+
+        installed_key = File.join(key_dir, "fluxion-docker-ce.key")
+        File.exists?(installed_key).should be_true
+        File.read(installed_key).should eq(KEY_BODY)
+
+        # The point of the whole sequence: the package manager is handed a
+        # local path to bytes Fluxion verified, never the URL it fetched them
+        # from.
+        File.read(repo_file).should contain("gpgkey=file://#{installed_key}\n")
+        File.read(repo_file).should_not contain("gpgkey=https://")
+
+        runner.ran?("dnf makecache").should be_true
+      end
+    end
+
+    it "refuses the key when the digest does not match, and writes nothing" do
+      with_directory do |directory|
+        url = "https://download.docker.com/linux/fedora/gpg"
+        repo_file = File.join(directory, "docker.repo")
+        key_dir = File.join(directory, "keys")
+        Dir.mkdir_p(key_dir)
+
+        # The digest is of the body we expected; the transport serves another.
+        transport = Fluxion::Executor::FakeHttpTransport.new.on(url, "substituted key")
+        step = Fluxion::RpmRepositoryStep.new(
+          name: "docker", id: "docker-ce", base_url: "https://example.com/repo",
+          repo_file: repo_file, signing_key: signing_key(url))
+
+        runner = Fluxion::Executor::FakeShellRunner.new
+        subject = ExecutingRpmExecutor.new(transport, key_dir)
+        result = subject.execute(step, subject.items(step).first, runner) { }
+
+        result.should be_a(Fluxion::StepResult::Failure)
+        # Verification comes before anything is installed or refreshed, so a
+        # bad key leaves the machine exactly as it was.
+        Dir.children(key_dir).should be_empty
+        File.exists?(repo_file).should be_false
+        runner.ran?("makecache").should be_false
+      end
+    end
+
+    it "uses zypper's refresh command and writes autorefresh for a zypper repository" do
+      with_directory do |directory|
+        repo_file = File.join(directory, "packman.repo")
+        step = Fluxion::ZypperRepositoryStep.new(
+          name: "packman", id: "packman",
+          base_url: "https://ftp.gwdg.de/pub/linux/misc/packman/suse/",
+          repo_file: repo_file, auto_refresh: true)
+
+        runner = Fluxion::Executor::FakeShellRunner.new
+        subject = ExecutingRpmExecutor.new(Fluxion::Executor::FakeHttpTransport.new, directory)
+        subject.execute(step, subject.items(step).first, runner) { }
+
+        File.read(repo_file).should contain("autorefresh=1")
+        runner.ran?("zypper refresh").should be_true
+      end
     end
   end
 

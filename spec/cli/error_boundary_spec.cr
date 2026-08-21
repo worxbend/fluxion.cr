@@ -30,6 +30,11 @@ describe "IO error boundaries" do
 
   describe Fluxion::State::Store do
     it "translates an unreadable state file into the state layer's vocabulary" do
+      # The premise is a file the process cannot read, and `chmod 000` does not
+      # make a file unreadable to root. CI runs as root in a container, where
+      # the read simply succeeds and there is no error to translate.
+      pending! "already root" if Fluxion::Host.root?
+
       directory = File.tempname("fluxion-unreadable")
       Dir.mkdir_p(directory)
       file = File.join(directory, "default.state.json")

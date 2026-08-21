@@ -73,6 +73,13 @@ describe Fluxion::CLI::Deps do
 
   describe "apply, driven with a fake runner" do
     it "runs the profile's commands without spawning anything" do
+      # `apply` refuses to run as root — a run that mutates the host as root
+      # cannot drop back to the user's account for the steps that must not be
+      # root-owned, so it would leave a half-root home directory. CI runs
+      # inside a container as root, where the command therefore exits before
+      # the injection these specs are about ever happens.
+      pending! "apply refuses to run as root" if Fluxion::Host.root?
+
       runner = Fluxion::Executor::FakeShellRunner.new
 
       with_state do |store|
@@ -88,6 +95,13 @@ describe Fluxion::CLI::Deps do
     end
 
     it "reports a failing command and exits non-zero" do
+      # `apply` refuses to run as root — a run that mutates the host as root
+      # cannot drop back to the user's account for the steps that must not be
+      # root-owned, so it would leave a half-root home directory. CI runs
+      # inside a container as root, where the command therefore exits before
+      # the injection these specs are about ever happens.
+      pending! "apply refuses to run as root" if Fluxion::Host.root?
+
       runner = Fluxion::Executor::FakeShellRunner.new.on("true", 1)
 
       with_state do |store|
@@ -102,6 +116,13 @@ describe Fluxion::CLI::Deps do
     end
 
     it "records what it ran into the injected store" do
+      # `apply` refuses to run as root — a run that mutates the host as root
+      # cannot drop back to the user's account for the steps that must not be
+      # root-owned, so it would leave a half-root home directory. CI runs
+      # inside a container as root, where the command therefore exits before
+      # the injection these specs are about ever happens.
+      pending! "apply refuses to run as root" if Fluxion::Host.root?
+
       runner = Fluxion::Executor::FakeShellRunner.new
 
       with_state do |store|
@@ -134,6 +155,10 @@ describe Fluxion::CLI::Deps do
 
   describe "state, driven with an injected store" do
     it "reads the store it was given rather than the user's real one" do
+      # Same reason as the `apply` specs above: this one has to apply first in
+      # order to have any state to read back.
+      pending! "apply refuses to run as root" if Fluxion::Host.root?
+
       runner = Fluxion::Executor::FakeShellRunner.new
 
       with_state do |store|

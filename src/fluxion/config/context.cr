@@ -63,15 +63,15 @@ module Fluxion::Config
       node.int? || default
     end
 
-    # Parses an enum-style field, reporting the accepted spellings when it does
-    # not match. Returns nil after recording the error.
-    def enum_value(node : Node, subject : String, accepted : Array(String), & : String -> T?) : T? forall T
-      raw = node.string?
-      return if raw.nil? || raw.strip.empty?
-      value = yield raw
+    # An optional enum field with a default. The accepted list is derived from
+    # the enum rather than written out.
+    def optional_enum(node : Node, subject : String, default : T) : T forall T
+      value = T.from_config?(node.string?)
       return value if value
-      error(node.path, "unsupported #{subject} '#{raw.strip}'", "expected one of #{accepted.join(", ")}")
-      nil
+      if node.present?
+        error(node.path, "unsupported #{subject}", "one of #{T.values.map(&.config_name).join(", ")}")
+      end
+      default
     end
 
     # A `{algorithm, value}` checksum block.

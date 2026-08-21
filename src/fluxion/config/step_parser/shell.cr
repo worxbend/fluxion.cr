@@ -332,11 +332,7 @@ module Fluxion::Config
     end
 
     private def shell_reload(context : Context, node : Node, name : String, description : String?) : Step?
-      shell = ShellKind.from_config?(node["shell"].string?)
-      if node["shell"].present? && shell.nil?
-        context.error(node["shell"].path, "unsupported shell", "one of zsh, bash, sh")
-      end
-      ShellReloadStep.new(name, shell || ShellKind::Zsh, description)
+      ShellReloadStep.new(name, context.optional_enum(node["shell"], "shell", ShellKind::Zsh), description)
     end
 
     private def default_shell(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?

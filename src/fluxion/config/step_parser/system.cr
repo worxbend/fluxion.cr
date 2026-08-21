@@ -54,14 +54,9 @@ module Fluxion::Config
           "for example user.email")
       end
 
-      scope = GitConfigScope.from_config?(node["scope"].string?)
-      if node["scope"].present? && scope.nil?
-        context.error(node["scope"].path, "unsupported scope", "one of global, system, local")
-      end
-
       GitConfigStep.new(
         name, entries,
-        scope: scope || GitConfigScope::Global,
+        scope: context.optional_enum(node["scope"], "scope", GitConfigScope::Global),
         description: description,
         continue_on_error: context.bool(node["continueOnError"], false),
         probe_command: probe,
@@ -136,14 +131,9 @@ module Fluxion::Config
       end
       report_duplicates(context, units_node.path, units.map(&.qualified_name), "unit")
 
-      scope = SystemdScope.from_config?(node["scope"].string?)
-      if node["scope"].present? && scope.nil?
-        context.error(node["scope"].path, "unsupported scope", "one of system, user")
-      end
-
       SystemdUnitStep.new(
         name, units,
-        scope: scope || SystemdScope::System,
+        scope: context.optional_enum(node["scope"], "scope", SystemdScope::System),
         description: description,
         continue_on_error: context.bool(node["continueOnError"], false),
         probe_command: probe,
@@ -161,10 +151,7 @@ module Fluxion::Config
       unit = context.require_string(entry["name"], "unit name")
       return if unit.empty?
 
-      state = SystemdState.from_config?(entry["state"].string?)
-      if entry["state"].present? && state.nil?
-        context.error(entry["state"].path, "unsupported state", "one of started, stopped, unchanged")
-      end
+      state = context.optional_enum(entry["state"], "state", SystemdState::Unchanged)
 
       enabled = context.bool(entry["enabled"], true)
       masked = context.bool(entry["mask", "masked"], false)
@@ -174,7 +161,7 @@ module Fluxion::Config
         context.error(entry.path, "cannot both mask and enable '#{unit}'")
       end
 
-      SystemdUnit.new(unit, masked ? false : enabled, state || SystemdState::Unchanged, masked)
+      SystemdUnit.new(unit, masked ? false : enabled, state, masked)
     end
 
     private def system_setting(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?

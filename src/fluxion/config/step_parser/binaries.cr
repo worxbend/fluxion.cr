@@ -119,7 +119,7 @@ module Fluxion::Config
       toolchain = ToolchainKind.from_config?(kind_node.string?)
       unless toolchain
         context.error(kind_node.path, "toolchain kind is required",
-          "one of RUSTUP, JULIAUP, SDKMAN, GENERIC")
+          "one of #{ToolchainKind.values.map(&.config_name).join(", ")}")
         return
       end
 

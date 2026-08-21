@@ -171,86 +171,108 @@ module Fluxion::Executor
     end
   end
 
+  # The kinds that hand their work to another tool.
+  #
+  # Each runs one delegated executable against that tool's own config file, so
+  # the only things that differ between them are which tool, how long it may
+  # take, and how its argument list is spelled.
+  abstract class DelegatedToolExecutor < StepExecutor
+    abstract def spec : KnownTools::Spec
+    abstract def timeout : Time::Span
+    abstract def config_label : String
+    protected abstract def argv(step : Step, executable : String, preview : Bool) : Array(String)
+
+    def commands(step : Step, item : StepItem) : Array(Command)
+      [Command.new(argv(step, spec.executable, true), timeout: preview_timeout)]
+    end
+
+    # Same as the run unless the delegate's dry run is cheaper.
+    def preview_timeout : Time::Span
+      timeout
+    end
+
+    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
+      started = Time.instant
+      config = step.delegated_config
+
+      unless config && File.exists?(config)
+        return StepResult::Failure.new(item.key, "#{config_label} config not found: #{config}", 1)
+      end
+
+      executable = ToolBroker.new(runner).resolve(spec)
+      result = runner.run(Command.new(argv(step, executable, false), timeout: timeout)) do |line|
+        sink.call(line)
+      end
+
+      outcome(item, result, started, spec.name)
+    rescue error : Error
+      failure(item, error, "failed to prepare #{spec.name}")
+    end
+  end
+
   # `dotbot` — apply a dotfiles configuration.
-  class DotbotExecutor < StepExecutor
+  class DotbotExecutor < DelegatedToolExecutor
     TIMEOUT = 5.minutes
 
     def supports?(step : Step) : Bool
       step.is_a?(DotbotStep)
     end
 
-    def commands(step : Step, item : StepItem) : Array(Command)
-      # dotbot's own dry run, so the preview is its per-link plan rather than an
-      # opaque command string. Same flag spelling as the run: the preview used
-      # `-c` where `execute` uses `--config`, and took its executable from a
-      # `dotbotBinary` field the run ignored — so the two could name a
-      # different program with a different flag.
-      [Command.new(argv(step.as(DotbotStep), KnownTools::DOTBOT.executable, dry_run: true),
-        timeout: TIMEOUT)]
+    def spec : KnownTools::Spec
+      KnownTools::DOTBOT
     end
 
-    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
-      dotbot = step.as(DotbotStep)
-      started = Time.instant
-
-      unless File.exists?(dotbot.config)
-        return StepResult::Failure.new(item.key, "dotbot config not found: #{dotbot.config}", 1)
-      end
-
-      executable = ToolBroker.new(runner).resolve(KnownTools::DOTBOT)
-      result = runner.run(Command.new(argv(dotbot, executable), timeout: TIMEOUT)) do |line|
-        sink.call(line)
-      end
-
-      outcome(item, result, started, "dotbot")
-    rescue error : Error
-      StepResult::Failure.new(item.key, "failed to prepare dotbot: #{error.message}", 1)
+    def timeout : Time::Span
+      TIMEOUT
     end
 
-    private def argv(step : DotbotStep, executable : String, dry_run : Bool = false) : Array(String)
-      argv = [executable, "--config", step.config]
-      argv << "--dry-run" if dry_run
+    def config_label : String
+      "dotbot"
+    end
+
+    # dotbot's own dry run, so the preview is its per-link plan rather than an
+    # opaque command string. Same flag spelling as the run: the preview used
+    # `-c` where `execute` uses `--config`, and took its executable from a
+    # `dotbotBinary` field the run ignored — so the two could name a
+    # different program with a different flag.
+    protected def argv(step : Step, executable : String, preview : Bool) : Array(String)
+      argv = [executable, "--config", step.as(DotbotStep).config]
+      argv << "--dry-run" if preview
       argv
     end
   end
 
   # `nerd-fonts` — install font families.
-  class NerdFontsExecutor < StepExecutor
+  class NerdFontsExecutor < DelegatedToolExecutor
     TIMEOUT = 15.minutes
 
     def supports?(step : Step) : Bool
       step.is_a?(NerdFontsStep)
     end
 
-    def commands(step : Step, item : StepItem) : Array(Command)
-      fonts = step.as(NerdFontsStep)
-      # The installer's own dry run, so the preview is its per-family plan
-      # rather than an opaque command string.
-      [Command.new([KnownTools::NERD_FONTS.executable, "--config", fonts.config, "--dry-run"],
-        timeout: TIMEOUT)]
+    def spec : KnownTools::Spec
+      KnownTools::NERD_FONTS
     end
 
-    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
-      fonts = step.as(NerdFontsStep)
-      started = Time.instant
+    def timeout : Time::Span
+      TIMEOUT
+    end
 
-      unless File.exists?(fonts.config)
-        return StepResult::Failure.new(item.key, "nerd-fonts config not found: #{fonts.config}", 1)
-      end
+    def config_label : String
+      "nerd-fonts"
+    end
 
-      executable = ToolBroker.new(runner).resolve(KnownTools::NERD_FONTS)
-      result = runner.run(Command.new([executable, "--config", fonts.config], timeout: TIMEOUT)) do |line|
-        sink.call(line)
-      end
-
-      outcome(item, result, started, "nerd-fonts-installer")
-    rescue error : Error
-      StepResult::Failure.new(item.key, "failed to prepare nerd-fonts-installer: #{error.message}", 1)
+    # The installer's own dry run, so the preview is its per-family plan
+    # rather than an opaque command string.
+    protected def argv(step : Step, executable : String, preview : Bool) : Array(String)
+      argv = [executable, "--config", step.as(NerdFontsStep).config]
+      argv << "--dry-run" if preview
+      argv
     end
   end
 
   # `binstaller-profile` — hand binary distribution to binstaller.
-  class BinstallerExecutor < StepExecutor
+  class BinstallerExecutor < DelegatedToolExecutor
     APPLY_TIMEOUT = 30.minutes
     PLAN_TIMEOUT  = 5.minutes
 
@@ -258,46 +280,40 @@ module Fluxion::Executor
       step.is_a?(BinstallerProfileStep)
     end
 
-    def commands(step : Step, item : StepItem) : Array(Command)
-      profile = step.as(BinstallerProfileStep)
-      # A preview must never be able to install anything, so it maps onto
-      # binstaller's `plan`, never its `apply`. Everything else about the
-      # invocation is identical to the run, because both come from `argv`.
-      [Command.new(argv(profile, "plan", KnownTools::BINSTALLER.executable), timeout: PLAN_TIMEOUT)]
+    def spec : KnownTools::Spec
+      KnownTools::BINSTALLER
     end
 
-    def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
-      profile = step.as(BinstallerProfileStep)
-      started = Time.instant
+    def timeout : Time::Span
+      APPLY_TIMEOUT
+    end
 
-      unless File.exists?(profile.config)
-        return StepResult::Failure.new(item.key, "binstaller config not found: #{profile.config}", 1)
-      end
+    def preview_timeout : Time::Span
+      PLAN_TIMEOUT
+    end
 
-      executable = ToolBroker.new(runner).resolve(KnownTools::BINSTALLER)
-      result = runner.run(Command.new(argv(profile, "apply", executable), timeout: APPLY_TIMEOUT)) do |line|
-        sink.call(line)
-      end
-      outcome(item, result, started, "binstaller")
-    rescue error : Error
-      StepResult::Failure.new(item.key, "failed to prepare binstaller: #{error.message}", 1)
+    def config_label : String
+      "binstaller"
     end
 
     # The one place a binstaller invocation is built.
     #
-    # The preview used to assemble its own, omitting the lock flags entirely, so
-    # `dry-run` described a different command than `apply` ran — in a codebase
-    # whose whole point is that both come from one method.
-    private def argv(step : BinstallerProfileStep, verb : String, executable : String) : Array(String)
-      argv = [executable, verb, "--config", step.config]
-      step.only.each { |tool| argv.concat(["--only", tool]) }
-      step.skip.each { |tool| argv.concat(["--skip", tool]) }
+    # A preview must never be able to install anything, so it maps onto
+    # binstaller's `plan`, never its `apply`. Everything else about the
+    # invocation is identical to the run, because both come from here — the
+    # preview used to assemble its own, omitting the lock flags entirely, so
+    # `dry-run` described a different command than `apply` ran.
+    protected def argv(step : Step, executable : String, preview : Bool) : Array(String)
+      profile = step.as(BinstallerProfileStep)
+      argv = [executable, preview ? "plan" : "apply", "--config", profile.config]
+      profile.only.each { |tool| argv.concat(["--only", tool]) }
+      profile.skip.each { |tool| argv.concat(["--skip", tool]) }
 
-      argv << "--locked" if step.locked?
+      argv << "--locked" if profile.locked?
       # Outside the `locked?` branch: `lockFile` without `locked` used to be
       # accepted by the parser and then silently dropped here, so a profile
       # naming a lock file ran unlocked against whatever was current.
-      step.lock_file.try { |lock| argv.concat(["--lock-file", lock]) }
+      profile.lock_file.try { |lock| argv.concat(["--lock-file", lock]) }
       argv
     end
   end

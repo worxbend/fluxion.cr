@@ -86,7 +86,7 @@ module Fluxion::CLI
       header(profile, options)
       reporter = Reporter.new(@output, @stream_output)
       summary = orchestrator.run(profile, options, reporter, cancellation)
-      reporter.print_summary
+      reporter.print_summary(summary)
 
       exit_code_for(summary, cancellation, options.read_only?)
     end

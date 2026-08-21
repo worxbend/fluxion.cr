@@ -8,14 +8,11 @@ module Fluxion::CLI
   class Reporter
     include ExecutionListener
 
-    getter summary : Executor::RunSummary
-
     # Whether to echo each command's own output. Off by default: a package
     # manager's progress bars bury Fluxion's structure.
     property? stream_output : Bool
 
     def initialize(@output : IO = STDOUT, @stream_output : Bool = false)
-      @summary = Executor::RunSummary.new
       @open_item = false
       @spinner = Spinner.new(@output)
     end
@@ -50,16 +47,11 @@ module Fluxion::CLI
 
     private def phase_failed(event : ExecutionEvent) : Nil
       close_item
-      # Accumulated here rather than read from the orchestrator's summary: the
-      # Reporter builds its own, so without this the closing roll-up below
-      # could never print the lines it was written to print.
-      @summary.failed_phases << event.step_name
       @output.puts "#{Style.bold_red("[FAIL]")} phase #{event.step_name}"
     end
 
     private def phase_blocked(event : ExecutionEvent) : Nil
       close_item
-      @summary.blocked_phases << event.step_name
       @output.puts "#{Style.yellow("[BLOCK]")} #{event.step_name} #{Style.dim("waits for #{event.item}")}"
     end
 
@@ -94,8 +86,6 @@ module Fluxion::CLI
     private def item_completed(event : ExecutionEvent) : Nil
       result = event.result
       return unless result
-
-      @summary.record(result)
 
       case result
       when StepResult::Success
@@ -146,25 +136,25 @@ module Fluxion::CLI
     end
 
     # The closing tally, printed whether or not the run succeeded.
-    def print_summary : Nil
+    def print_summary(summary : Executor::RunSummary) : Nil
       close_item
       @output.puts
 
       parts = [
-        Style.green("#{@summary.succeeded} ok"),
-        @summary.failed > 0 ? Style.red("#{@summary.failed} failed") : Style.dim("0 failed"),
-        Style.dim("#{@summary.skipped} skipped"),
+        Style.green("#{summary.succeeded} ok"),
+        summary.failed > 0 ? Style.red("#{summary.failed} failed") : Style.dim("0 failed"),
+        Style.dim("#{summary.skipped} skipped"),
       ]
-      parts << Style.cyan("#{@summary.dry_run} would run") if @summary.dry_run > 0
-      parts << Style.bold_yellow("#{@summary.paused} paused") if @summary.paused > 0
+      parts << Style.cyan("#{summary.dry_run} would run") if summary.dry_run > 0
+      parts << Style.bold_yellow("#{summary.paused} paused") if summary.paused > 0
 
       @output.puts "#{Style.bold("Summary:")} #{parts.join(Style.dim(" · "))}"
 
-      unless @summary.failed_phases.empty?
-        @output.puts Style.red("Failed phases: #{@summary.failed_phases.join(", ")}")
+      unless summary.failed_phases.empty?
+        @output.puts Style.red("Failed phases: #{summary.failed_phases.join(", ")}")
       end
-      unless @summary.blocked_phases.empty?
-        @output.puts Style.yellow("Blocked phases: #{@summary.blocked_phases.join(", ")}")
+      unless summary.blocked_phases.empty?
+        @output.puts Style.yellow("Blocked phases: #{summary.blocked_phases.join(", ")}")
       end
     end
   end

@@ -581,6 +581,22 @@ describe Fluxion::Config::Manifest do
       result.error_messages.any?(&.includes?("unsafe shell characters")).should be_true
     end
 
+    it "rejects shell metacharacters in the shorthand candidate form too" do
+      # The shorthand and the object form describe the same thing, so they must
+      # be guarded the same way. `SdkmanExecutor` interpolates the candidate
+      # into a script it hands to `bash -lc`, so a shorthand entry that skipped
+      # the check would run whatever it contained.
+      result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+        - name: sdks
+          kind: sdkman-packages
+          spec:
+            packages:
+              - "maven; rm -rf /"
+        STEPS
+
+      result.error_messages.any?(&.includes?("unsafe shell characters")).should be_true
+    end
+
     it "reads an interrupt's resume mode and exit code" do
       result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
         - name: relogin

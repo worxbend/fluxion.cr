@@ -82,7 +82,11 @@ module Fluxion::Config
       candidates = packages_node.items.compact_map do |entry|
         if entry.scalar?
           value = entry.string?
-          value ? SdkmanCandidate.new(value) : nil
+          next unless value
+          # The diagnostic hangs off the item itself: a shorthand entry has no
+          # `candidate` child node to point at.
+          validate_sdkman_value(context, entry, value, "candidate")
+          SdkmanCandidate.new(value)
         elsif entry.mapping?
           candidate = context.require_string(entry["candidate"], "SDKMAN candidate")
           next if candidate.empty?

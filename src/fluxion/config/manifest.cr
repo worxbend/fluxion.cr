@@ -345,15 +345,14 @@ module Fluxion::Config
     # confusingly. Catching it at parse time costs nothing.
     private def validate_package_manager(context : Context, step : Step, entry : Node,
                                          target : TargetOs, condition : Condition?) : Nil
-      manager = case step
-                when PackagesStep     then step.package_manager
-                when SystemUpdateStep then step.package_manager
-                end
+      manager = step.item_package_manager
       return unless manager
 
-      # Cargo owns its own tree rather than the distribution's, so no target
-      # rules it out; only the managers a distribution actually ships are
-      # worth checking against one.
+      # Only the managers a distribution actually ships are worth checking a
+      # target against. Cargo and Flatpak own their own trees rather than the
+      # distribution's, so no distribution lists them and no target rules them
+      # out — which is why asking every step for its manager is safe here even
+      # though only the distribution-scoped kinds can ever fail the check.
       return unless Distribution.values.any?(&.package_managers.includes?(manager))
 
       # A step guarded by a distribution rule is deliberately for a machine
@@ -454,11 +453,7 @@ module Fluxion::Config
     private def required_managers(steps : Array(Step)) : Set(PackageManager)
       managers = Set(PackageManager).new
       steps.each do |step|
-        case step
-        when PackagesStep     then managers << normalize(step.package_manager)
-        when SystemUpdateStep then managers << normalize(step.package_manager)
-        when FlatpakStep      then managers << PackageManager::Flatpak
-        end
+        step.item_package_manager.try { |manager| managers << normalize(manager) }
       end
       managers
     end

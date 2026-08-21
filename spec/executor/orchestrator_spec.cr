@@ -39,7 +39,45 @@ private def run(subject : Fluxion::Profile,
   {summary, listener, runner}
 end
 
+# A step of a kind no executor is registered for, standing in for a profile
+# built by a newer Fluxion than the one running it.
+private class UnknownStep < Fluxion::Step
+  def kind : String
+    "invented"
+  end
+
+  def item_type : Fluxion::ItemType
+    Fluxion::ItemType::Package
+  end
+
+  def items : Array(Fluxion::ItemRef)
+    [Fluxion::ItemRef.new(@name, "package", @name)]
+  end
+end
+
 describe Fluxion::Executor::Orchestrator do
+  it "fails a step whose kind nothing can carry out" do
+    summary, listener, _ = run(profile([phase("base", [UnknownStep.new("mystery")] of Fluxion::Step)]))
+
+    summary.failed.should eq(1)
+    summary.ok?.should be_false
+    listener.results.first.as(Fluxion::StepResult::Failure)
+      .error_message.should contain("no executor for step kind 'invented'")
+  end
+
+  it "stops the run when a source setup's kind has no executor" do
+    # A source setup configures the repository the packages after it install
+    # from, so an unusable one is not something to note and carry on past.
+    subject = Fluxion::Profile.new("test", Fluxion::TargetOs.new(Fluxion::Distribution::Fedora),
+      [phase("base", [packages("tools", "git")] of Fluxion::Step)],
+      source_setups: [Fluxion::SourceSetup.new(UnknownStep.new("repo"), Fluxion::PackageManager::Dnf)])
+
+    summary, _, runner = run(subject)
+
+    summary.ok?.should be_false
+    runner.argv.should be_empty
+  end
+
   it "runs every item of every step" do
     summary, _, runner = run(profile([phase("base", [packages("tools", "git", "curl")] of Fluxion::Step)]))
 

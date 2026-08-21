@@ -5,6 +5,12 @@ module Fluxion::Executor
   # here so the step executors stay ignorant of everything except their own
   # commands. That is what lets `dry-run` and `apply` be the same traversal
   # with one flag different.
+  #
+  # The orchestrator itself is reusable and holds only the collaborators it was
+  # built with. Everything that belongs to one particular run — the options, the
+  # listener, the summary being filled in, the cancellation signal, the state
+  # recorder — lives on `Traversal`, which is created per run and thrown away
+  # after it.
   class Orchestrator
     getter runner : ShellRunner
     getter executors : ExecutorRegistry
@@ -20,87 +26,339 @@ module Fluxion::Executor
 
     def run(profile : Profile, options : RunOptions, listener : ExecutionListener,
             cancellation : CancellationSignal = CancellationSignal.new) : RunSummary
-      summary = RunSummary.new
       phases = select_phases(profile, options)
       recorder = Recorder.new(@state, options)
 
-      # Buffered state is flushed even when an error escapes the loop below.
-      # `Recorder` deliberately holds every successful item in memory and writes
-      # once, so without this a run that installed fifty packages and then hit
-      # an unexpected failure recorded none of them — leaving
-      # `--skip-already-installed` useless exactly when it matters most, and no
-      # resume point for a run that got most of the way through.
-      begin
-        # A source setup configures a repository the packages that follow depend
-        # on, so it runs first and a failure there stops the run.
-        unless source_setups_succeeded?(profile, options, listener, summary, cancellation, recorder)
-          return summary
-        end
-
-        run_phases(phases, options, listener, summary, cancellation, recorder)
-        recorder.resume_at(nil) if summary.next_phase.nil? && summary.ok?
-      ensure
-        recorder.flush
-      end
-
-      summary
+      Traversal.new(@runner, @executors, @probes, options, listener, cancellation, recorder)
+        .walk(profile, phases)
     end
 
-    # The phase traversal proper: ordering, blocking, fingerprint skips, and
-    # what each outcome means for the rest of the run.
-    private def run_phases(phases : Array(Phase), options : RunOptions,
-                           listener : ExecutionListener, summary : RunSummary,
-                           cancellation : CancellationSignal, recorder : Recorder) : Nil
-      completed = Set(String).new
+    private def select_phases(profile : Profile, options : RunOptions) : Array(Phase)
+      phases = profile.ordered_phases
 
-      phases.each do |phase|
-        if cancellation.cancelled?
-          summary.next_phase = phase.name
-          listener.on_event(ExecutionEvent.cancelled(phase.name, phase.name))
-          break
+      unless options.only_phases.empty?
+        unknown = options.only_phases.reject { |name| profile.phase?(name) }
+        unless unknown.empty?
+          raise ExecutionError.new(
+            "Unknown #{Text.singular_or_plural(unknown.size, "phase")}: #{unknown.join(", ")}. " \
+            "Valid phases: #{profile.phases.map(&.name).join(", ")}")
+        end
+        return phases.select { |phase| options.only_phases.includes?(phase.name) }
+      end
+
+      if from = options.from_phase
+        index = phases.index { |phase| phase.name == from }
+        unless index
+          raise ExecutionError.new(
+            "Unknown phase: #{from}. Valid phases: #{profile.phases.map(&.name).join(", ")}")
+        end
+        return phases[index..]
+      end
+
+      phases
+    end
+
+    # One run of one profile.
+    #
+    # Every method below used to be a private method on `Orchestrator` taking
+    # the same five arguments — options, listener, summary, cancellation,
+    # recorder — and passing them on to the next one. Six methods carried that
+    # convoy, which made every signature three lines long, made the one genuine
+    # argument of each method hard to pick out among the passengers, and left
+    # `recorder` typed as nilable purely so the signatures were easier to write.
+    # Holding them as fields of an object that exists for the length of one run
+    # says the same thing once.
+    private class Traversal
+      def initialize(
+        @runner : ShellRunner,
+        @executors : ExecutorRegistry,
+        @probes : ProbeRegistry,
+        @options : RunOptions,
+        @listener : ExecutionListener,
+        @cancellation : CancellationSignal,
+        @recorder : Recorder,
+      )
+        @summary = RunSummary.new
+      end
+
+      def walk(profile : Profile, phases : Array(Phase)) : RunSummary
+        # Buffered state is flushed even when an error escapes the traversal
+        # below. `Recorder` deliberately holds every successful item in memory
+        # and writes once, so without this a run that installed fifty packages
+        # and then hit an unexpected failure recorded none of them — leaving
+        # `--skip-already-installed` useless exactly when it matters most, and
+        # no resume point for a run that got most of the way through.
+        begin
+          # A source setup configures a repository the packages that follow
+          # depend on, so it runs first and a failure there stops the run.
+          return @summary unless source_setups_succeeded?(profile)
+
+          run_phases(phases)
+          @recorder.resume_at(nil) if @summary.next_phase.nil? && @summary.ok?
+        ensure
+          @recorder.flush
         end
 
-        blocked_by = phase.depends_on.find { |dependency| summary.failed_phases.includes?(dependency) || summary.blocked_phases.includes?(dependency) }
-        if blocked_by
-          summary.blocked_phases << phase.name
-          listener.on_event(ExecutionEvent.phase_blocked(phase.name, blocked_by))
-          next
+        @summary
+      end
+
+      # The phase traversal proper: ordering, blocking, fingerprint skips, and
+      # what each outcome means for the rest of the run.
+      private def run_phases(phases : Array(Phase)) : Nil
+        phases.each do |phase|
+          if @cancellation.cancelled?
+            @summary.next_phase = phase.name
+            @listener.on_event(ExecutionEvent.cancelled(phase.name, phase.name))
+            break
+          end
+
+          if blocked_by = blocking_dependency(phase)
+            @summary.blocked_phases << phase.name
+            @listener.on_event(ExecutionEvent.phase_blocked(phase.name, blocked_by))
+            next
+          end
+
+          fingerprint = State::Fingerprint.of(phase)
+          if @recorder.already_completed?(phase, fingerprint)
+            # A completed phase is only skipped while its fingerprint still
+            # matches, so editing a package list makes it run again rather than
+            # being silently considered done.
+            @listener.on_event(ExecutionEvent.phase_started(phase.name))
+            @listener.on_event(ExecutionEvent.phase_completed(phase.name))
+            next
+          end
+
+          case run_phase(phase)
+          in PhaseOutcome::Completed
+            @recorder.phase_completed(phase, fingerprint)
+            next
+          in PhaseOutcome::Failed
+            @recorder.phase_failed(phase, fingerprint)
+            @summary.failed_phases << phase.name
+            @listener.on_event(ExecutionEvent.phase_failed(phase.name))
+            next
+          in PhaseOutcome::Halted
+            # A logout checkpoint or an interrupt: state is written and a resume
+            # point recorded, then the run stops cleanly.
+            @summary.next_phase = phases[(phases.index(phase) || 0) + 1]?.try(&.name)
+            @recorder.resume_at(@summary.next_phase)
+            break
+          in PhaseOutcome::Cancelled
+            @summary.next_phase = phase.name
+            @recorder.resume_at(phase.name)
+            break
+          end
+        end
+      end
+
+      # The dependency that stops this phase running, or nil.
+      #
+      # A phase blocked by one that was itself blocked is blocked too, which is
+      # what keeps a failure early on from being followed by a cascade of steps
+      # running against a machine that is not in the state they assume.
+      private def blocking_dependency(phase : Phase) : String?
+        phase.depends_on.find do |dependency|
+          @summary.failed_phases.includes?(dependency) ||
+            @summary.blocked_phases.includes?(dependency)
+        end
+      end
+
+      private def run_phase(phase : Phase) : PhaseOutcome
+        @listener.on_event(ExecutionEvent.phase_started(phase.name))
+        failed = false
+
+        phase.steps.each do |step|
+          return PhaseOutcome::Cancelled if @cancellation.cancelled?
+
+          # An interrupt is a control step, not work: it records where to resume
+          # and stops, rather than running anything.
+          #
+          # A preview describes it instead of obeying it. Stopping here would
+          # leave everything after the checkpoint undescribed, which is the
+          # opposite of what a dry run is for.
+          if step.is_a?(InterruptStep)
+            next preview_interrupt(step) if @options.read_only?
+            halt(step)
+            return PhaseOutcome::Halted
+          end
+
+          step_failed = step_failed?(step)
+          failed ||= step_failed
+          return PhaseOutcome::Failed if step_failed && !phase.continue_on_step_error?
         end
 
-        fingerprint = State::Fingerprint.of(phase)
-        if recorder.already_completed?(phase, fingerprint)
-          # A completed phase is only skipped while its fingerprint still
-          # matches, so editing a package list makes it run again rather than
-          # being silently considered done.
-          listener.on_event(ExecutionEvent.phase_started(phase.name))
-          listener.on_event(ExecutionEvent.phase_completed(phase.name))
-          completed << phase.name
-          next
+        return PhaseOutcome::Failed if failed
+
+        @listener.on_event(ExecutionEvent.phase_completed(phase.name))
+
+        policy = phase.restart_policy
+        if policy.is_a?(RestartPolicy::PromptLogout)
+          @listener.on_event(ExecutionEvent.restart_required(phase.name, policy.message))
+          return PhaseOutcome::Halted
         end
 
-        outcome = run_phase(phase, options, listener, summary, cancellation, recorder)
-        completed << phase.name
+        PhaseOutcome::Completed
+      end
 
-        case outcome
-        in PhaseOutcome::Completed
-          recorder.phase_completed(phase, fingerprint)
-          next
-        in PhaseOutcome::Failed
-          recorder.phase_failed(phase, fingerprint)
-          summary.failed_phases << phase.name
-          listener.on_event(ExecutionEvent.phase_failed(phase.name))
-          next
-        in PhaseOutcome::Halted
-          # A logout checkpoint or an interrupt: state is written and a resume
-          # point recorded, then the run stops cleanly.
-          summary.next_phase = phases[(phases.index(phase) || 0) + 1]?.try(&.name)
-          recorder.resume_at(summary.next_phase)
-          break
-        in PhaseOutcome::Cancelled
-          summary.next_phase = phase.name
-          recorder.resume_at(phase.name)
-          break
+      private def preview_interrupt(step : InterruptStep) : Nil
+        result = StepResult::DryRun.new(step.name,
+          ["interrupt", step.name, "exit", step.exit_code.to_s, "—", step.message])
+        report_single_item(step.name, result)
+      end
+
+      private def halt(step : InterruptStep) : Nil
+        message = String.build do |io|
+          io << step.message
+          step.instructions.each { |instruction| io << ' ' << instruction }
         end
+
+        report_single_item(step.name, StepResult::Paused.new(step.name, message, step.exit_code))
+      end
+
+      # Returns true when the step should be treated as failed.
+      private def step_failed?(step : Step) : Bool
+        executor = @executors.for(step)
+        return report_missing_executor(step.name, "step", step.kind) unless executor
+
+        @listener.on_event(ExecutionEvent.step_started(step.name))
+        any_failed = false
+
+        begin
+          executor.items(step).each do |item|
+            break if @cancellation.cancelled?
+
+            result = run_item(step, item, executor)
+            @summary.record(result)
+            @recorder.item_succeeded(item, result) if result.is_a?(StepResult::Success)
+            next unless result.is_a?(StepResult::Failure)
+
+            any_failed = true
+            break unless step.continue_on_error?
+          end
+        ensure
+          @listener.on_event(ExecutionEvent.step_completed(step.name))
+        end
+
+        any_failed
+      end
+
+      private def run_item(step : Step, item : StepItem, executor : StepExecutor) : StepResult
+        @listener.on_event(ExecutionEvent.item_started(step.name, item.key))
+
+        if decision = skip_decision(item)
+          return completed(step.name, item.key, StepResult::Skipped.new(item.key, decision.to_s))
+        end
+
+        if @options.read_only?
+          return completed(step.name, item.key, executor.preview(step, item))
+        end
+
+        if step.requires_approval?(item.key) && !@options.approved?
+          return completed(step.name, item.key, StepResult::Failure.new(item.key,
+            "explicit confirmation required; re-run with --yes", 2))
+        end
+
+        # The one place a `Fluxion::Error` from an executor becomes a failed
+        # item.
+        #
+        # Twelve executors rescue it themselves and return a Failure, while the
+        # base `execute` does not — so whether a trust or execution error failed
+        # one item or unwound the whole run depended on whether that kind
+        # happened to override `execute`. Catching it here gives every kind the
+        # same contract, and leaves the ones that already rescue doing no harm.
+        result = begin
+          executor.execute(step, item, @runner) do |line|
+            @listener.on_event(ExecutionEvent.item_output(step.name, item.key, line))
+          end
+        rescue error : Error
+          StepResult::Failure.new(item.key, error.message || error.class.name, 1)
+        end
+
+        completed(step.name, item.key, result)
+        @listener.on_event(ExecutionEvent.error(step.name, item.key, result)) if result.is_a?(StepResult::Failure)
+        result
+      end
+
+      # Announces an item's outcome and hands it back, so the callers above read
+      # as "this is what happened" rather than as three lines of event plumbing
+      # repeated once per branch.
+      private def completed(step_name : String, key : String, result : StepResult) : StepResult
+        @listener.on_event(ExecutionEvent.item_completed(step_name, key, result))
+        result
+      end
+
+      # Whether this item can be skipped, and on what evidence.
+      private def skip_decision(item : StepItem) : InstallationStatus?
+        return unless @options.mode.probes?
+
+        if @options.mode.trusts_state?
+          if recorded = @recorder.recorded(item)
+            return recorded
+          end
+        end
+
+        status = @probes.probe(item, @runner)
+        status.installed? ? status : nil
+      end
+
+      # `confirm` items need explicit approval. Fluxion does not prompt for them
+      # in either plain or TUI mode: a run that waits for input is a run that
+      # hangs unattended.
+
+      # False when a source setup failed or the run was cancelled, in which case
+      # the caller stops: the packages that follow depend on the repository
+      # these configure.
+      #
+      # Named as a predicate, and for success, because its sibling
+      # `step_failed?` returns true for the opposite outcome — two bare `Bool`s
+      # with opposite polarity and verb names read identically at the call site.
+      private def source_setups_succeeded?(profile : Profile) : Bool
+        profile.source_setups.each do |setup|
+          return false if @cancellation.cancelled?
+
+          unless @executors.for(setup.step)
+            # A source setup Fluxion cannot perform would leave later package
+            # installs pointing at a repository that was never configured, so it
+            # stops the run rather than being noted and skipped.
+            report_missing_executor(setup.name, "source", setup.step.kind)
+            return @options.read_only?
+          end
+
+          return false if step_failed?(setup.step) && !@options.read_only?
+        end
+
+        true
+      end
+
+      # Reports a kind nothing can carry out as a failed step of one item, and
+      # returns true so a caller asking "did this fail?" can hand it straight
+      # back. Both callers — an unknown step kind and an unknown source-setup
+      # kind — reported this identically before; the only thing that differed
+      # was the noun in the message.
+      private def report_missing_executor(name : String, noun : String, kind : String) : Bool
+        result = StepResult::Failure.new(name, "no executor for #{noun} kind '#{kind}'", 1)
+
+        @listener.on_event(ExecutionEvent.step_started(name))
+        @listener.on_event(ExecutionEvent.item_completed(name, name, result))
+        @listener.on_event(ExecutionEvent.step_completed(name))
+        @summary.record(result)
+        true
+      end
+
+      # An interrupt: a control step whose whole existence is one result. It is
+      # announced as an item so the reporters and the TUI tree, which are built
+      # around items, have something to show.
+      private def report_single_item(name : String, result : StepResult) : Nil
+        @listener.on_event(ExecutionEvent.item_started(name, name))
+        @listener.on_event(ExecutionEvent.item_completed(name, name, result))
+        @summary.record(result)
+      end
+
+      private enum PhaseOutcome
+        Completed
+        Failed
+        Halted
+        Cancelled
       end
     end
 
@@ -211,229 +469,6 @@ module Fluxion::Executor
         # continues with live probes and simply records nothing.
         nil
       end
-    end
-
-    private enum PhaseOutcome
-      Completed
-      Failed
-      Halted
-      Cancelled
-    end
-
-    private def run_phase(phase : Phase, options : RunOptions, listener : ExecutionListener,
-                          summary : RunSummary, cancellation : CancellationSignal,
-                          recorder : Recorder) : PhaseOutcome
-      listener.on_event(ExecutionEvent.phase_started(phase.name))
-      failed = false
-
-      phase.steps.each do |step|
-        return PhaseOutcome::Cancelled if cancellation.cancelled?
-
-        # An interrupt is a control step, not work: it records where to resume
-        # and stops, rather than running anything.
-        #
-        # A preview describes it instead of obeying it. Stopping here would
-        # leave everything after the checkpoint undescribed, which is the
-        # opposite of what a dry run is for.
-        if step.is_a?(InterruptStep)
-          next preview_interrupt(step, listener, summary) if options.read_only?
-          halt(step, listener, summary)
-          return PhaseOutcome::Halted
-        end
-
-        step_failed = step_failed?(step, options, listener, summary, cancellation, recorder)
-        failed ||= step_failed
-        return PhaseOutcome::Failed if step_failed && !phase.continue_on_step_error?
-      end
-
-      return PhaseOutcome::Failed if failed
-
-      listener.on_event(ExecutionEvent.phase_completed(phase.name))
-
-      policy = phase.restart_policy
-      if policy.is_a?(RestartPolicy::PromptLogout)
-        listener.on_event(ExecutionEvent.restart_required(phase.name, policy.message))
-        return PhaseOutcome::Halted
-      end
-
-      PhaseOutcome::Completed
-    end
-
-    private def preview_interrupt(step : InterruptStep, listener : ExecutionListener, summary : RunSummary) : Nil
-      result = StepResult::DryRun.new(step.name,
-        ["interrupt", step.name, "exit", step.exit_code.to_s, "—", step.message])
-      listener.on_event(ExecutionEvent.item_started(step.name, step.name))
-      listener.on_event(ExecutionEvent.item_completed(step.name, step.name, result))
-      summary.record(result)
-    end
-
-    private def halt(step : InterruptStep, listener : ExecutionListener, summary : RunSummary) : Nil
-      message = String.build do |io|
-        io << step.message
-        step.instructions.each { |instruction| io << ' ' << instruction }
-      end
-
-      result = StepResult::Paused.new(step.name, message, step.exit_code)
-      listener.on_event(ExecutionEvent.item_started(step.name, step.name))
-      listener.on_event(ExecutionEvent.item_completed(step.name, step.name, result))
-      summary.record(result)
-    end
-
-    # Returns true when the step should be treated as failed.
-    private def step_failed?(step : Step, options : RunOptions, listener : ExecutionListener,
-                             summary : RunSummary, cancellation : CancellationSignal,
-                             recorder : Recorder? = nil) : Bool
-      executor = @executors.for(step)
-      unless executor
-        listener.on_event(ExecutionEvent.step_started(step.name))
-        result = StepResult::Failure.new(step.name, "no executor for step kind '#{step.kind}'", 1)
-        listener.on_event(ExecutionEvent.item_completed(step.name, step.name, result))
-        listener.on_event(ExecutionEvent.step_completed(step.name))
-        summary.record(result)
-        return true
-      end
-
-      listener.on_event(ExecutionEvent.step_started(step.name))
-      any_failed = false
-
-      begin
-        executor.items(step).each do |item|
-          break if cancellation.cancelled?
-
-          result = run_item(step, item, executor, options, listener, recorder)
-          summary.record(result)
-          recorder.try(&.item_succeeded(item, result)) if result.is_a?(StepResult::Success)
-          next unless result.is_a?(StepResult::Failure)
-
-          any_failed = true
-          break unless step.continue_on_error?
-        end
-      ensure
-        listener.on_event(ExecutionEvent.step_completed(step.name))
-      end
-
-      any_failed
-    end
-
-    private def run_item(step : Step, item : StepItem, executor : StepExecutor,
-                         options : RunOptions, listener : ExecutionListener,
-                         recorder : Recorder? = nil) : StepResult
-      listener.on_event(ExecutionEvent.item_started(step.name, item.key))
-
-      if decision = skip_decision(item, options, recorder)
-        result = StepResult::Skipped.new(item.key, decision.to_s)
-        listener.on_event(ExecutionEvent.item_completed(step.name, item.key, result))
-        return result
-      end
-
-      if options.read_only?
-        result = executor.preview(step, item)
-        listener.on_event(ExecutionEvent.item_completed(step.name, item.key, result))
-        return result
-      end
-
-      if step.requires_approval?(item.key) && !options.approved?
-        result = StepResult::Failure.new(item.key,
-          "explicit confirmation required; re-run with --yes", 2)
-        listener.on_event(ExecutionEvent.item_completed(step.name, item.key, result))
-        return result
-      end
-
-      # The one place a `Fluxion::Error` from an executor becomes a failed item.
-      #
-      # Twelve executors rescue it themselves and return a Failure, while the
-      # base `execute` does not — so whether a trust or execution error failed
-      # one item or unwound the whole run depended on whether that kind happened
-      # to override `execute`. Catching it here gives every kind the same
-      # contract, and leaves the ones that already rescue doing no harm.
-      result = begin
-        executor.execute(step, item, @runner) do |line|
-          listener.on_event(ExecutionEvent.item_output(step.name, item.key, line))
-        end
-      rescue error : Error
-        StepResult::Failure.new(item.key, error.message || error.class.name, 1)
-      end
-
-      listener.on_event(ExecutionEvent.item_completed(step.name, item.key, result))
-      listener.on_event(ExecutionEvent.error(step.name, item.key, result)) if result.is_a?(StepResult::Failure)
-      result
-    end
-
-    # Whether this item can be skipped, and on what evidence.
-    private def skip_decision(item : StepItem, options : RunOptions,
-                              recorder : Recorder?) : InstallationStatus?
-      return unless options.mode.probes?
-
-      if options.mode.trusts_state?
-        if recorded = recorder.try(&.recorded(item))
-          return recorded
-        end
-      end
-
-      status = @probes.probe(item, @runner)
-      status.installed? ? status : nil
-    end
-
-    # `confirm` items need explicit approval. Fluxion does not prompt for them
-    # in either plain or TUI mode: a run that waits for input is a run that
-    # hangs unattended.
-
-    private def select_phases(profile : Profile, options : RunOptions) : Array(Phase)
-      phases = profile.ordered_phases
-
-      unless options.only_phases.empty?
-        unknown = options.only_phases.reject { |name| profile.phase?(name) }
-        unless unknown.empty?
-          raise ExecutionError.new(
-            "Unknown #{Text.singular_or_plural(unknown.size, "phase")}: #{unknown.join(", ")}. " \
-            "Valid phases: #{profile.phases.map(&.name).join(", ")}")
-        end
-        return phases.select { |phase| options.only_phases.includes?(phase.name) }
-      end
-
-      if from = options.from_phase
-        index = phases.index { |phase| phase.name == from }
-        unless index
-          raise ExecutionError.new(
-            "Unknown phase: #{from}. Valid phases: #{profile.phases.map(&.name).join(", ")}")
-        end
-        return phases[index..]
-      end
-
-      phases
-    end
-
-    # False when a source setup failed or the run was cancelled, in which case
-    # the caller stops: the packages that follow depend on the repository these
-    # configure.
-    #
-    # Named as a predicate, and for success, because its sibling
-    # `step_failed?` returns true for the opposite outcome — two bare `Bool`s
-    # with opposite polarity and verb names read identically at the call site.
-    private def source_setups_succeeded?(profile : Profile, options : RunOptions, listener : ExecutionListener,
-                                         summary : RunSummary, cancellation : CancellationSignal,
-                                         recorder : Recorder? = nil) : Bool
-      profile.source_setups.each do |setup|
-        return false if cancellation.cancelled?
-
-        executor = @executors.for(setup.step)
-        unless executor
-          # A source setup Fluxion cannot perform would leave later package
-          # installs pointing at a repository that was never configured, so it
-          # stops the run rather than being noted and skipped.
-          listener.on_event(ExecutionEvent.step_started(setup.name))
-          result = StepResult::Failure.new(setup.name,
-            "no executor for source kind '#{setup.step.kind}'", 1)
-          listener.on_event(ExecutionEvent.item_completed(setup.name, setup.name, result))
-          listener.on_event(ExecutionEvent.step_completed(setup.name))
-          summary.record(result)
-          return options.read_only?
-        end
-
-        return false if step_failed?(setup.step, options, listener, summary, cancellation, recorder) && !options.read_only?
-      end
-
-      true
     end
   end
 end

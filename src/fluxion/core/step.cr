@@ -122,8 +122,7 @@ module Fluxion
 
     # One-line summary for `plan` and `list`.
     def summary : String
-      count = items.size
-      count == 1 ? "1 item" : "#{count} items"
+      Text.pluralize(items.size, "item")
     end
 
     # True when the step mutates the host. Purely informational steps still

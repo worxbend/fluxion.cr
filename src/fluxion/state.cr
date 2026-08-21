@@ -1,6 +1,7 @@
 require "digest/sha256"
 require "./core"
 require "./host"
+require "./atomic_file"
 require "./paths"
 require "./state/store"
 

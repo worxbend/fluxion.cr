@@ -3,6 +3,7 @@ require "file_utils"
 
 require "./core"
 require "./host"
+require "./atomic_file"
 require "./paths"
 require "./config"
 require "./executor"

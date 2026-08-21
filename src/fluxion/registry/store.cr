@@ -227,15 +227,12 @@ module Fluxion::Registry
       Digest::SHA256.hexdigest(body)
     end
 
+    # No mode, deliberately. One caller is `stage`, which writes into the git
+    # checkout that `publish` then commits and pushes, so forcing 0o600 here
+    # would change the permissions of tracked files. What protects an installed
+    # profile is the 0o700 directory it sits in, created above.
     private def write_atomically(path : String, body : String) : Nil
-      temporary = "#{path}.#{Random::Secure.hex(6)}.tmp"
-      begin
-        File.write(temporary, body)
-        File.rename(temporary, path)
-      rescue error
-        File.delete(temporary) rescue nil
-        raise ExecutionError.new("Failed to write #{path}: #{error.message}")
-      end
+      AtomicFile.write(path, body)
     end
   end
 end

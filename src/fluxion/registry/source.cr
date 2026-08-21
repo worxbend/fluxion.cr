@@ -166,17 +166,9 @@ module Fluxion::Registry
         end
       end
 
-      # Written beside the destination and renamed, so an interrupted write
-      # never leaves the user with a truncated registry list.
-      temporary = "#{path}.#{Random::Secure.hex(6)}.tmp"
-      begin
-        File.write(temporary, body)
-        File.chmod(temporary, 0o600)
-        File.rename(temporary, path)
-      rescue error
-        File.delete(temporary) rescue nil
-        raise ExecutionError.new("Failed to write #{path}: #{error.message}")
-      end
+      # 0o600: the settings name every registry this machine trusts, which is
+      # not something other local users need to read.
+      AtomicFile.write(path, body, mode: 0o600)
     end
 
     def find(name : String) : Source?

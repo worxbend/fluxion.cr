@@ -278,15 +278,8 @@ module Fluxion::State
       file = path(document.profile_name)
       prepare_directory
 
-      temporary = "#{file}.#{Random::Secure.hex(8)}.tmp"
-      begin
-        File.write(temporary, document.to_pretty_json)
-        File.chmod(temporary, FILE_MODE)
-        File.rename(temporary, file)
-      rescue error
-        File.delete(temporary) rescue nil
-        raise ExecutionError.new("Failed to write state file #{file}: #{error.message}")
-      end
+      AtomicFile.write(file, document.to_pretty_json,
+        mode: FILE_MODE, description: "state file #{file}")
     end
 
     def update(profile : String, & : Document -> _) : Document

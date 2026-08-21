@@ -49,10 +49,10 @@ module Fluxion::CLI
 
       phases = profile.phases.size
       steps = profile.steps.size
-      shape = "profile #{Style.bold(profile.name)} with #{pluralize(phases, "phase")}, #{pluralize(steps, "step")}"
+      shape = "profile #{Style.bold(profile.name)} with #{Text.pluralize(phases, "phase")}, #{Text.pluralize(steps, "step")}"
 
       if failed
-        puts "#{Style.red(Symbols.failure)} Config has #{pluralize(diagnostics.size, "issue")}: #{shape}"
+        puts "#{Style.red(Symbols.failure)} Config has #{Text.pluralize(diagnostics.size, "issue")}: #{shape}"
       else
         puts "#{Style.green(Symbols.success)} Config is valid: #{shape}"
       end
@@ -89,10 +89,6 @@ module Fluxion::CLI
           }
         end,
       }.to_json)
-    end
-
-    private def pluralize(count : Int32, noun : String) : String
-      "#{count} #{noun}#{"s" if count != 1}"
     end
   end
 

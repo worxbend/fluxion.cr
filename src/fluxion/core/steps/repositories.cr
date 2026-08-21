@@ -374,7 +374,7 @@ module Fluxion
     end
 
     def summary : String
-      "#{@keys.size} signing key#{"s" if @keys.size != 1}"
+      Text.pluralize(@keys.size, "signing key")
     end
   end
 end

@@ -65,7 +65,7 @@ module Fluxion::TUI
       return "no saved state for this profile" unless available?
 
       parts = [] of String
-      parts << "#{@completed_phases.size} phase#{"s" if @completed_phases.size != 1} already done"
+      parts << "#{Text.pluralize(@completed_phases.size, "phase")} already done"
       @next_phase.try { |phase| parts << "stopped before #{phase}" }
       @last_run_at.try { |time| parts << "last run #{time.to_s("%Y-%m-%d %H:%M")}" }
       parts.join(" · ")

@@ -1,6 +1,7 @@
 require "digest/sha256"
 require "uri"
 
+require "./core/text"
 require "./core/errors"
 require "./core/diagnostic"
 require "./core/public_url"

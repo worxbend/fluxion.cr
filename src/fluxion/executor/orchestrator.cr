@@ -385,7 +385,7 @@ module Fluxion::Executor
         unknown = options.only_phases.reject { |name| profile.phase?(name) }
         unless unknown.empty?
           raise ExecutionError.new(
-            "Unknown phase#{"s" if unknown.size != 1}: #{unknown.join(", ")}. " \
+            "Unknown #{Text.singular_or_plural(unknown.size, "phase")}: #{unknown.join(", ")}. " \
             "Valid phases: #{profile.phases.map(&.name).join(", ")}")
         end
         return phases.select { |phase| options.only_phases.includes?(phase.name) }

@@ -79,7 +79,7 @@ module Fluxion
     end
 
     def summary : String
-      "#{@packages.size} #{@package_manager} package#{"s" if @packages.size != 1}"
+      "#{@packages.size} #{@package_manager} #{Text.singular_or_plural(@packages.size, "package")}"
     end
   end
 
@@ -123,7 +123,7 @@ module Fluxion
     end
 
     def summary : String
-      "#{@app_ids.size} flatpak app#{"s" if @app_ids.size != 1} from #{@remote}"
+      "#{Text.pluralize(@app_ids.size, "flatpak app")} from #{@remote}"
     end
   end
 
@@ -166,7 +166,7 @@ module Fluxion
     end
 
     def summary : String
-      "#{@packages.size} #{@backend} package#{"s" if @packages.size != 1}"
+      "#{@packages.size} #{@backend} #{Text.singular_or_plural(@packages.size, "package")}"
     end
   end
 
@@ -215,7 +215,7 @@ module Fluxion
     end
 
     def summary : String
-      "#{@candidates.size} SDKMAN candidate#{"s" if @candidates.size != 1}"
+      Text.pluralize(@candidates.size, "SDKMAN candidate")
     end
   end
 

@@ -399,7 +399,7 @@ module Fluxion::TUI
       end
 
       turned_off = @selection.resume_from(@resume)
-      notify(turned_off.zero? ? "nothing left to skip — the saved phases are already off" : "skipping #{turned_off} phase#{"s" if turned_off != 1} the last run finished")
+      notify(turned_off.zero? ? "nothing left to skip — the saved phases are already off" : "skipping #{Text.pluralize(turned_off, "phase")} the last run finished")
     end
 
     private def notify(message : String) : Nil
@@ -523,7 +523,7 @@ module Fluxion::TUI
         spans << CryTUI::Span.new(" #{step.name.ljust(26)}", selected ? Theme.base : Theme.hint)
         spans << CryTUI::Span.new(" #{step.kind.ljust(16)}", Theme.hint)
         count = step.items.size
-        spans << CryTUI::Span.new(" #{count} item#{"s" if count != 1}", Theme.info)
+        spans << CryTUI::Span.new(" #{Text.pluralize(count, "item")}", Theme.info)
       else
         phase = row.phase
         selected = @selection.phase?(phase.name)
@@ -610,9 +610,9 @@ module Fluxion::TUI
       summary = CryTUI::Line.new([
         CryTUI::Span.new("  #{Chrome.status_dot(@selection.any_selected?)} ",
           @selection.any_selected? ? Theme.success : Theme.warning),
-        CryTUI::Span.new("#{steps} step#{"s" if steps != 1}", Theme.heading),
+        CryTUI::Span.new(Text.pluralize(steps, "step"), Theme.heading),
         CryTUI::Span.new(" · ", Theme.border),
-        CryTUI::Span.new("#{items} item#{"s" if items != 1} selected", Theme.base),
+        CryTUI::Span.new("#{Text.pluralize(items, "item")} selected", Theme.base),
         CryTUI::Span.new(notice_text, Theme.warning),
       ])
 

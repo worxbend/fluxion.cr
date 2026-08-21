@@ -178,7 +178,7 @@ module Fluxion::CLI
 
       parsed, _ = store(added).manifest
       if parsed
-        puts "#{Style.green(Symbols.success)} #{parsed.entries.size} configuration#{"s" if parsed.entries.size != 1} available"
+        puts "#{Style.green(Symbols.success)} #{Text.pluralize(parsed.entries.size, "configuration")} available"
         puts Style.dim("  fluxion remote-ls")
       else
         @error_output.puts "#{Style.yellow(Symbols.warning)} " \
@@ -367,7 +367,7 @@ module Fluxion::CLI
       end
       return if stale.empty?
 
-      puts "  #{Style.cyan("#{stale.size} installed configuration#{"s" if stale.size != 1} changed upstream:")}"
+      puts "  #{Style.cyan("#{stale.size} installed #{Text.singular_or_plural(stale.size, "configuration")} changed upstream:")}"
       stale.each { |entry| puts "    #{Symbols.arrow} #{entry.id}" }
       puts Style.dim("  fluxion registry install <id> --force  to take the update")
     end
@@ -852,7 +852,7 @@ module Fluxion::CLI
       # as current rather than as a pending local edit.
       candidates.each { |entry| catalogue.install(entry, force: true) }
 
-      puts "#{Style.green(Symbols.success)} Published #{candidates.size} configuration#{"s" if candidates.size != 1}"
+      puts "#{Style.green(Symbols.success)} Published #{Text.pluralize(candidates.size, "configuration")}"
       ExitCode::Success
     end
   end

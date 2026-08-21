@@ -242,7 +242,7 @@ module Fluxion
     end
 
     def summary : String
-      "#{@scripts.size} script#{"s" if @scripts.size != 1}"
+      Text.pluralize(@scripts.size, "script")
     end
   end
 
@@ -284,7 +284,7 @@ module Fluxion
     end
 
     def summary : String
-      "#{@commands.size} command#{"s" if @commands.size != 1}"
+      Text.pluralize(@commands.size, "command")
     end
   end
 

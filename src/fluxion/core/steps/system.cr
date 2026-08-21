@@ -315,7 +315,7 @@ module Fluxion
     end
 
     def summary : String
-      "#{@units.size} unit#{"s" if @units.size != 1} (#{@scope})"
+      "#{Text.pluralize(@units.size, "unit")} (#{@scope})"
     end
   end
 
@@ -438,7 +438,7 @@ module Fluxion
     end
 
     def summary : String
-      "#{@files.size} file#{"s" if @files.size != 1}"
+      Text.pluralize(@files.size, "file")
     end
   end
 end

@@ -55,7 +55,7 @@ module Fluxion::CLI
       return ExitCode::Success if failures.zero?
 
       puts
-      raise Failure.external("Doctor found #{failures} failing check#{"s" if failures != 1}")
+      raise Failure.external("Doctor found #{Text.pluralize(failures, "failing check")}")
     end
 
     private def render(check : Check, width : Int32) : String

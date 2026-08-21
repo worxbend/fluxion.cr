@@ -97,4 +97,37 @@ describe "installerVersion" do
 
     result.errors.should be_empty
   end
+
+  # `Kind#package_actions` is what `fluxion kinds` prints; `PackageAction`
+  # in core is what the parser validates against. They were two hand-written
+  # copies of the same list, so a new action could be accepted and undocumented
+  # or documented and rejected. It is now derived, and this holds it there.
+  it "documents exactly the actions the parser accepts" do
+    Fluxion::Config::PlanKinds::ALL.each do |kind|
+      manager = kind.package_manager
+      expected = manager ? Fluxion::PackageAction.supported_for(manager) : [] of String
+      kind.package_actions.should eq(expected)
+    end
+  end
+
+  it "still lists no actions for the kinds that never accepted any" do
+    # aur-packages picks its helper from `spec.packageManager`, so the kind
+    # itself names no manager and documents no actions — as the schema docs say.
+    %w[aur-packages cargo-packages flatpak-packages sdkman-packages].each do |id|
+      Fluxion::Config::PlanKinds.find(id).not_nil!.package_actions.should be_empty
+    end
+  end
+
+  it "still lists the actions each package kind documented before" do
+    expected = {
+      "apt-packages"    => %w[update upgrade dist-upgrade],
+      "dnf-packages"    => %w[check-update upgrade swap groupupdate group-update],
+      "pacman-packages" => %w[sync-upgrade syu upgrade],
+      "zypper-packages" => %w[refresh update dup dup-from],
+    }
+
+    expected.each do |id, actions|
+      Fluxion::Config::PlanKinds.find(id).not_nil!.package_actions.should eq(actions)
+    end
+  end
 end

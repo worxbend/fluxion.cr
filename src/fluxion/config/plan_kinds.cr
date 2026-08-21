@@ -24,33 +24,41 @@ module Fluxion::Config
       getter summary : String
       getter category : Category
 
-      # Pre-install actions this kind's `spec.actions` accepts.
-      getter package_actions : Array(String)
-
       # The package manager a package kind installs with. Nil for kinds where
       # the manifest picks one, or where the concept does not apply.
       getter package_manager : PackageManager?
 
       def initialize(@id : String, @summary : String, @category : Category,
-                     @package_actions : Array(String) = [] of String,
                      @package_manager : PackageManager? = nil)
       end
-    end
 
-    APT_ACTIONS    = %w[update upgrade dist-upgrade]
-    DNF_ACTIONS    = %w[check-update upgrade swap groupupdate group-update]
-    PACMAN_ACTIONS = %w[sync-upgrade syu upgrade]
-    ZYPPER_ACTIONS = %w[refresh update dup dup-from]
+      # Pre-install actions this kind's `spec.actions` accepts.
+      #
+      # Asked of the manager rather than written out here. It used to be a
+      # literal per kind, and those literals were verbatim copies of
+      # `PackageAction::SUPPORTED` in core — the parser validated against the
+      # core copy while `fluxion kinds` printed this one, with nothing
+      # comparing them. A new action added to one was either silently rejected
+      # or silently undocumented, which is exactly the drift this table's own
+      # header comment claims it prevents.
+      #
+      # Empty for a kind with no manager of its own, which is what
+      # `aur-packages` needs: its helper is chosen from `spec.packageManager`
+      # at parse time, so the kind names none and documents none.
+      def package_actions : Array(String)
+        @package_manager.try { |manager| PackageAction.supported_for(manager) } || [] of String
+      end
+    end
 
     # Declaration order is also the order `fluxion kinds` prints and the
     # tie-break order for did-you-mean suggestions.
     ALL = [
-      Kind.new("apt-packages", "Install packages with apt.", Category::Packages, APT_ACTIONS, PackageManager::Apt),
+      Kind.new("apt-packages", "Install packages with apt.", Category::Packages, PackageManager::Apt),
       Kind.new("aur-packages", "Install AUR packages with paru or yay.", Category::Packages),
       Kind.new("cargo-packages", "Install crates with cargo.", Category::Packages, package_manager: PackageManager::Cargo),
-      Kind.new("dnf-packages", "Install packages with dnf.", Category::Packages, DNF_ACTIONS, PackageManager::Dnf),
-      Kind.new("pacman-packages", "Install packages with pacman.", Category::Packages, PACMAN_ACTIONS, PackageManager::Pacman),
-      Kind.new("zypper-packages", "Install packages with zypper.", Category::Packages, ZYPPER_ACTIONS, PackageManager::Zypper),
+      Kind.new("dnf-packages", "Install packages with dnf.", Category::Packages, PackageManager::Dnf),
+      Kind.new("pacman-packages", "Install packages with pacman.", Category::Packages, PackageManager::Pacman),
+      Kind.new("zypper-packages", "Install packages with zypper.", Category::Packages, PackageManager::Zypper),
       Kind.new("sdkman-packages", "Install SDKMAN candidates such as java or maven.", Category::Sdkman),
       Kind.new("flatpak-packages", "Install Flatpak applications.", Category::Apps),
       Kind.new("shell-scripts", "Run local or HTTPS-fetched shell scripts.", Category::Installer),

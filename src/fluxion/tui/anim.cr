@@ -8,9 +8,6 @@ module Fluxion::TUI
   module Anim
     extend self
 
-    BARS         = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
-    ASCII_LEVELS = ['.', '-', '=', '+', '*', '#']
-
     # Mixes two colours, `amount` of the way from `from` to `to`.
     #
     # A terminal cell has no alpha channel, so anything that should look
@@ -60,41 +57,8 @@ module Fluxion::TUI
       end.to_a
     end
 
-    # Splices one row of a spinner into a line the caller is already building.
-    #
-    # Spinners render themselves into a rectangle, but most of the places this
-    # interface wants one are mid-sentence rather than in a pane of their own.
-    def spans(lines : Array(CryTUI::Line), row : Int32 = 0) : Array(CryTUI::Span)
-      lines[row]?.try(&.spans) || [] of CryTUI::Span
-    end
-
-    def sparkline(values : Enumerable(Number), width : Int32) : String
-      history(values, width, BARS, normalize_from_zero: true)
-    end
-
-    def sparkline_ascii(values : Enumerable(Number), width : Int32) : String
-      history(values, width, ASCII_LEVELS, normalize_from_zero: false)
-    end
-
     private def lerp(from : UInt8, to : UInt8, amount : Float32) : Int32
       (from + (to.to_i - from.to_i) * amount).round.to_i
-    end
-
-    private def history(values : Enumerable(Number), width : Int32, levels : Array(Char),
-                        normalize_from_zero : Bool) : String
-      return "" if width <= 0
-      samples = values.map(&.to_f64).to_a.last(width)
-      return levels.first.to_s * width if samples.empty?
-      minimum = normalize_from_zero ? 0.0 : samples.min
-      maximum = {samples.max, normalize_from_zero ? 1.0 : samples.min + Float64::EPSILON}.max
-      range = {maximum - minimum, Float64::EPSILON}.max
-      String.build do |io|
-        io << levels.first.to_s * (width - samples.size)
-        samples.each do |sample|
-          index = (((sample - minimum) / range).clamp(0.0, 1.0) * (levels.size - 1)).round.to_i
-          io << levels[index]
-        end
-      end
     end
   end
 end

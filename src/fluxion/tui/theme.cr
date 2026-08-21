@@ -109,10 +109,6 @@ module Fluxion::TUI
       CryTUI::Style.new(palette.border)
     end
 
-    def border_focus : CryTUI::Style
-      CryTUI::Style.new(palette.border_focus)
-    end
-
     def badge : CryTUI::Style
       CryTUI::Style.new(palette.badge_foreground, palette.badge_background,
         modifiers: CryTUI::Modifier::Bold)
@@ -127,18 +123,6 @@ module Fluxion::TUI
     # indistinguishable from a hung run.
     def spinner_glyph(tick : Int) : String
       CryTUI::Widgets::FluxSpinner.new(tick: tick, frames: Spinners.frames).frame
-    end
-
-    # A sweeping bar that says work is still happening, without claiming to
-    # know how much is left.
-    def activity_bar(buffer : CryTUI::Buffer, area : CryTUI::Rect, tick : Int) : Nil
-      return if area.empty?
-      CryTUI::Widgets::BarSpinner.new(
-        tick: tick,
-        motion: CryTUI::Widgets::BarMotion::Loop,
-        arc_style: running,
-        dim_style: hint
-      ).render(area, buffer)
     end
 
     # Box drawing, so a panel is described once.

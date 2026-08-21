@@ -286,24 +286,26 @@ module Fluxion::Config
                            {:both, token}
                          end
 
-        apply = ->(state : NamedTuple(required: Bool, trusted: Bool)) do
-          case setting
-          when "Never", "Optional" then {required: false, trusted: state[:trusted]}
-          when "Required"          then {required: true, trusted: state[:trusted]}
-          when "TrustAll"          then {required: state[:required], trusted: false}
-          when "TrustedOnly"       then {required: state[:required], trusted: true}
-          else                          state
-          end
-        end
-
-        package = apply.call(package) unless scope == :database
-        database = apply.call(database) unless scope == :package
+        package = apply_sig_setting(package, setting) unless scope == :database
+        database = apply_sig_setting(database, setting) unless scope == :package
       end
 
       unless package[:required] && package[:trusted] && database[:required] && database[:trusted]
         context.error(node.path,
           "enabled repositories must require signed, trusted packages and databases",
           "'Required TrustedOnly' satisfies both")
+      end
+    end
+
+    private alias SigState = NamedTuple(required: Bool, trusted: Bool)
+
+    private def apply_sig_setting(state : SigState, setting : String) : SigState
+      case setting
+      when "Never", "Optional" then {required: false, trusted: state[:trusted]}
+      when "Required"          then {required: true, trusted: state[:trusted]}
+      when "TrustAll"          then {required: state[:required], trusted: false}
+      when "TrustedOnly"       then {required: state[:required], trusted: true}
+      else                          state
       end
     end
 

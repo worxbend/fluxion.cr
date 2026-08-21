@@ -59,6 +59,15 @@ module Fluxion
       end
     end
 
+    # The command that lists installed package names on this distribution.
+    def installed_query_argv(explicit_only : Bool = false) : Array(String)
+      case self
+      in .fedora?, .open_suse? then ["rpm", "-qa", "--qf", "%{NAME}\\n"]
+      in .arch?                then explicit_only ? ["pacman", "-Qqe"] : ["pacman", "-Qq"]
+      in .debian?, .ubuntu?    then ["dpkg-query", "-W", "-f=${Package}\\n"]
+      end
+    end
+
     def to_s(io : IO) : Nil
       io << config_name
     end

@@ -63,19 +63,9 @@ module Fluxion::CLI
     end
 
     private def packages(runner : Executor::ShellRunner, facts : HostFacts) : Array(String)
-      argv = SnapshotCommand.query_argv(facts.distribution)
+      argv = facts.distribution.try(&.installed_query_argv)
       return [] of String unless argv
       lines(runner, argv)
-    end
-
-    # The command that lists installed package names, per distribution.
-    def self.query_argv(distribution : Distribution?) : Array(String)?
-      return unless distribution
-      case distribution
-      in .fedora?, .open_suse? then ["rpm", "-qa", "--qf", "%{NAME}\\n"]
-      in .arch?                then ["pacman", "-Qq"]
-      in .debian?, .ubuntu?    then ["dpkg-query", "-W", "-f=${Package}\\n"]
-      end
     end
 
     private def lines(runner : Executor::ShellRunner, argv : Array(String)) : Array(String)

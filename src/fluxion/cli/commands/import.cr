@@ -107,7 +107,7 @@ module Fluxion::CLI
     private def installed(runner : Executor::ShellRunner, facts : HostFacts) : Array(String)
       # Explicitly-installed packages only where the manager tracks that: a
       # fragment listing every transitive dependency is unusable.
-      argv = facts.distribution.try(&.arch?) ? ["pacman", "-Qqe"] : SnapshotCommand.query_argv(facts.distribution)
+      argv = facts.distribution.try(&.installed_query_argv(explicit_only: true))
       return [] of String unless argv && Host.command_exists?(argv.first)
 
       result = runner.run(Executor::Command.new(argv, timeout: 30.seconds))

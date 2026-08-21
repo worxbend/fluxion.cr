@@ -1,5 +1,5 @@
 name: fluxion
-version: 0.2.0
+version: 0.3.0
 description: |
   Turn a fresh Linux machine into your machine. One YAML file, one preview,
   one run. CLI or TUI. A Crystal implementation of the Fluxion workstation

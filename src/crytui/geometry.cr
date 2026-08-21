@@ -112,7 +112,26 @@ module CryTUI
     private MEDIUM   = Kiwi::Strength::MEDIUM
     private WEAK     = Kiwi::Strength::WEAK
 
+    # Fixed-point scale for the solver. Cassowary works in floats, but the
+    # answer has to land on whole terminal cells, so sizes are multiplied by
+    # this going in and divided out on the way back. Rounding at cell
+    # granularity directly would make constraints that differ by less than a
+    # cell indistinguishable to the solver.
+    private PRECISION = 100.0
+
     private def solve(total : Int32) : Array(Tuple(Int32, Int32))
+      uniform_split(total) || solved_split(total)
+    end
+
+    # The three arrangements that need no solver at all.
+    #
+    # When every constraint is the same kind and that kind divides the area by
+    # a plain fraction, the answer is arithmetic. These are not an optimisation
+    # detail: they are also the cases where the solver's equal-growth
+    # preferences would fight the exact proportions the caller asked for, so
+    # taking them directly is what makes `percentage(30)` mean thirty percent.
+    # Nil when the constraints are mixed, which is the common case.
+    private def uniform_split(total : Int32) : Array(Tuple(Int32, Int32))?
       if @spacing == 0 && @constraints.all?(&.kind.percentage?)
         return cumulative_ranges(total, @constraints.map { |constraint| constraint.value.to_f64 / 100.0 })
       end
@@ -126,15 +145,40 @@ module CryTUI
         ranges = cumulative_ranges(available, weights.map { |weight| weight / sum })
         return ranges.map_with_index { |(start, size), index| {start + index * @spacing, size} }
       end
+    end
 
-      precision = 100.0
-      scaled_total = total * precision
+    # The general case: state every rule as a weighted constraint and let
+    # Cassowary find the arrangement that satisfies the most important ones.
+    #
+    # The variables alternate: each pane is a (start, finish) pair, with a
+    # spacer pair between neighbours, bracketed by one variable at each edge of
+    # the area. `segments` names the pane pairs so the rules below can talk
+    # about panes rather than about indices.
+    private def solved_split(total : Int32) : Array(Tuple(Int32, Int32))
+      scaled_total = total * PRECISION
       count = @constraints.size
       variables = Array.new(count * 2 + 2) { |index| Kiwi::Variable.new("layout_#{index}") }
       solver = Kiwi::Solver.new
+      area_size = variables.last - variables.first
+      segments = @constraints.map_with_index { |_, index| {variables[index * 2 + 1], variables[index * 2 + 2]} }
+
+      constrain_bounds(solver, variables, scaled_total)
+      constrain_flex_start(solver, variables, count, area_size)
+      constrain_sizes(solver, segments, area_size)
+      constrain_equal_growth(solver, segments)
+
+      solver.update_variables
+      segments.map do |start, finish|
+        rounded_start = (start.value.round / PRECISION).round.to_i
+        rounded_finish = (finish.value.round / PRECISION).round.to_i
+        {rounded_start, {rounded_finish - rounded_start, 0}.max}
+      end
+    end
+
+    # The area's edges, and the fact that nothing may escape them.
+    private def constrain_bounds(solver, variables, scaled_total) : Nil
       constrain(solver, variables.first == 0, REQUIRED)
       constrain(solver, variables.last == scaled_total, REQUIRED)
-      area_size = variables.last - variables.first
       variables.each do |variable|
         constrain(solver, variable >= variables.first, REQUIRED)
         constrain(solver, variable <= variables.last, REQUIRED)
@@ -144,28 +188,39 @@ module CryTUI
       variables.skip(1).each_slice(2) do |pair|
         constrain(solver, pair[0] <= pair[1], REQUIRED) if pair.size == 2
       end
+    end
 
-      # Ratatui 0.29 defaults to Flex::Start: its leading spacer is empty,
-      # internal spacers have the requested size, and unused room trails.
+    # Ratatui 0.29 defaults to Flex::Start: its leading spacer is empty,
+    # internal spacers have the requested size, and unused room trails.
+    private def constrain_flex_start(solver, variables, count, area_size) : Nil
       constrain(solver, variables[1] == variables[0], REQUIRED - 1.0)
       (1...count).each do |index|
-        constrain(solver, variables[index * 2 + 1] - variables[index * 2] == @spacing * precision, REQUIRED / 10.0)
+        constrain(solver, variables[index * 2 + 1] - variables[index * 2] == @spacing * PRECISION, REQUIRED / 10.0)
       end
       constrain(solver, variables.last - variables[-2] == area_size, MEDIUM / 10.0)
+    end
 
-      segments = @constraints.map_with_index { |_, index| {variables[index * 2 + 1], variables[index * 2 + 2]} }
+    # What each individual constraint asks of its own pane.
+    #
+    # The strengths carry the meaning and are the reason this cannot be read as
+    # ordinary control flow. `min` and `max` state their bound far more
+    # strongly than their preference, so the bound holds and the preference
+    # only breaks ties; `percentage` and `ratio` state an exact share; `fill`
+    # merely wants everything, and settles for a share once other fill panes
+    # want the same.
+    private def constrain_sizes(solver, segments, area_size) : Nil
       @constraints.each_with_index do |constraint, index|
         start, finish = segments[index]
         size = finish - start
         case constraint.kind
         when .min?
-          constrain(solver, size >= constraint.value * precision, STRONG * 100.0)
+          constrain(solver, size >= constraint.value * PRECISION, STRONG * 100.0)
           constrain(solver, size == area_size, MEDIUM)
         when .max?
-          constrain(solver, size <= constraint.value * precision, STRONG * 100.0)
-          constrain(solver, size == constraint.value * precision, MEDIUM * 10.0)
+          constrain(solver, size <= constraint.value * PRECISION, STRONG * 100.0)
+          constrain(solver, size == constraint.value * PRECISION, MEDIUM * 10.0)
         when .length?
-          constrain(solver, size == constraint.value * precision, STRONG * 10.0)
+          constrain(solver, size == constraint.value * PRECISION, STRONG * 10.0)
         when .percentage?
           constrain(solver, size == area_size * constraint.value / 100.0, STRONG)
         when .ratio?
@@ -175,7 +230,15 @@ module CryTUI
           constrain(solver, size == area_size, MEDIUM)
         end
       end
+    end
 
+    # How panes share what is left over once their own rules are satisfied.
+    #
+    # Two preferences, deliberately weak. Growable panes grow in proportion to
+    # their fill weights, and failing that every pane would rather be the same
+    # size as its neighbour — which is what makes two `length(80)` panes in 100
+    # columns come out 50/50 instead of the first winning outright.
+    private def constrain_equal_growth(solver, segments) : Nil
       flexible = @constraints.each_with_index.select { |constraint, _| constraint.kind.fill? || constraint.kind.min? }.to_a
       flexible.each_combination(2) do |pair|
         left_constraint, left_index = pair[0]
@@ -190,13 +253,6 @@ module CryTUI
         left_start, left_finish = pair[0]
         right_start, right_finish = pair[1]
         constrain(solver, left_finish - left_start == right_finish - right_start, WEAK)
-      end
-
-      solver.update_variables
-      segments.map do |start, finish|
-        rounded_start = (start.value.round / precision).round.to_i
-        rounded_finish = (finish.value.round / precision).round.to_i
-        {rounded_start, {rounded_finish - rounded_start, 0}.max}
       end
     end
 

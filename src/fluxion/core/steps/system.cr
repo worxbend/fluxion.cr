@@ -47,6 +47,15 @@ module Fluxion
       user ? "#{user}:#{group}" : group
     end
 
+    # Inverse of `item_key`: splits "alice:docker" into {"alice", "docker"}.
+    # A key with no user is all group, and a key with no group after the
+    # separator falls back to the whole key.
+    def self.split_item_key(item_key : String) : {String, String}
+      user, _, group = item_key.rpartition(':')
+      group = item_key if group.empty?
+      {user, group}
+    end
+
     def default_checkpoint_message : String
       "Log out and back in so the new group membership (#{@groups.join(", ")}) takes effect."
     end

@@ -350,8 +350,7 @@ module Fluxion::Executor
     end
 
     def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
-      user, _, group = item.key.rpartition(':')
-      group = item.key if group.empty?
+      user, group = UserGroupsStep.split_item_key(item.key)
       target = user.presence || Host.target_user
 
       result = runner.run(Command.new(["id", "-nG", target], timeout: PROBE_TIMEOUT))

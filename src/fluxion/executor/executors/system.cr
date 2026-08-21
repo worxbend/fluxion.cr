@@ -12,8 +12,7 @@ module Fluxion::Executor
 
     def commands(step : Step, item : StepItem) : Array(Command)
       groups = step.as(UserGroupsStep)
-      _, _, group = item.key.rpartition(':')
-      group = item.key if group.empty?
+      _, group = UserGroupsStep.split_item_key(item.key)
       user = Host.target_user(groups.user)
 
       commands = [] of Command
@@ -27,8 +26,7 @@ module Fluxion::Executor
     def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
       groups = step.as(UserGroupsStep)
       unless groups.create_missing?
-        _, _, group = item.key.rpartition(':')
-        group = item.key if group.empty?
+        _, group = UserGroupsStep.split_item_key(item.key)
 
         exists = runner.run(Command.new(["getent", "group", group], timeout: TIMEOUT))
         unless exists.success?

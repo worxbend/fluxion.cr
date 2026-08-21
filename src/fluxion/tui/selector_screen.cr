@@ -145,8 +145,8 @@ module Fluxion::TUI
       when .right?     then perform(ActionKind::Expand)
       when .page_up?   then move(-page)
       when .page_down? then move(page)
-      when .home?      then @cursor = 0
-      when .end?       then @cursor = {@rows.size - 1, 0}.max
+      when .home?      then move_to(0)
+      when .end?       then move_to({@rows.size - 1, 0}.max)
       when .tab?       then perform(ActionKind::FocusNextPane)
       when .enter?     then return run_if_possible
       when .escape?    then return clear_or_cancel
@@ -185,8 +185,8 @@ module Fluxion::TUI
       case action
       when .navigate_up?             then move(-1)
       when .navigate_down?           then move(1)
-      when .navigate_top?            then @cursor = 0
-      when .navigate_bottom?         then @cursor = {@rows.size - 1, 0}.max
+      when .navigate_top?            then move_to(0)
+      when .navigate_bottom?         then move_to({@rows.size - 1, 0}.max)
       when .navigate_half_page_down? then move(page // 2)
       when .navigate_half_page_up?   then move(-(page // 2))
       when .navigate_next_group?     then jump_group(1)
@@ -281,7 +281,22 @@ module Fluxion::TUI
         return
       end
       return if @rows.empty?
-      @cursor = (@cursor + delta).clamp(0, @rows.size - 1)
+      move_to((@cursor + delta).clamp(0, @rows.size - 1))
+    end
+
+    # Every deliberate cursor move goes through here.
+    #
+    # Putting the cursor on a row means asking to read that row, so the detail
+    # pane goes back to the top: leaving it where the previous row was scrolled
+    # to shows the new row starting from somewhere in its middle. `move` and
+    # `jump_group` reset it; Home, End, gg and G assigned `@cursor` directly and
+    # did not, so those four jumped the cursor and left the detail pane behind.
+    #
+    # `refresh_rows` deliberately does not use this: re-clamping the cursor
+    # after a fold or a search is not a move, and the row under it is usually
+    # the same one.
+    private def move_to(index : Int32) : Nil
+      @cursor = index
       @detail_scroll = 0
     end
 
@@ -292,13 +307,12 @@ module Fluxion::TUI
       index = @cursor + direction
       while index >= 0 && index < @rows.size
         if @rows[index].step.nil?
-          @cursor = index
-          @detail_scroll = 0
+          move_to(index)
           return
         end
         index += direction
       end
-      @cursor = direction > 0 ? @rows.size - 1 : 0
+      move_to(direction > 0 ? @rows.size - 1 : 0)
     end
 
     private def toggle : Nil

@@ -209,3 +209,75 @@ describe Fluxion::TUI::SelectorScreen do
     end
   end
 end
+
+# The right-hand pane, sliced out of the screenshot so an assertion about it
+# cannot accidentally be satisfied by the tree on the left — both show step
+# names.
+private def detail(screen, width = 100) : String
+  screenshot(screen, width, 24).lines.map { |line| line.size > 67 ? line[67..] : "" }.join('\n')
+end
+
+private def scrollable_profile
+  Fluxion::Profile.new(
+    "test",
+    Fluxion::TargetOs.new(Fluxion::Distribution::Fedora),
+    [
+      # Long enough that scrolling the detail pane pushes the step's own
+      # heading off the top of it.
+      Fluxion::Phase.new("base",
+        [step("tools", "git", "curl", "jq", "ripgrep", "fd", "bat")] of Fluxion::Step),
+      Fluxion::Phase.new("desktop", [step("apps", "firefox")] of Fluxion::Step, ["base"]),
+    ],
+  )
+end
+
+# Puts the cursor on the long step, focuses the detail pane, and scrolls it far
+# enough that the step's own name is no longer visible.
+private def scrolled_screen
+  screen = Fluxion::TUI::SelectorScreen.new(Fluxion::TUI::Selection.new(scrollable_profile))
+  press(screen, 'j')
+  screen.handle(CryTUI::KeyEvent.new(CryTUI::KeyCode::Tab))
+  press(screen, 'j', 'j', 'j', 'j')
+  screen.handle(CryTUI::KeyEvent.new(CryTUI::KeyCode::Tab))
+
+  detail(screen).should_not contain("tools")
+  screen
+end
+
+# Putting the cursor on a row is a request to read that row, so the detail pane
+# has to go back to the top. `j`/`k` and the group jumps always did; the four
+# keys that set the cursor directly did not, and left the new row rendered from
+# wherever the previous one had been scrolled to.
+describe "the detail pane's scroll position" do
+  it "returns to the top when G jumps to the last row" do
+    screen = scrolled_screen
+    press(screen, 'G')
+
+    # The last row is the `apps` step, whose detail begins with its own name.
+    detail(screen).should contain("apps")
+    detail(screen).should contain("firefox")
+  end
+
+  it "returns to the top when End jumps to the last row" do
+    screen = scrolled_screen
+    screen.handle(CryTUI::KeyEvent.new(CryTUI::KeyCode::End))
+
+    detail(screen).should contain("apps")
+  end
+
+  it "returns to the top when gg jumps to the first row" do
+    screen = scrolled_screen
+    press(screen, 'g', 'g')
+
+    # The first row is the `base` phase, whose detail begins with its name and
+    # then lists its steps.
+    detail(screen).should contain("base")
+  end
+
+  it "returns to the top when Home jumps to the first row" do
+    screen = scrolled_screen
+    screen.handle(CryTUI::KeyEvent.new(CryTUI::KeyCode::Home))
+
+    detail(screen).should contain("base")
+  end
+end

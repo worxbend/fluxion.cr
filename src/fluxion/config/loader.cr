@@ -17,6 +17,25 @@ module Fluxion::Config
       profile
     end
 
+    # Loads and validates a profile already held in memory.
+    def load_string(body : String, base_dir : String, label : String,
+                    host : HostFacts = HostFacts.new, strict : Bool = false) : Profile
+      if body.bytesize > MAX_CONFIG_BYTES
+        refuse(label, "config exceeds maximum size of #{MAX_CONFIG_BYTES} bytes")
+      end
+
+      document = begin
+        YAML.parse(body)
+      rescue error : YAML::ParseException
+        refuse(label, "YAML parse error: #{error.message}")
+      end
+
+      context = Context.new(base_dir, host)
+      profile = parse(context, document, label)
+      context.diagnostics.raise_if_failed!(strict)
+      profile
+    end
+
     # Loads without raising, returning the profile alongside its diagnostics.
     # `validate` and `lint` need the findings even when the profile is usable.
     def load_with_diagnostics(path : String, host : HostFacts = HostFacts.new) : {Profile, Array(Diagnostic)}
@@ -37,17 +56,19 @@ module Fluxion::Config
     # every field-level complaint that followed would be noise.
     private def require_header!(root : Node, path : String) : Nil
       if root.null?
-        raise ConfigError.new("Failed to load config from #{path}: config file is empty")
+        refuse(path, "config file is empty")
       end
       unless root.mapping?
-        raise ConfigError.new("Failed to load config from #{path}: config root must be a YAML mapping")
+        refuse(path, "config root must be a YAML mapping")
       end
       return if root.has_key?("apiVersion") || root.has_key?("kind")
 
-      raise ConfigError.new(
-        "Failed to load config from #{path}: missing profile header; expected " \
-        "apiVersion: #{Manifest::SUPPORTED_API_VERSION} with kind: #{Manifest::SUPPORTED_KIND}"
-      )
+      refuse(path, "missing profile header; expected " \
+                   "apiVersion: #{Manifest::SUPPORTED_API_VERSION} with kind: #{Manifest::SUPPORTED_KIND}")
+    end
+
+    private def refuse(path : String, reason : String) : NoReturn
+      raise ConfigError.new("Failed to load config from #{path}: #{reason}")
     end
 
     # Reads the file with the checks that have to happen before parsing: a
@@ -56,26 +77,26 @@ module Fluxion::Config
       info = begin
         File.info(path, follow_symlinks: false)
       rescue File::NotFoundError
-        raise ConfigError.new("Failed to load config from #{path}: File does not exist")
+        refuse(path, "File does not exist")
       end
 
       unless info.file?
-        raise ConfigError.new("Failed to load config from #{path}: config must be a regular non-symbolic file")
+        refuse(path, "config must be a regular non-symbolic file")
       end
       if info.size > MAX_CONFIG_BYTES
-        raise ConfigError.new("Failed to load config from #{path}: config exceeds maximum size of #{MAX_CONFIG_BYTES} bytes")
+        refuse(path, "config exceeds maximum size of #{MAX_CONFIG_BYTES} bytes")
       end
 
       content = begin
         File.read(path)
       rescue error : File::Error
-        raise ConfigError.new("Failed to load config from #{path}: #{error.message}")
+        refuse(path, error.message.to_s)
       end
 
       begin
         YAML.parse(content)
       rescue error : YAML::ParseException
-        raise ConfigError.new("Failed to load config from #{path}: YAML parse error: #{error.message}")
+        refuse(path, "YAML parse error: #{error.message}")
       end
     end
 

@@ -74,6 +74,10 @@ module Fluxion
       ItemType::BinstallerProfile
     end
 
+    def delegated_config : String?
+      @config
+    end
+
     def items : Array(ItemRef)
       [item(@config, "binstaller-profile", @name)]
     end
@@ -119,6 +123,10 @@ module Fluxion
       ItemType::NerdFont
     end
 
+    def delegated_config : String?
+      @config
+    end
+
     # One item, not one per family.
     #
     # Fluxion used to expand an inline font list into an item each, but the
@@ -161,6 +169,10 @@ module Fluxion
 
     def item_type : ItemType
       ItemType::Dotbot
+    end
+
+    def delegated_config : String?
+      @config
     end
 
     def items : Array(ItemRef)

@@ -298,6 +298,10 @@ module Fluxion
       ItemType::FlatpakRemote
     end
 
+    def required_commands : Array(String)
+      ["flatpak"]
+    end
+
     def items : Array(ItemRef)
       [item(@remote, "flatpak-remote")]
     end
@@ -359,6 +363,10 @@ module Fluxion
 
     def item_type : ItemType
       ItemType::GpgKey
+    end
+
+    def required_commands : Array(String)
+      ["gpg"]
     end
 
     def items : Array(ItemRef)

@@ -66,6 +66,10 @@ module Fluxion
       ItemType::Package
     end
 
+    def required_commands : Array(String)
+      [@package_manager.command]
+    end
+
     def item_package_manager : PackageManager?
       @package_manager
     end
@@ -104,6 +108,10 @@ module Fluxion
 
     def item_type : ItemType
       ItemType::Flatpak
+    end
+
+    def required_commands : Array(String)
+      ["flatpak"]
     end
 
     def item_package_manager : PackageManager?
@@ -147,6 +155,10 @@ module Fluxion
 
     def item_type : ItemType
       ItemType::ToolPackage
+    end
+
+    def required_commands : Array(String)
+      [@backend.command]
     end
 
     def items : Array(ItemRef)
@@ -243,6 +255,10 @@ module Fluxion
 
     def item_type : ItemType
       ItemType::SystemUpdate
+    end
+
+    def required_commands : Array(String)
+      [@package_manager.command]
     end
 
     def item_package_manager : PackageManager?

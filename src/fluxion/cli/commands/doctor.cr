@@ -105,15 +105,6 @@ module Fluxion::CLI
       [Check.new(Level::Warn, "state directory", "#{parent} does not exist yet")]
     end
 
-    # The path a delegated kind hands to another tool, if this step is one.
-    private def delegated_config(step : Step) : String?
-      case step
-      when BinstallerProfileStep then step.config
-      when NerdFontsStep         then step.config
-      when DotbotStep            then step.config
-      end
-    end
-
     # Existence only. What is inside belongs to the tool that reads it, and
     # `doctor` answers "can this host run this profile" before a run rather
     # than validating someone else's schema.
@@ -139,12 +130,12 @@ module Fluxion::CLI
 
       seen = Set(String).new
       profile.steps.each do |step|
-        required_commands(step).each do |command|
+        step.required_commands.each do |command|
           next unless seen.add?(command)
           checks << command_check(command)
         end
 
-        delegated_config(step).try { |config| checks << delegated_check(step, config) }
+        step.delegated_config.try { |config| checks << delegated_check(step, config) }
 
         case step
         when DefaultShellStep
@@ -158,21 +149,6 @@ module Fluxion::CLI
       end
 
       checks
-    end
-
-    private def required_commands(step : Step) : Array(String)
-      case step
-      when PackagesStep      then [step.package_manager.command]
-      when SystemUpdateStep  then [step.package_manager.command]
-      when FlatpakStep       then ["flatpak"]
-      when FlatpakRemoteStep then ["flatpak"]
-      when ToolPackagesStep  then [step.backend.command]
-      when GitRepoStep       then ["git"]
-      when GitConfigStep     then ["git"]
-      when SystemdUnitStep   then ["systemctl"]
-      when GpgKeyStep        then ["gpg"]
-      else                        [] of String
-      end
     end
 
     private def command_check(command : String, required : Bool = true) : Check

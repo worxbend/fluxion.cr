@@ -97,6 +97,29 @@ module Fluxion
       nil
     end
 
+    # Executables this step needs on PATH before it can do anything.
+    #
+    # Answered by the step because the step is what knows: `doctor` asks every
+    # step in the profile and reports what is missing, but deciding that a
+    # git-repo step needs `git` is not a diagnostic policy, it is a fact about
+    # the kind. Empty for the many kinds that shell out to nothing in
+    # particular.
+    def required_commands : Array(String)
+      [] of String
+    end
+
+    # Path to another tool's config file, for the kinds that delegate their
+    # work — binstaller, dotbot, nerd-fonts. Nil for every kind that does its
+    # own work, which is most of them.
+    #
+    # The same three kinds hash this file in `content_digest`, for the same
+    # reason: what the step actually does lives in a file Fluxion does not
+    # read. Naming the path once here is what lets both callers stop asking
+    # each class by name.
+    def delegated_config : String?
+      nil
+    end
+
     # One-line summary for `plan` and `list`.
     def summary : String
       count = items.size

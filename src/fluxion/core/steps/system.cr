@@ -117,6 +117,10 @@ module Fluxion
       ItemType::GitConfig
     end
 
+    def required_commands : Array(String)
+      ["git"]
+    end
+
     # Sorted so plans, state, and fingerprints do not depend on YAML ordering.
     def sorted_keys : Array(String)
       @entries.keys.sort!
@@ -183,6 +187,10 @@ module Fluxion
 
     def item_type : ItemType
       ItemType::GitRepo
+    end
+
+    def required_commands : Array(String)
+      ["git"]
     end
 
     def items : Array(ItemRef)
@@ -296,6 +304,10 @@ module Fluxion
 
     def item_type : ItemType
       ItemType::SystemdUnit
+    end
+
+    def required_commands : Array(String)
+      ["systemctl"]
     end
 
     def items : Array(ItemRef)

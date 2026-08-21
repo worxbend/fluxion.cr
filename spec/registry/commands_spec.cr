@@ -133,6 +133,23 @@ describe "fluxion registry" do
     end
   end
 
+  it "reports a manifest warning once, however many times the command reads it" do
+    with_registry do |sandbox|
+      add_registry(sandbox)
+
+      # `install` reads the manifest for itself and again to resolve the id.
+      # Each read reports the manifest's diagnostics, so an unnoticed second
+      # read shows the user the same warning twice and reads as two problems.
+      sandbox.publish_upstream(
+        Fluxion::Registry::Manifest::FILE_NAME,
+        RegistryHelpers::MANIFEST.sub("distributions: [arch]", "distributions: [plan9]"))
+
+      result = invoke("registry", "install", "base")
+
+      result.stderr.scan(/unknown distribution 'plan9'/).size.should eq(1)
+    end
+  end
+
   it "names the available entries when the id is unknown" do
     with_registry do |sandbox|
       add_registry(sandbox)

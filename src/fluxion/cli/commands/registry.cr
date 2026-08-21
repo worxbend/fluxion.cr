@@ -32,6 +32,17 @@ module Fluxion::CLI
     @registry_name : String?
     @format = Format::Text
 
+    # Manifests already read during this invocation, keyed by registry name.
+    #
+    # Reading one is not free — it is a file read, a YAML parse, and a round of
+    # diagnostics — and `install` alone used to ask for the same manifest three
+    # times: once for itself and twice inside `entry`. Worse than the cost, each
+    # read printed the manifest's warnings again, so a registry with one warning
+    # made `install` print it three times and left the user looking for three
+    # problems. A command instance serves exactly one invocation, so a plain
+    # hash is the whole of the lifetime question.
+    @manifests = {} of String => Registry::Manifest
+
     protected def settings : Registry::Settings
       Registry::Settings.load
     end
@@ -70,9 +81,20 @@ module Fluxion::CLI
       {target, catalogue, entry(target, id)}
     end
 
+    # The registry named on the command line, falling back to `--registry` and
+    # then to the default. Positional-first, because `fluxion registry ls mine`
+    # is the spelling people reach for.
+    protected def named_source(positional : Array(String)) : Registry::Source
+      settings.resolve(positional.first? || @registry_name)
+    end
+
     # Loads the manifest, telling the user to sync rather than leaving them
     # with a bare "no such file".
     protected def manifest(source : Registry::Source) : Registry::Manifest
+      @manifests.fetch(source.name) { @manifests[source.name] = read_manifest(source) }
+    end
+
+    private def read_manifest(source : Registry::Source) : Registry::Manifest
       unless source.cloned?
         raise Failure.invalid_input(
           "#{source.name} has not been synced yet. Run: fluxion registry sync #{source.name}")
@@ -92,10 +114,11 @@ module Fluxion::CLI
     end
 
     protected def entry(source : Registry::Source, id : String) : Registry::Entry
-      found = manifest(source).entry?(id)
+      published = manifest(source)
+      found = published.entry?(id)
       return found if found
 
-      available = manifest(source).ids
+      available = published.ids
       hint = available.empty? ? nil : "available: #{available.first(8).join(", ")}"
       raise Failure.invalid_input("#{source.name} has no entry '#{id}'#{hint ? " — #{hint}" : ""}")
     end
@@ -398,8 +421,7 @@ module Fluxion::CLI
     end
 
     def run(arguments : Array(String)) : ExitCode
-      positional = parse(arguments)
-      target = settings.resolve(positional.first? || @registry_name)
+      target = named_source(parse(arguments))
       catalogue = store(target)
       parsed = manifest(target)
 
@@ -734,8 +756,7 @@ module Fluxion::CLI
     end
 
     def run(arguments : Array(String)) : ExitCode
-      positional = parse(arguments)
-      target = settings.resolve(positional.first? || @registry_name)
+      target = named_source(parse(arguments))
       catalogue = store(target)
       parsed = manifest(target)
 

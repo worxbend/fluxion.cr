@@ -512,3 +512,59 @@ describe Fluxion::Config::StepParser do
     end
   end
 end
+
+# `confirm` decides whether an item needs `apply --yes`. It accepts a boolean
+# shorthand or a string carrying its own wording, and no spec parsed it from
+# YAML — which is how `confirm: false` came to mean the opposite of what it
+# says.
+private def command_step(confirm : String) : Fluxion::ShellCommandStep
+  result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+    - name: risky
+      kind: commands
+      spec:
+        commands:
+          - run: rm -rf /var/cache/thing
+            confirm: #{confirm}
+    STEPS
+
+  result.errors.should be_empty
+  result.step("risky").as(Fluxion::ShellCommandStep)
+end
+
+describe "a shell command's confirm field" do
+  it "asks with generic wording for `confirm: true`" do
+    item = command_step("true").commands.first
+    item.confirmation_required?.should be_true
+    item.confirm.should eq("confirm")
+  end
+
+  it "does not ask for `confirm: false`" do
+    # The whole point of writing it is to say "do not stop for this one".
+    command_step("false").commands.first.confirmation_required?.should be_false
+  end
+
+  it "keeps a string as its own wording" do
+    item = command_step(%("really delete the cache?")).commands.first
+    item.confirmation_required?.should be_true
+    item.confirm.should eq("really delete the cache?")
+  end
+
+  it "keeps a string that happens to spell a boolean" do
+    # `confirm: "yes"` is a prompt reading "yes", not the shorthand: a quoted
+    # scalar is a string and is taken at its word.
+    command_step(%("yes")).commands.first.confirm.should eq("yes")
+  end
+
+  it "rejects a value that is neither a boolean nor a non-blank string" do
+    result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+      - name: risky
+        kind: commands
+        spec:
+          commands:
+            - run: rm -rf /var/cache/thing
+              confirm: []
+      STEPS
+
+    result.error_messages.any?(&.includes?("must be a boolean or non-blank string")).should be_true
+  end
+end

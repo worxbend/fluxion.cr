@@ -133,6 +133,20 @@ module Fluxion::Config
       end
     end
 
+    # A YAML boolean and nothing else.
+    #
+    # Needed by the fields where a string is meaningful in its own right, so
+    # neither of the two accessors above can be asked first: `string?`
+    # stringifies a boolean, and `bool?` reads the string "yes" as true. A
+    # field that accepts `true` OR wording has to tell an actual boolean from a
+    # word that merely looks like one, and this is the only accessor that does.
+    def literal_bool? : Bool?
+      raw = @raw
+      return unless raw
+      value = raw.raw
+      value if value.is_a?(Bool)
+    end
+
     def int? : Int32?
       raw = @raw
       return unless raw

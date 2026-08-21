@@ -251,19 +251,30 @@ module Fluxion::Config
     end
 
     # `confirm: true` is shorthand for a generic prompt; a string supplies its
-    # own wording. Either way the item needs `apply --yes`.
+    # own wording; `confirm: false` asks for nothing. A prompt is stored, so
+    # nil means "do not ask" and anything else means the item needs
+    # `apply --yes`.
+    #
+    # The boolean is tested first, and with `literal_bool?` rather than
+    # `bool?`, for two different reasons. `string?` renders a YAML boolean as
+    # "true"/"false", so asking it first made `confirm: false` a non-nil prompt
+    # reading "false" — turning confirmation ON for an item that explicitly
+    # turned it off. And `bool?` coerces the strings yes/no/on/off, so asking
+    # that first would swallow a deliberate one-word prompt of `confirm: "yes"`.
     private def confirm(context : Context, node : Node) : String?
       return unless node.present?
+
+      case node.literal_bool?
+      when true  then return "confirm"
+      when false then return
+      end
+
       if value = node.string?
         return value unless value.strip.empty?
       end
-      case node.bool?
-      when true  then "confirm"
-      when false then nil
-      else
-        context.error(node.path, "must be a boolean or non-blank string")
-        nil
-      end
+
+      context.error(node.path, "must be a boolean or non-blank string")
+      nil
     end
 
     private def environment(context : Context, node : Node) : Array(ShellEnvironmentVariable)

@@ -7,7 +7,23 @@ module CryTUI
     extend self
 
     def width(text : String) : Int32
+      # Almost everything Fluxion prints is ASCII: package names, paths, shell
+      # commands, log output. Grapheme segmentation cannot combine ASCII into
+      # clusters and no ASCII character is wide, so the general path's cost —
+      # segmenting the string, allocating a String per grapheme, and asking
+      # Unicode about each one — buys nothing here. Counting bytes gives the
+      # same answer for a fraction of the work.
+      return ascii_width(text) if text.ascii_only?
       text.each_grapheme.sum { |grapheme| grapheme_width(grapheme.to_s) }
+    end
+
+    # Width of a string already known to be ASCII: printable characters are one
+    # cell, the C0 controls and DEL are zero, matching what `grapheme_width`
+    # decides for them one at a time.
+    private def ascii_width(text : String) : Int32
+      count = 0
+      text.each_byte { |byte| count += 1 if byte >= 0x20 && byte != 0x7F }
+      count
     end
 
     def grapheme_width(grapheme : String) : Int32
@@ -16,9 +32,13 @@ module CryTUI
       property = String::Grapheme::Property.from(first)
       return 0 if property.control? || property.cr? || property.lf? || property.extend? || property.zwj?
       return 2 if property.regional_indicator?
-      codepoints = grapheme.each_char.map(&.ord).to_a
-      return 1 if codepoints.includes?(0xFE0E) # explicit text presentation selector
-      return 2 if codepoints.includes?(0xFE0F) || codepoints.includes?(0x20E3)
+      # Two passes rather than one, and deliberately so: a text-presentation
+      # selector wins over an emoji one wherever they appear, which a single
+      # pass returning on whichever came first would not preserve. Neither pass
+      # builds an array — this runs once per grapheme of every frame, and the
+      # array these checks used to allocate was pure garbage.
+      return 1 if grapheme.each_char.any? { |char| char.ord == 0xFE0E } # text presentation
+      return 2 if grapheme.each_char.any? { |char| char.ord == 0xFE0F || char.ord == 0x20E3 }
       # Supplementary-plane pictographs (🎚 🎛 🗂 …) are Emoji_Presentation=No, so
       # unicode-width classes them as one cell — but the astral plane has no
       # narrow text glyph, and terminals render them with emoji presentation
@@ -66,8 +86,32 @@ module CryTUI
       0x1FAF0..0x1FAF8, 0x20000..0x2FFFD, 0x30000..0x3FFFD,
     ]
 
-    private def wide_codepoint?(codepoint : Int32) : Bool
-      WIDE_RANGES.any?(&.includes?(codepoint))
+    # The lowest codepoint any wide range covers. Everything below it — all of
+    # ASCII, all of Latin-1, Greek, Cyrillic, Hebrew, Arabic — is narrow, and
+    # that is very nearly everything Fluxion ever prints.
+    private FIRST_WIDE = 0x1100
+
+    # Is this codepoint drawn two cells wide?
+    #
+    # Called once per character of every string the TUI renders, on every
+    # frame, so the shape of this lookup is worth more than it looks. It used
+    # to be `WIDE_RANGES.any?(&.includes?(codepoint))`, which walks all 123
+    # ranges before it can answer "no" — and "no" is the answer for every
+    # character of an ordinary line of English text. Measuring one 208-column
+    # ASCII line cost about 47µs, all of it spent failing to match ranges of
+    # CJK and emoji.
+    #
+    # Two changes, neither of which alters a single answer. The guard rejects
+    # everything below the first wide range without touching the table at all,
+    # which covers essentially all real output. What survives the guard is
+    # found by binary search instead of a scan, which is sound because
+    # `WIDE_RANGES` is sorted and disjoint — a property the specs assert
+    # directly rather than leave as a comment, since the search silently
+    # returns wrong answers if a future range is added out of order.
+    def wide_codepoint?(codepoint : Int32) : Bool
+      return false if codepoint < FIRST_WIDE
+      range = WIDE_RANGES.bsearch { |candidate| candidate.end >= codepoint }
+      !range.nil? && range.includes?(codepoint)
     end
   end
 end

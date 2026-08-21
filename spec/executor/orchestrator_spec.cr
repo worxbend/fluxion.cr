@@ -327,6 +327,41 @@ describe Fluxion::State::Fingerprint do
     Fluxion::State::Fingerprint.of(subject).should eq(Fluxion::State::Fingerprint.of(subject))
   end
 
+  it "changes when a pre-install action is edited" do
+    # `actions` are verbs that run before the packages — `update`, `upgrade`.
+    # They are not packages, so they appear in no item key, and the step has no
+    # other input the fingerprint sees. Without them being hashed, swapping
+    # `update` for `upgrade` left a completed phase looking untouched and the
+    # new action never ran.
+    with_actions = ->(action : String) do
+      Fluxion::State::Fingerprint.of(phase("base", [
+        Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Dnf, ["git"],
+          [Fluxion::PackageAction.new(action)]),
+      ] of Fluxion::Step))
+    end
+
+    with_actions.call("upgrade").should_not eq(with_actions.call("check-update"))
+  end
+
+  it "changes when a pre-install action's arguments are edited" do
+    with_args = ->(args : Array(String)) do
+      Fluxion::State::Fingerprint.of(phase("base", [
+        Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Zypper, ["git"],
+          [Fluxion::PackageAction.new("dup-from", args)]),
+      ] of Fluxion::Step))
+    end
+
+    with_args.call(["repo-oss"]).should_not eq(with_args.call(["repo-other"]))
+  end
+
+  it "is unchanged for a packages step that declares no actions" do
+    # The common case must not churn: a step with no actions has to fingerprint
+    # exactly as it did before actions were hashed at all.
+    subject = phase("base", [packages("tools", "git")] of Fluxion::Step)
+    Fluxion::State::Fingerprint.of(subject).should eq(Fluxion::State::Fingerprint.of(subject))
+    packages("tools", "git").content_digest.should be_nil
+  end
+
   it "changes when a package is added" do
     before = Fluxion::State::Fingerprint.of(phase("base", [packages("tools", "git")] of Fluxion::Step))
     after = Fluxion::State::Fingerprint.of(phase("base", [packages("tools", "git", "curl")] of Fluxion::Step))

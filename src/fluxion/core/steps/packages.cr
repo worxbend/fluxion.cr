@@ -78,6 +78,20 @@ module Fluxion
       @packages.map { |package| item(package, "package") }
     end
 
+    # Pre-install actions decide part of what this step does, and nothing else
+    # the phase fingerprint reads can see them: they are not packages, so they
+    # are in no item key, and the step has no other hashed input. Without this,
+    # changing `actions: [update]` to `actions: [upgrade]` left a completed
+    # phase's fingerprint identical, the orchestrator skipped the phase, and
+    # the new action never ran.
+    #
+    # nil when there are no actions, so the ordinary packages step — which is
+    # nearly all of them — fingerprints exactly as it did before.
+    def content_digest : String?
+      return if @actions.empty?
+      Digest::SHA256.hexdigest(@actions.map(&.to_s).join('\0'))
+    end
+
     def summary : String
       "#{@packages.size} #{@package_manager} #{Text.singular_or_plural(@packages.size, "package")}"
     end

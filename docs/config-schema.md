@@ -253,17 +253,19 @@ when:
 
 | Field | Meaning |
 |---|---|
-| `os`, `osFamily` | Match the host OS family. |
-| `distribution`, `distributions` | Match the host distribution. |
-| `version` | Match the host version. |
-| `codename` | Match the host codename. |
-| `architecture`, `architectures` | Match the host architecture. |
+| `os`, `osFamily` | Match the host OS family. Accepts the same spellings as `spec.target.os.family`, so `rhel` and `redhat` both mean `fedora`, and `opensuse` means `suse`. |
+| `distribution`, `distributions` | Match the host distribution. A derivative matches its parent — `ubuntu` matches a host reporting `pop` — and an unmapped distribution can be matched by its literal `os-release` ID. |
+| `version` | Match the host version. Compared as written; there is no alias table. |
+| `codename` | Match the host codename. Compared as written; there is no alias table. |
+| `architecture`, `architectures` | Match the host architecture. Accepts the same spellings as `spec.target.os.architecture`: `amd64`, `x86_64`, `x64`; and `arm64`, `aarch64`. |
 | `commands` | Every listed command must exist on `PATH`. |
 | `commandExists` | At least one listed command must exist on `PATH`. |
 | `oneOf` | Match when any nested `when` branch matches. |
 
 A matcher may be a string, a list of strings, or an object with `oneOf`,
-`equals`, or `value`. The reserved `files`, `vars`, and `expression` fields are
+`equals`, or `value`. A value that names no known family or architecture is not
+an error — it simply matches no host, so the step is skipped with a reason
+rather than failing to load. The reserved `files`, `vars`, and `expression` fields are
 rejected rather than quietly treated as true, until Fluxion has typed,
 fail-closed semantics for them.
 

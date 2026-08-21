@@ -31,11 +31,17 @@ module Fluxion::Config
       end
 
       condition = Condition.new(
-        os_family: matcher(node["os", "osFamily"]),
+        os_family: matcher(node["os", "osFamily"], ->OsFamily.canonicalise(String)),
+        # Deliberately not canonicalised: `Condition` compares a distribution
+        # against the mapped name *and* falls back to the raw os-release ID, so
+        # `ubuntu` matches a host reporting `pop` while an unmapped distribution
+        # can still be matched by its literal ID.
         distribution: matcher(node["distribution", "distributions"]),
+        # Free strings by design — a version or codename is whatever the host
+        # reports, and there is no enum that owns their vocabulary.
         version: matcher(node["version"]),
         codename: matcher(node["codename"]),
-        architecture: matcher(node["architecture", "architectures"]),
+        architecture: matcher(node["architecture", "architectures"], ->Architecture.canonicalise(String)),
         required_commands: node["commands"].string_list,
         any_commands: node["commandExists"].string_list,
         branches: branches,
@@ -54,7 +60,20 @@ module Fluxion::Config
 
     # Accepts the three shapes the schema allows for one matcher: a scalar, a
     # list, or an object with `oneOf` / `equals` / `value`.
-    private def matcher(node : Node) : Matcher?
+    #
+    # `canonicalise` maps each written value onto the spelling the host fact
+    # will be compared against. Two fields need it because they name facts an
+    # enum owns: `spec.target.os` runs the same words through
+    # `Architecture.from_config?` and `OsFamily.from_config?`, which accept
+    # x86_64 and rhel alongside amd64 and fedora, while a `when:` guard used to
+    # compare the raw text — so `architecture: x86_64` never matched an amd64
+    # host even though the identical spelling worked one field away.
+    #
+    # An unrecognised value is kept as written rather than rejected. Turning it
+    # into a parse error would make a profile fail to load over a word that
+    # merely matches no host, and would break the literal matching that
+    # unmapped distributions rely on.
+    private def matcher(node : Node, canonicalise : Proc(String, String)? = nil) : Matcher?
       return unless node.present?
 
       values = if node.mapping?
@@ -65,6 +84,10 @@ module Fluxion::Config
                else
                  node.string_list
                end
+
+      if canonicalise
+        values = values.map { |value| canonicalise.call(value).as(String) }
+      end
 
       matcher = Matcher.new(values)
       matcher.empty? ? nil : matcher

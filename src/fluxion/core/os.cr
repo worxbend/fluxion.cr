@@ -82,6 +82,14 @@ module Fluxion
       end
     end
 
+    # The canonical spelling of `value`, or `value` unchanged when it names no
+    # member. For the places that compare written configuration against a host
+    # fact and must accept every alias `from_config?` does, without turning an
+    # unknown word into a failure.
+    def self.canonicalise(value : String) : String
+      from_config?(value).try(&.config_name) || value
+    end
+
     def config_name : String
       to_s.downcase
     end
@@ -102,6 +110,14 @@ module Fluxion
       when "amd64", "x86_64", "x64" then Amd64
       when "arm64", "aarch64"       then Arm64
       end
+    end
+
+    # The canonical spelling of `value`, or `value` unchanged when it names no
+    # member. For the places that compare written configuration against a host
+    # fact and must accept every alias `from_config?` does, without turning an
+    # unknown word into a failure.
+    def self.canonicalise(value : String) : String
+      from_config?(value).try(&.config_name) || value
     end
 
     def config_name : String

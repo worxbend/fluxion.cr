@@ -135,6 +135,44 @@ describe Fluxion::Config::ConditionParser do
       subject.matches?(facts(Fluxion::Distribution::Debian)) { true }.should be_false
     end
 
+    it "accepts the architecture spellings the enum documents" do
+      # `spec.target.os.architecture` goes through `Architecture.from_config?`,
+      # which accepts x86_64 and x64 alongside amd64. A `when:` guard describes
+      # the same fact, so it has to accept the same words — otherwise the alias
+      # a profile uses in one field silently fails to match in the other.
+      %w[amd64 x86_64 x64].each do |spelling|
+        condition, diagnostics = parse("architecture: #{spelling}")
+        diagnostics.empty?.should be_true
+        condition.not_nil!.matches?(
+          facts(architecture: Fluxion::Architecture::Amd64)) { true }.should be_true
+      end
+    end
+
+    it "accepts the os-family spellings the enum documents" do
+      %w[fedora rhel redhat].each do |spelling|
+        condition, _ = parse("osFamily: #{spelling}")
+        condition.not_nil!.matches?(
+          facts(family: Fluxion::OsFamily::Fedora)) { true }.should be_true
+      end
+    end
+
+    it "still refuses a host the alias does not describe" do
+      condition, _ = parse("architecture: aarch64")
+      condition.not_nil!.matches?(
+        facts(architecture: Fluxion::Architecture::Amd64)) { true }.should be_false
+      condition.not_nil!.matches?(
+        facts(architecture: Fluxion::Architecture::Arm64)) { true }.should be_true
+    end
+
+    it "keeps an unrecognised value as written rather than dropping the guard" do
+      # A word the enum does not know is not an error: it simply matches
+      # nothing, which is a guard that excludes rather than one that vanishes.
+      condition, diagnostics = parse("architecture: sparc64")
+      diagnostics.empty?.should be_true
+      condition.not_nil!.matches?(
+        facts(architecture: Fluxion::Architecture::Amd64)) { true }.should be_false
+    end
+
     it "combines a top-level matcher with its branches" do
       # Both have to hold: the architecture gate and one of the distributions.
       condition, _ = parse(<<-YAML)

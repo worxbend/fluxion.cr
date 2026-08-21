@@ -1,9 +1,9 @@
 module Fluxion::Executor
   # Turns one step into the work it represents.
   #
-  # A step executor exists to produce commands. `dry-run` prints them,
-  # `apply` runs them, and `plan --show-commands` previews them — from the same
-  # method, so a preview cannot describe something different from what runs.
+  # A step executor exists to produce commands. `apply` runs them, and both
+  # `dry-run` and `apply --dry-run` print them — from the same method, so a
+  # preview cannot describe something different from what runs.
   #
   # Kinds that need more than a command sequence (a verified download, an
   # atomic install) override `execute` and still supply `commands` for preview.

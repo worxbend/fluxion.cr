@@ -217,7 +217,6 @@ fluxion plan --format json | jq '.phases[].name'
 ```
 
 ```text
---show-commands   Show the command preview for each item
 --format=FORMAT   text (default), table, tree, json
 ```
 

@@ -1269,8 +1269,8 @@ reported at once, so a profile with five mistakes takes one run to fix.
 
 ## Dry-run and safety guarantees
 
-`fluxion plan --show-commands`, `fluxion dry-run`, and `fluxion apply --dry-run`
-render selected, skipped, and source-setup work without mutating anything:
+`fluxion dry-run` and `fluxion apply --dry-run` render selected, skipped, and
+source-setup work without mutating anything:
 
 - Dry-run does not install packages, write files, download binaries, add remotes
   or repositories, save interrupt state, or run shell commands.

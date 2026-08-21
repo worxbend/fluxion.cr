@@ -14,14 +14,12 @@ module Fluxion::CLI
     end
 
     def usage : String
-      "fluxion plan [-c FILE] [--show-commands] [--format text|table|tree|json]"
+      "fluxion plan [-c FILE] [--format text|table|tree|json]"
     end
 
     @format = Format::Text
-    @show_commands = false
 
     def register(parser : OptionParser) : Nil
-      parser.on("--show-commands", "Show the command preview for each item") { @show_commands = true }
       format_option(parser, [Format::Text, Format::Table, Format::Tree, Format::Json]) { |value| @format = value }
     end
 

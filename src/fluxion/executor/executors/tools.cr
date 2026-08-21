@@ -286,8 +286,8 @@ module Fluxion::Executor
     # The one place a binstaller invocation is built.
     #
     # The preview used to assemble its own, omitting the lock flags entirely, so
-    # `plan --show-commands` described a different command than `apply` ran —
-    # in a codebase whose whole point is that both come from one method.
+    # `dry-run` described a different command than `apply` ran — in a codebase
+    # whose whole point is that both come from one method.
     private def argv(step : BinstallerProfileStep, verb : String, executable : String) : Array(String)
       argv = [executable, verb, "--config", step.config]
       step.only.each { |tool| argv.concat(["--only", tool]) }

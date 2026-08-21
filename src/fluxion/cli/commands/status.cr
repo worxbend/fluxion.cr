@@ -113,11 +113,15 @@ module Fluxion::CLI
                               document : State::Document) : Entry
       recorded = document.find(item.step_name, item.key, item.item_type.json_name)
 
+      # The three outcomes a probe can report. `InstalledFromState` is
+      # deliberately not among them: it is built only by the orchestrator's
+      # recorder, for skip decisions during a run, and `status` inspects the
+      # host rather than trusting what a previous run wrote down. State is
+      # still read here — as `recorded` above — but only to compare against
+      # what the probe found, never to assert that something is installed.
       classification, detail, live = case status
                                      when InstallationStatus::InstalledByProbe
                                        {Classification::Installed, status.to_s, status.detected_version}
-                                     when InstallationStatus::InstalledFromState
-                                       {Classification::Installed, status.to_s, nil}
                                      when InstallationStatus::Unknown
                                        {Classification::Unknown, status.reason, nil}
                                      else

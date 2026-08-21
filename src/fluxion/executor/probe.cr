@@ -273,7 +273,6 @@ module Fluxion::Executor
     end
 
     private def expand(path : String) : String
-      Path.posix(Host.home + path[1..]).normalize.to_s if path.starts_with?("~/")
       path.starts_with?("~/") ? Path.posix(Host.home, path[2..]).normalize.to_s : path
     end
   end

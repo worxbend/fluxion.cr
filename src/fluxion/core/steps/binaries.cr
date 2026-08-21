@@ -6,6 +6,10 @@ module Fluxion
   # This is what lets the fingerprint see through the path to the file — and to
   # the step's own knobs — without Fluxion learning a schema it does not own.
   module DelegatedConfig
+    # Stands in for a config that is not on disk. Framed like any other value,
+    # so it cannot be produced by a real file's contents of the same bytes.
+    MISSING_CONFIG = "\0missing"
+
     def content_digest : String?
       path = config
       digest = Digest::SHA256.new
@@ -13,22 +17,34 @@ module Fluxion
       # Returning nil would make `Recorder#recorded` skip the comparison and
       # report the step still installed, which is the opposite of what a
       # vanished config means.
-      digest << (File.file?(path) ? File.read(path) : "\0missing")
+      body = File.file?(path) ? File.read(path) : MISSING_CONFIG
+      append(digest, "config", body)
       # The knobs that change what the delegate is asked to do live on the step,
       # not in the item key (which is the config path) and not in the file. A
       # digest over the file alone left `only:`, `skip:`, `locked:` and
       # `lockFile:` invisible to the fingerprint, so narrowing a profile to two
       # tools left a completed phase looking unchanged.
-      delegation_inputs.each { |value| digest << "\0" << value }
+      delegation_inputs.each { |value| append(digest, "input", value) }
       digest.hexfinal
     rescue File::Error
       nil
     end
 
     # Anything beyond the config path that changes the delegated invocation.
-    # Empty for a kind whose only input is the path.
+    # Empty for a kind whose only input is the path. Every entry has to carry
+    # its own role (`only=docker`, not `docker`), because the digest sees a
+    # flat list: without the role, `only: [docker]` and `skip: [docker]` — two
+    # opposite profiles — hash identically.
     def delegation_inputs : Array(String)
       [] of String
+    end
+
+    # Length-prefixed framing, the same shape `Store` uses for phase
+    # fingerprints. Joining with a plain separator lets a value that contains
+    # the separator impersonate a boundary, so a config file ending in
+    # "foo\0bar" and a config "foo" followed by the input "bar" collide.
+    private def append(digest : Digest::SHA256, key : String, value : String) : Nil
+      digest << key.bytesize.to_s << ":" << key << value.bytesize.to_s << ":" << value
     end
 
     def delegated_config : String?
@@ -64,9 +80,11 @@ module Fluxion
     end
 
     def delegation_inputs : Array(String)
-      inputs = @only + @skip
-      inputs << "locked" if @locked
-      @lock_file.try { |lock| inputs << lock }
+      inputs = [] of String
+      @only.each { |tool| inputs << "only=#{tool}" }
+      @skip.each { |tool| inputs << "skip=#{tool}" }
+      inputs << "locked=#{@locked}"
+      @lock_file.try { |lock| inputs << "lockFile=#{lock}" }
       inputs
     end
 

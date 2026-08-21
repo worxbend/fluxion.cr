@@ -235,10 +235,15 @@ module Fluxion
       # re-pinning to a new release left the step looking unchanged.
       inputs = @scripts.compact_map do |script|
         digest = script.sha256
-        script.content || digest.try(&.value)
+        script.content.try { |body| "content=#{body}" } || digest.try { |sha| "sha256=#{sha.value}" }
       end
       return if inputs.empty?
-      Digest::SHA256.hexdigest(inputs.join('\0'))
+      # Length-prefixed, like the phase fingerprint in `Store`: a bare
+      # separator between bodies lets one script's text spill across the
+      # boundary and impersonate its neighbour.
+      accumulator = Digest::SHA256.new
+      inputs.each { |value| accumulator << value.bytesize.to_s << ":" << value }
+      accumulator.hexfinal
     end
 
     def summary : String

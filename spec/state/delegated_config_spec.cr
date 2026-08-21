@@ -30,7 +30,42 @@ describe "delegated config change detection" do
     it "digests the referenced file's bytes for the delegated kinds" do
       with_config("apiVersion: binstaller.io/v1alpha1\n") do |path|
         digest = Fluxion::BinstallerProfileStep.new("portable", path).content_digest
-        digest.should eq(Digest::SHA256.hexdigest(File.read(path)))
+        File.write(path, "apiVersion: binstaller.io/v1alpha2\n")
+        digest.should_not eq(Fluxion::BinstallerProfileStep.new("portable", path).content_digest)
+      end
+    end
+
+    it "tells opposite profiles apart instead of collapsing them" do
+      # `only: [docker]` installs docker and nothing else; `skip: [docker]`
+      # installs everything except docker. A digest over an unlabelled, flat
+      # list of tool names hashed both as ["docker"], so switching one for the
+      # other left the completed phase looking unchanged and it never ran.
+      with_config("versions:\n  docker: 27.0.0\n") do |path|
+        only = Fluxion::BinstallerProfileStep.new("portable", path, only: ["docker"])
+        skip = Fluxion::BinstallerProfileStep.new("portable", path, skip: ["docker"])
+        only.content_digest.should_not eq(skip.content_digest)
+
+        # Same names, different split between the two lists.
+        both = Fluxion::BinstallerProfileStep.new("portable", path, only: ["git", "vim"])
+        split = Fluxion::BinstallerProfileStep.new("portable", path, only: ["git"], skip: ["vim"])
+        both.content_digest.should_not eq(split.content_digest)
+
+        # A tool literally named "locked" is not the `locked:` flag, and is not
+        # a lock file path either.
+        named = Fluxion::BinstallerProfileStep.new("portable", path, only: ["locked"])
+        flag = Fluxion::BinstallerProfileStep.new("portable", path, locked: true)
+        file = Fluxion::BinstallerProfileStep.new("portable", path, lock_file: "locked")
+        [named, flag, file].map(&.content_digest).uniq.size.should eq(3)
+      end
+    end
+
+    it "keeps the config's bytes from spilling into the step's knobs" do
+      # Unframed concatenation let a config ending in the separator plus a
+      # value impersonate that value being passed as a knob.
+      with_config("only=docker") do |path|
+        Fluxion::BinstallerProfileStep.new("portable", path).content_digest
+          .should_not eq(Fluxion::BinstallerProfileStep.new("portable", "/nope/absent.yaml",
+            only: ["docker"]).content_digest)
       end
     end
 

@@ -68,41 +68,13 @@ module Fluxion::Config
       has_url = url_node.present?
       has_content = content_node.present?
 
-      if has_content && content_node.string?.nil?
-        context.error(content_node.path, "must be a string",
-          "a script body, usually written as a YAML block with |")
-        return
-      end
+      return unless valid_script_source?(context, node, content_node, has_script, has_url, has_content)
 
-      declared = [has_script, has_url, has_content].count(true)
-      unless declared == 1
-        context.error(node.path, "must define exactly one of script, url or content")
-        return
-      end
-
-      # An inline body has no shebang to read and no file to open, so the
-      # interpreter cannot be inferred and must be stated.
       shell = script_shell(context, node["shell"])
-      # The step's `shell:` is a default for its items, so it satisfies the
-      # inline requirement just as an item-level one does.
-      if has_content && shell.nil? && step_shell.nil?
-        context.error(node["shell"].path,
-          "is required for an inline content script",
-          "one of #{ShellKind.values.map(&.config_name).join(", ")}; there is no shebang to read")
-        return
-      end
+      return unless valid_inline_shell?(context, node, has_content, shell, step_shell)
 
       sha256 = context.sha256(node["sha256"])
-      if has_url && sha256.nil?
-        context.error(node["sha256"].path,
-          "is required for a remote script",
-          "Fluxion verifies the digest before executing, including under sudo")
-        return
-      end
-      if !has_url && node["sha256"].present?
-        context.error(node["sha256"].path, "is only valid for a remote URL",
-          "a local script is an operator-controlled input, and an inline body is already in the profile")
-      end
+      return unless valid_script_digest?(context, node, has_url, sha256)
 
       url = has_url ? context.https_url(url_node) : nil
       return if has_url && url.nil?
@@ -124,6 +96,60 @@ module Fluxion::Config
         timeout: item_timeout(context, node),
         sha256: sha256,
       )
+    end
+
+    # A script item names its body exactly once: a local path, a remote URL, or
+    # an inline block. Two of them is ambiguous and none of them is empty, and
+    # either way there is nothing to run.
+    private def valid_script_source?(context : Context, node : Node, content_node : Node,
+                                     has_script : Bool, has_url : Bool, has_content : Bool) : Bool
+      if has_content && content_node.string?.nil?
+        context.error(content_node.path, "must be a string",
+          "a script body, usually written as a YAML block with |")
+        return false
+      end
+
+      unless [has_script, has_url, has_content].count(true) == 1
+        context.error(node.path, "must define exactly one of script, url or content")
+        return false
+      end
+
+      true
+    end
+
+    # An inline body has no shebang to read and no file to open, so the
+    # interpreter cannot be inferred and must be stated. The step's `shell:` is
+    # a default for its items, so it satisfies that requirement just as an
+    # item-level one does.
+    private def valid_inline_shell?(context : Context, node : Node, has_content : Bool,
+                                    shell : ShellKind?, step_shell : ShellKind?) : Bool
+      return true unless has_content && shell.nil? && step_shell.nil?
+      context.error(node["shell"].path,
+        "is required for an inline content script",
+        "one of #{ShellKind.values.map(&.config_name).join(", ")}; there is no shebang to read")
+      false
+    end
+
+    # A remote script must be pinned to a digest, and only a remote script may
+    # carry one.
+    private def valid_script_digest?(context : Context, node : Node,
+                                     has_url : Bool, sha256 : Checksum?) : Bool
+      if has_url && sha256.nil?
+        context.error(node["sha256"].path,
+          "is required for a remote script",
+          "Fluxion verifies the digest before executing, including under sudo")
+        return false
+      end
+
+      # A warning shaped as an error, and deliberately not fatal: a stray
+      # digest on a local script is a mistake worth naming, but it does not
+      # make the item unrunnable, so parsing continues.
+      if !has_url && node["sha256"].present?
+        context.error(node["sha256"].path, "is only valid for a remote URL",
+          "a local script is an operator-controlled input, and an inline body is already in the profile")
+      end
+
+      true
     end
 
     private def shell_command(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?

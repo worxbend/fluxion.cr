@@ -8,8 +8,14 @@ module Fluxion::TUI
   # command output, either the live tail of the whole run or the output of one
   # step you pinned.
   #
+  # The run's shape — which phases, which steps, what happened to each item —
+  # lives in `RunTree`. What is left here is the part that changes when the
+  # drawing or the key bindings change: the cursor, the panes, the output log,
+  # and the folding.
+  #
   # Every event arrives on the executor's fiber and every read happens on the
-  # drawing fiber, so all of the mutable state below is behind one mutex.
+  # drawing fiber, so all of the mutable state below — and the tree, which does
+  # no locking of its own — is behind this class's one mutex.
   class ExecutionScreen
     include ExecutionListener
 
@@ -44,120 +50,16 @@ module Fluxion::TUI
       end
     end
 
-    # What has happened to one item.
-    enum ItemState
-      Pending
-      Running
-      Succeeded
-      Failed
-      Skipped
-      Preview
-      Paused
-
-      def terminal? : Bool
-        !pending? && !running?
-      end
-    end
-
-    # One item of one step: the smallest thing the run reports on.
-    class ItemRow
-      getter key : String
-      property state : ItemState
-      property detail : String?
-      # Monotonic, not wall clock: a run that spans a clock adjustment must
-      # not report an item as having taken a negative amount of time.
-      property started_at : Time::Instant
-      property finished_at : Time::Instant?
-
-      def initialize(@key : String, @state : ItemState = ItemState::Pending, @detail : String? = nil)
-        @started_at = Time.instant
-      end
-
-      def duration : Time::Span?
-        @finished_at.try { |finished| finished - @started_at }
-      end
-    end
-
-    # A step and the items it is working through.
-    class StepGroup
-      getter name : String
-      getter items : Array(ItemRow)
-      property? collapsed : Bool
-
-      def initialize(@name : String)
-        @items = [] of ItemRow
-        @collapsed = false
-      end
-
-      def find_or_add(key : String) : ItemRow
-        @items.find { |item| item.key == key } || begin
-          row = ItemRow.new(key)
-          @items << row
-          row
-        end
-      end
-
-      def failed? : Bool
-        @items.any?(&.state.failed?)
-      end
-
-      def running? : Bool
-        @items.any?(&.state.running?)
-      end
-
-      def finished : Int32
-        @items.count(&.state.terminal?)
-      end
-    end
-
-    # A phase and the steps under it.
-    class PhaseGroup
-      getter name : String
-      getter steps : Array(StepGroup)
-      property? collapsed : Bool
-      property? blocked : Bool
-      property blocked_by : String?
-
-      def initialize(@name : String)
-        @steps = [] of StepGroup
-        @collapsed = false
-        @blocked = false
-      end
-
-      def find_or_add(name : String) : StepGroup
-        @steps.find { |step| step.name == name } || begin
-          group = StepGroup.new(name)
-          @steps << group
-          group
-        end
-      end
-
-      def failed? : Bool
-        @steps.any?(&.failed?)
-      end
-
-      def running? : Bool
-        @steps.any?(&.running?)
-      end
-    end
-
     # One line of command output, tagged with where it came from so the output
     # pane can show either the whole run or one step of it without keeping two
     # copies of the same text.
     record OutputLine, phase : String, step : String, item : String, text : String
 
-    # A row of the tree, flattened so cursor movement is a single index.
-    record Node, phase : PhaseGroup, step : StepGroup?, item : ItemRow?
-
-    # The phase events are filed under before any phase has started — a run
-    # that fails in its first step still has to put that output somewhere.
-    UNGROUPED = "run"
-
     getter summary : Executor::RunSummary
 
     # The node whose output the right-hand pane is showing, or nil for the
     # live tail of the whole run.
-    @pinned : Node? = nil
+    @pinned : RunTree::Node? = nil
 
     # How many items the run will touch in total, counted once from the
     # profile the selector produced.
@@ -165,11 +67,9 @@ module Fluxion::TUI
 
     def initialize(@profile : Profile, @mode : String)
       @summary = Executor::RunSummary.new
-      @phases = [] of PhaseGroup
+      @tree = RunTree.new
       @log = Deque(OutputLine).new
       @notices = Deque(String).new
-      @current_phase = ""
-      @current_step = ""
       @finished = false
       @cancelling = false
       @started_at = Time.instant
@@ -220,22 +120,20 @@ module Fluxion::TUI
         # explicitly.
         case event.kind
         in .phase_started?
-          @current_phase = event.step_name
-          phase(event.step_name)
+          @tree.phase_started(event.step_name)
         in .phase_failed?
           notice("#{event.step_name} failed")
         in .phase_blocked?
-          group = phase(event.step_name)
+          group = @tree.phase(event.step_name)
           group.blocked = true
           group.blocked_by = event.item
           notice("#{event.step_name} blocked by #{event.item}")
         in .restart_required?
           notice("restart required: #{event.item}")
         in .step_started?
-          @current_step = event.step_name
-          step(event.step_name)
+          @tree.step_started(event.step_name)
         in .item_started?
-          item(event.step_name, event.item).state = ItemState::Running
+          @tree.item(event.step_name, event.item).state = RunTree::ItemState::Running
         in .item_output?
           event.output_line.try { |line| record_output(event.step_name, event.item, line) }
         in .item_completed?
@@ -259,39 +157,23 @@ module Fluxion::TUI
       @summary.record(result)
 
       state, detail = case result
-                      when StepResult::Success then {ItemState::Succeeded, nil}
-                      when StepResult::Failure then {ItemState::Failed, result.error_message}
-                      when StepResult::Skipped then {ItemState::Skipped, result.reason}
-                      when StepResult::DryRun  then {ItemState::Preview, result.would_execute.join(' ')}
-                      when StepResult::Paused  then {ItemState::Paused, result.message}
-                      else                          {ItemState::Succeeded, nil}
+                      when StepResult::Success then {RunTree::ItemState::Succeeded, nil}
+                      when StepResult::Failure then {RunTree::ItemState::Failed, result.error_message}
+                      when StepResult::Skipped then {RunTree::ItemState::Skipped, result.reason}
+                      when StepResult::DryRun  then {RunTree::ItemState::Preview, result.would_execute.join(' ')}
+                      when StepResult::Paused  then {RunTree::ItemState::Paused, result.message}
+                      else                          {RunTree::ItemState::Succeeded, nil}
                       end
 
-      row = item(event.step_name, event.item)
+      row = @tree.item(event.step_name, event.item)
       row.state = state
       row.detail = detail || row.detail
       row.finished_at = Time.instant
     end
 
-    private def phase(name : String) : PhaseGroup
-      name = UNGROUPED if name.empty?
-      @phases.find { |group| group.name == name } || begin
-        group = PhaseGroup.new(name)
-        @phases << group
-        group
-      end
-    end
-
-    private def step(name : String) : StepGroup
-      phase(@current_phase).find_or_add(name)
-    end
-
-    private def item(step_name : String, key : String) : ItemRow
-      step(step_name).find_or_add(key)
-    end
-
     private def record_output(step_name : String, item_key : String, text : String) : Nil
-      @log << OutputLine.new(@current_phase.empty? ? UNGROUPED : @current_phase, step_name, item_key, text)
+      phase = @tree.current_phase
+      @log << OutputLine.new(phase.empty? ? RunTree::UNGROUPED : phase, step_name, item_key, text)
       while @log.size > MAX_LOG_LINES
         @log.shift
       end
@@ -458,7 +340,7 @@ module Fluxion::TUI
       move_to(direction > 0 ? rows.size - 1 : 0)
     end
 
-    private def current : Node?
+    private def current : RunTree::Node?
       nodes[@cursor]?
     end
 
@@ -470,7 +352,7 @@ module Fluxion::TUI
         # `h` on an item moves out to its step rather than doing nothing,
         # which is what a Neovim user expects from a tree: collapse where you
         # can, move outward where you cannot.
-        move_to(index_of(node.phase, node.step) || @cursor)
+        move_to(@tree.index_of(node.phase, node.step, @failures_only) || @cursor)
       elsif step = node.step
         @follow = false
         step.collapsed = true
@@ -509,23 +391,8 @@ module Fluxion::TUI
 
     private def fold_every(collapsed : Bool) : Nil
       @follow = false
-      @phases.each do |phase|
-        phase.collapsed = collapsed
-        phase.steps.each(&.collapsed=(collapsed))
-      end
+      @tree.fold_every(collapsed)
       clamp_cursor
-    end
-
-    # Where a group's own heading row sits, so a key can move out of a nested
-    # row onto the thing that contains it. Compared by identity rather than by
-    # name: two phases may legitimately contain steps of the same name.
-    private def index_of(phase : PhaseGroup, step : StepGroup?) : Int32?
-      nodes.index do |node|
-        next false unless node.item.nil?
-        next false unless node.phase.same?(phase)
-        candidate = node.step
-        step.nil? ? candidate.nil? : !candidate.nil? && candidate.same?(step)
-      end
     end
 
     private def clamp_cursor : Nil
@@ -559,32 +426,14 @@ module Fluxion::TUI
 
     # ── Tree ─────────────────────────────────────────────────────────────────
 
-    # The visible rows, in run order. Rebuilt per frame rather than cached: the
-    # tree changes on almost every event, and a cache would have to be
-    # invalidated from the executor's fiber for no measurable gain on a list
-    # this size.
-    private def nodes : Array(Node)
-      rows = [] of Node
-      @phases.each do |phase|
-        steps = @failures_only ? phase.steps.select(&.failed?) : phase.steps
-        next if @failures_only && steps.empty?
-
-        rows << Node.new(phase, nil, nil)
-        next if phase.collapsed?
-
-        steps.each do |step|
-          rows << Node.new(phase, step, nil)
-          next if step.collapsed?
-
-          items = @failures_only ? step.items.select(&.state.failed?) : step.items
-          items.each { |item| rows << Node.new(phase, step, item) }
-        end
-      end
-      rows
+    # The visible rows, in run order, honouring the failures-only filter that
+    # belongs to the screen rather than to the tree.
+    private def nodes : Array(RunTree::Node)
+      @tree.rows(@failures_only)
     end
 
     private def completed_items : Int32
-      @phases.sum { |phase| phase.steps.sum(&.finished) }
+      @tree.completed_items
     end
 
     # How much of the run is behind us, from 0 to 1.
@@ -697,8 +546,8 @@ module Fluxion::TUI
       return "done" if @finished
       return "#{Theme.spinner_glyph(@frame)} stopping after this item" if @cancelling
 
-      where = @current_phase.empty? ? "starting" : @current_phase
-      where += " · #{@current_step}" unless @current_step.empty?
+      where = @tree.current_phase.empty? ? "starting" : @tree.current_phase
+      where += " · #{@tree.current_step}" unless @tree.current_step.empty?
       "#{Theme.spinner_glyph(@frame)} #{where}"
     end
 
@@ -749,7 +598,7 @@ module Fluxion::TUI
     # the single most useful thing on the screen, and squeezing it onto the end
     # of the item's own line is how it ends up truncated to "package n" on a
     # split pane.
-    private def node_lines(node : Node) : Array(CryTUI::Line)
+    private def node_lines(node : RunTree::Node) : Array(CryTUI::Line)
       if item = node.item
         lines = [item_line(item)]
         item.detail.try do |detail|
@@ -766,7 +615,7 @@ module Fluxion::TUI
       end
     end
 
-    private def phase_line(phase : PhaseGroup) : CryTUI::Line
+    private def phase_line(phase : RunTree::PhaseGroup) : CryTUI::Line
       arrow = phase.collapsed? ? Theme.symbol("▸", ">") : Theme.symbol("▾", "v")
       spans = [
         CryTUI::Span.new("#{arrow} ", Theme.hint),
@@ -780,7 +629,7 @@ module Fluxion::TUI
       CryTUI::Line.new(spans)
     end
 
-    private def step_line(step : StepGroup) : CryTUI::Line
+    private def step_line(step : RunTree::StepGroup) : CryTUI::Line
       arrow = step.collapsed? ? Theme.symbol("▸", ">") : Theme.symbol("▾", "v")
       done = step.finished
       total = step.items.size
@@ -793,7 +642,7 @@ module Fluxion::TUI
       CryTUI::Line.new(spans)
     end
 
-    private def item_line(item : ItemRow) : CryTUI::Line
+    private def item_line(item : RunTree::ItemRow) : CryTUI::Line
       spans = [
         CryTUI::Span.new("      #{glyph(item.state)} ", style(item.state)),
         CryTUI::Span.new(item.key.ljust(30), style(item.state)),
@@ -804,27 +653,27 @@ module Fluxion::TUI
       CryTUI::Line.new(spans)
     end
 
-    private def glyph(state : ItemState) : String
+    private def glyph(state : RunTree::ItemState) : String
       case state
-      in ItemState::Pending   then Theme.symbol("·", ".")
-      in ItemState::Running   then Theme.spinner_glyph(@frame)
-      in ItemState::Succeeded then Theme.symbol("✔", "+")
-      in ItemState::Failed    then Theme.symbol("✘", "x")
-      in ItemState::Skipped   then Theme.symbol("○", "-")
-      in ItemState::Preview   then Theme.symbol("~", "~")
-      in ItemState::Paused    then Theme.symbol("⏸", "=")
+      in .pending?   then Theme.symbol("·", ".")
+      in .running?   then Theme.spinner_glyph(@frame)
+      in .succeeded? then Theme.symbol("✔", "+")
+      in .failed?    then Theme.symbol("✘", "x")
+      in .skipped?   then Theme.symbol("○", "-")
+      in .preview?   then Theme.symbol("~", "~")
+      in .paused?    then Theme.symbol("⏸", "=")
       end
     end
 
-    private def style(state : ItemState) : CryTUI::Style
+    private def style(state : RunTree::ItemState) : CryTUI::Style
       case state
-      in ItemState::Pending   then Theme.hint
-      in ItemState::Running   then Theme.running
-      in ItemState::Succeeded then Theme.success
-      in ItemState::Failed    then Theme.failure
-      in ItemState::Skipped   then Theme.hint
-      in ItemState::Preview   then Theme.info
-      in ItemState::Paused    then Theme.warning
+      in .pending?   then Theme.hint
+      in .running?   then Theme.running
+      in .succeeded? then Theme.success
+      in .failed?    then Theme.failure
+      in .skipped?   then Theme.hint
+      in .preview?   then Theme.info
+      in .paused?    then Theme.warning
       end
     end
 

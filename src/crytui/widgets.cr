@@ -149,7 +149,29 @@ module CryTUI
       end
     end
 
+    # Shared by every widget that can be wrapped in a `Block`.
+    #
+    # A block is a border and an optional title drawn around a widget, so a
+    # widget that has one must draw it first and then confine itself to what is
+    # left inside. Four widgets did that with the same five lines copied out,
+    # which meant the rule "draw the border, then shrink to its interior" was
+    # stated four times and could drift in one of them.
+    #
+    # Including this gives a widget `draw_block`, which returns the area the
+    # widget should actually use: the block's interior when there is a block,
+    # and the whole area when there is not.
+    module Blocked
+      private def draw_block(area : Rect, buffer : Buffer) : Rect
+        block = @block
+        return area unless block
+        block.render(area, buffer)
+        block.inner(area)
+      end
+    end
+
     struct Paragraph
+      include Blocked
+
       getter text : String
       getter style : Style
       getter block : Block?
@@ -158,11 +180,7 @@ module CryTUI
       end
 
       def render(area : Rect, buffer : Buffer)
-        content = area
-        if block = @block
-          block.render(area, buffer)
-          content = block.inner(area)
-        end
+        content = draw_block(area, buffer)
         @text.lines.first(content.height).each_with_index do |line, index|
           buffer.set_string(content.x, content.y + index, line, @style, content.width)
         end
@@ -170,6 +188,8 @@ module CryTUI
     end
 
     struct StyledText
+      include Blocked
+
       getter lines : Array(Line)
       getter style : Style
       getter block : Block?
@@ -179,11 +199,7 @@ module CryTUI
       end
 
       def render(area : Rect, buffer : Buffer)
-        content = area
-        if block = @block
-          block.render(area, buffer)
-          content = block.inner(area)
-        end
+        content = draw_block(area, buffer)
         return if content.empty?
         @lines.skip(@scroll.clamp(0, Int32::MAX)).first(content.height).each_with_index do |line, index|
           line.render(buffer, Rect.new(content.x, content.y + index, content.width, 1), @style)
@@ -216,6 +232,8 @@ module CryTUI
     end
 
     struct List
+      include Blocked
+
       # Contrast a span must clear against the selected row's background to
       # keep its own colour. 3:1 is the WCAG floor for large text and for
       # non-text interface elements, which is the right bar for short coloured
@@ -232,11 +250,7 @@ module CryTUI
       end
 
       def render(area : Rect, buffer : Buffer, state : ListState)
-        content = area
-        if block = @block
-          block.render(area, buffer)
-          content = block.inner(area)
-        end
+        content = draw_block(area, buffer)
         return if content.empty? || @items.empty?
         clamp_state(state, content.height)
         y = content.y
@@ -295,6 +309,8 @@ module CryTUI
     end
 
     struct Gauge
+      include Blocked
+
       getter ratio : Float64
       getter label : String?
       getter filled_style : Style
@@ -306,11 +322,7 @@ module CryTUI
       end
 
       def render(area : Rect, buffer : Buffer)
-        content = area
-        if block = @block
-          block.render(area, buffer)
-          content = block.inner(area)
-        end
+        content = draw_block(area, buffer)
         return if content.empty?
         filled = (content.width * @ratio).round.to_i
         (0...content.width).each do |x|

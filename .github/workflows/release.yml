@@ -9,14 +9,23 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Was hardcoded to `ubuntu-latest`, so `matrix.runner` was declared and
+    # never read and BOTH legs built on x86-64. The arm64 asset of v0.1.0
+    # through v0.3.0 was an x86-64 binary under an arm64 name — byte-identical
+    # to the amd64 one — which `install.sh` then handed to every aarch64 host.
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - arch: amd64
             runner: ubuntu-latest
+            platform: linux/amd64
+            # What `file` calls this architecture, for the check below.
+            elf: x86-64
           - arch: arm64
             runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            elf: aarch64
 
     steps:
       - uses: actions/checkout@v4
@@ -24,10 +33,25 @@ jobs:
       - name: Build a static binary
         # Alpine and --static so the release runs on any glibc or musl host
         # without a runtime dependency the user has to think about.
+        #
+        # --platform is explicit rather than left to the daemon's default: it
+        # states which architecture this leg is for in the same place the
+        # runner is chosen, so the two cannot drift apart again silently.
         run: |
-          docker run --rm -v "$PWD":/work -w /work \
+          docker run --rm --platform ${{ matrix.platform }} -v "$PWD":/work -w /work \
             crystallang/crystal:1.21.0-alpine \
             sh -c 'shards install --frozen --production && shards build --release --static --no-debug'
+
+      - name: Check the binary is for the architecture it will be named after
+        # The guard that was missing. Publishing a binary that cannot execute on
+        # the machine it is offered to is worse than publishing nothing, so a
+        # mismatch fails the release rather than shipping.
+        run: |
+          file bin/fluxion
+          if ! file -b bin/fluxion | grep -q '${{ matrix.elf }}'; then
+            echo "::error::bin/fluxion is not ${{ matrix.elf }}; refusing to publish it as ${{ matrix.arch }}"
+            exit 1
+          fi
 
       - name: Package
         run: |

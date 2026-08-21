@@ -205,6 +205,10 @@ module Fluxion
       "shell-script"
     end
 
+    def item_type : ItemType
+      ItemType::ShellScript
+    end
+
     def items : Array(ItemRef)
       @scripts.map { |script| item(script.name, "script", script.key) }
     end
@@ -267,6 +271,10 @@ module Fluxion
       "shell-command"
     end
 
+    def item_type : ItemType
+      ItemType::ShellCommand
+    end
+
     def items : Array(ItemRef)
       @commands.map { |command| item(command.name, "command") }
     end
@@ -298,6 +306,10 @@ module Fluxion
 
     def kind : String
       "shell-reload"
+    end
+
+    def item_type : ItemType
+      ItemType::ShellReload
     end
 
     def items : Array(ItemRef)
@@ -332,6 +344,10 @@ module Fluxion
 
     def kind : String
       "default-shell"
+    end
+
+    def item_type : ItemType
+      ItemType::DefaultShell
     end
 
     def items : Array(ItemRef)
@@ -372,6 +388,10 @@ module Fluxion
       "assert"
     end
 
+    def item_type : ItemType
+      ItemType::Assert
+    end
+
     def items : Array(ItemRef)
       [item(@name, "assert")]
     end
@@ -408,6 +428,10 @@ module Fluxion
 
     def kind : String
       "manual"
+    end
+
+    def item_type : ItemType
+      ItemType::Manual
     end
 
     def items : Array(ItemRef)
@@ -469,6 +493,10 @@ module Fluxion
 
     def kind : String
       "interrupt"
+    end
+
+    def item_type : ItemType
+      ItemType::Interrupt
     end
 
     def items : Array(ItemRef)

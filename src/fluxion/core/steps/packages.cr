@@ -62,6 +62,14 @@ module Fluxion
       "packages"
     end
 
+    def item_type : ItemType
+      ItemType::Package
+    end
+
+    def item_package_manager : PackageManager?
+      @package_manager
+    end
+
     def items : Array(ItemRef)
       @packages.map { |package| item(package, "package") }
     end
@@ -92,6 +100,14 @@ module Fluxion
 
     def kind : String
       "flatpak"
+    end
+
+    def item_type : ItemType
+      ItemType::Flatpak
+    end
+
+    def item_package_manager : PackageManager?
+      PackageManager::Flatpak
     end
 
     def items : Array(ItemRef)
@@ -127,6 +143,10 @@ module Fluxion
 
     def kind : String
       "tool-packages"
+    end
+
+    def item_type : ItemType
+      ItemType::ToolPackage
     end
 
     def items : Array(ItemRef)
@@ -174,6 +194,10 @@ module Fluxion
       "sdkman-packages"
     end
 
+    def item_type : ItemType
+      ItemType::SdkmanPackage
+    end
+
     def items : Array(ItemRef)
       @candidates.map { |candidate| item(candidate.candidate, "sdkman", candidate.to_s) }
     end
@@ -215,6 +239,14 @@ module Fluxion
 
     def kind : String
       "system-update"
+    end
+
+    def item_type : ItemType
+      ItemType::SystemUpdate
+    end
+
+    def item_package_manager : PackageManager?
+      @package_manager
     end
 
     def items : Array(ItemRef)

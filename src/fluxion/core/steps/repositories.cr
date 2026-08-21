@@ -64,6 +64,10 @@ module Fluxion
       "apt-repository"
     end
 
+    def item_type : ItemType
+      ItemType::AptRepository
+    end
+
     # Keyed by the source list path: it is unique, absolute, and the thing the
     # user would delete to undo the step.
     def items : Array(ItemRef)
@@ -128,6 +132,10 @@ module Fluxion
       "rpm-repository"
     end
 
+    def item_type : ItemType
+      ItemType::RpmRepository
+    end
+
     def items : Array(ItemRef)
       [item(@repo_file, "rpm-repository", @id)]
     end
@@ -178,6 +186,10 @@ module Fluxion
 
     def kind : String
       "zypper-repository"
+    end
+
+    def item_type : ItemType
+      ItemType::ZypperRepository
     end
 
     def items : Array(ItemRef)
@@ -237,6 +249,10 @@ module Fluxion
       "pacman-repository"
     end
 
+    def item_type : ItemType
+      ItemType::PacmanRepository
+    end
+
     def items : Array(ItemRef)
       [item(@repository, "pacman-repository")]
     end
@@ -276,6 +292,10 @@ module Fluxion
 
     def kind : String
       "flatpak-remote"
+    end
+
+    def item_type : ItemType
+      ItemType::FlatpakRemote
     end
 
     def items : Array(ItemRef)
@@ -335,6 +355,10 @@ module Fluxion
 
     def kind : String
       "gpg-key"
+    end
+
+    def item_type : ItemType
+      ItemType::GpgKey
     end
 
     def items : Array(ItemRef)

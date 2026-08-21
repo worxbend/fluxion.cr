@@ -78,8 +78,8 @@ module Fluxion::Executor
     end
 
     protected def step_item(step : Step, item : ItemRef) : StepItem
-      StepItem.new(step.name, item.key, ItemTypes.for(step), item.display,
-        ItemTypes.package_manager_for(step), step)
+      StepItem.new(step.name, item.key, step.item_type, item.display,
+        step.item_package_manager, step)
     end
   end
 

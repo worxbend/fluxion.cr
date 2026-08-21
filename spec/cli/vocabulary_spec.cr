@@ -34,7 +34,7 @@ describe "item type vocabulary" do
       step = step_for(kind)
 
       # What `status`, `diff` and `explain` print.
-      Fluxion::Executor::ItemTypes.for(step).json_name.should eq(expected)
+      step.item_type.json_name.should eq(expected)
 
       # And what `state forget --type` will accept, which is the round trip
       # that used to fail.

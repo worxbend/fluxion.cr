@@ -10,7 +10,6 @@ require "./executor/installer"
 require "./executor/shell_runner"
 require "./executor/probe"
 require "./executor/probe_sweep"
-require "./executor/item_types"
 require "./executor/step_executor"
 # downloads.cr first: it defines `DownloadSupport`, which the shell and
 # repository executors include.

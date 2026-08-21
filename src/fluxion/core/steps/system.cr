@@ -34,6 +34,10 @@ module Fluxion
       "user-groups"
     end
 
+    def item_type : ItemType
+      ItemType::UserGroup
+    end
+
     def items : Array(ItemRef)
       @groups.map { |group| item(item_key(group), "user-group", group) }
     end
@@ -109,6 +113,10 @@ module Fluxion
       "git-config"
     end
 
+    def item_type : ItemType
+      ItemType::GitConfig
+    end
+
     # Sorted so plans, state, and fingerprints do not depend on YAML ordering.
     def sorted_keys : Array(String)
       @entries.keys.sort!
@@ -171,6 +179,10 @@ module Fluxion
 
     def kind : String
       "git-repo"
+    end
+
+    def item_type : ItemType
+      ItemType::GitRepo
     end
 
     def items : Array(ItemRef)
@@ -282,6 +294,10 @@ module Fluxion
       "systemd-unit"
     end
 
+    def item_type : ItemType
+      ItemType::SystemdUnit
+    end
+
     def items : Array(ItemRef)
       @units.map { |unit| item(unit.qualified_name, "systemd-unit") }
     end
@@ -319,6 +335,10 @@ module Fluxion
 
     def kind : String
       "system-setting"
+    end
+
+    def item_type : ItemType
+      ItemType::SystemSetting
     end
 
     def empty? : Bool
@@ -395,6 +415,10 @@ module Fluxion
 
     def kind : String
       "file-writes"
+    end
+
+    def item_type : ItemType
+      ItemType::FileWrite
     end
 
     def items : Array(ItemRef)

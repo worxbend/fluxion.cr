@@ -70,6 +70,10 @@ module Fluxion
       "binstaller-profile"
     end
 
+    def item_type : ItemType
+      ItemType::BinstallerProfile
+    end
+
     def items : Array(ItemRef)
       [item(@config, "binstaller-profile", @name)]
     end
@@ -111,6 +115,10 @@ module Fluxion
       "nerd-fonts"
     end
 
+    def item_type : ItemType
+      ItemType::NerdFont
+    end
+
     # One item, not one per family.
     #
     # Fluxion used to expand an inline font list into an item each, but the
@@ -149,6 +157,10 @@ module Fluxion
 
     def kind : String
       "dotbot"
+    end
+
+    def item_type : ItemType
+      ItemType::Dotbot
     end
 
     def items : Array(ItemRef)
@@ -227,6 +239,10 @@ module Fluxion
       "toolchain"
     end
 
+    def item_type : ItemType
+      ItemType::Toolchain
+    end
+
     def items : Array(ItemRef)
       [item(@name, "toolchain", @toolchain.config_name)]
     end
@@ -268,6 +284,10 @@ module Fluxion
 
     def kind : String
       "oh-my-zsh"
+    end
+
+    def item_type : ItemType
+      ItemType::OhMyZsh
     end
 
     def items : Array(ItemRef)

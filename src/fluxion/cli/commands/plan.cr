@@ -205,7 +205,7 @@ module Fluxion::CLI
       # disagree for six kinds, so `plan --format json` reported `"binary"` for
       # the same item `status --format json` called `"compiled_binary"`, and
       # `state forget --type` rejected the value `plan` had just printed.
-      item_type = Executor::ItemTypes.for(step).json_name
+      item_type = step.item_type.json_name
 
       {
         "name"  => step.name,

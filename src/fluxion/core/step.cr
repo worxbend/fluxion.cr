@@ -76,8 +76,26 @@ module Fluxion
     # profile writes; `Config::PlanKinds::STEP_TYPES` maps between the two.
     abstract def kind : String
 
+    # The discriminator this step's items are recorded under.
+    #
+    # Abstract, and answered by the step, because this value is load-bearing
+    # well past the executor: it is what the state file persists, the key
+    # `ProbeRegistry` dispatches on, and half of `status`'s dedupe identity.
+    # It used to be decided by a `case` over the step hierarchy, which Crystal
+    # cannot check for exhaustiveness — so a new kind whose arm nobody added
+    # fell through to a default and recorded its items under the wrong type,
+    # with no compile error to say so. As an abstract method the compiler
+    # refuses to build a subclass that forgets it.
+    abstract def item_type : ItemType
+
     # Everything this step installs, in declaration order.
     abstract def items : Array(ItemRef)
+
+    # The package manager that installs this step's items, for the few kinds
+    # where the concept applies at all. Nil for the rest, which is most of them.
+    def item_package_manager : PackageManager?
+      nil
+    end
 
     # One-line summary for `plan` and `list`.
     def summary : String

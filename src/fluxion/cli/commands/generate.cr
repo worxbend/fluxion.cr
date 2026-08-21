@@ -22,13 +22,10 @@ module Fluxion::CLI
         raise Failure.io("Directory does not exist: #{directory}")
       end
 
-      temporary = "#{absolute}.fluxion-#{Random::Secure.hex(6)}"
       begin
-        File.write(temporary, content)
-        File.rename(temporary, absolute)
-      rescue error
-        File.delete(temporary) rescue nil
-        raise Failure.io("Failed to write #{absolute}: #{error.message}")
+        AtomicFile.write(absolute, content)
+      rescue error : ExecutionError
+        raise Failure.io(error.message || "Failed to write #{absolute}")
       end
 
       absolute

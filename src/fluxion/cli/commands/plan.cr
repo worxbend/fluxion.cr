@@ -200,9 +200,10 @@ module Fluxion::CLI
     end
 
     private def step_json(step : Step)
-      # `ItemType`, not `ItemRef#type`. The two are separate vocabularies —
-      # `ItemRef#type` is a free string each Step writes by hand — and they
-      # disagree for six kinds, so `plan --format json` reported `"binary"` for
+      # `ItemType`, not `ItemRef#fingerprint_tag`. The two are separate
+      # vocabularies — the latter is a free string each Step writes by hand,
+      # for hashing — and they disagree for six kinds, so `plan --format json`
+      # reported `"binary"` for
       # the same item `status --format json` called `"compiled_binary"`, and
       # `state forget --type` rejected the value `plan` had just printed.
       item_type = step.item_type.json_name

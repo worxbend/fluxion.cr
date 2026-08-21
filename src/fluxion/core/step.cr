@@ -10,9 +10,22 @@ module Fluxion
   struct ItemRef
     getter key : String
 
-    # Short type label shown in `status`/`diff` and used to disambiguate
-    # `state forget` when the same key appears in two steps.
-    getter type : String
+    # A per-item discriminator, mixed into the phase fingerprint alongside the
+    # key so that two steps whose items happen to share a name still hash
+    # differently, and shown by `ItemRef#to_s`.
+    #
+    # Explicitly NOT the vocabulary a user sees. `status`, `diff`, `plan` and
+    # `state forget` all speak `Step#item_type` — a closed enum — and the two
+    # disagree for six kinds, which is why `plan --format json` once printed
+    # "binary" for an item `status` called "compiled_binary" (see the comment
+    # in cli/commands/plan.cr#step_json). A free string each step writes by
+    # hand is fine for a hash input and wrong for anything a user types back.
+    #
+    # Some kinds deliberately put a value here that `item_type` does not
+    # carry — `ToolPackagesStep` writes its backend — so this cannot simply be
+    # replaced by `item_type`: doing that would make changing `backend: npm` to
+    # `backend: cargo` invisible to the fingerprint.
+    getter fingerprint_tag : String
 
     # Name of the step that owns this item.
     getter step_name : String
@@ -20,7 +33,7 @@ module Fluxion
     # Human-facing label when `key` alone reads poorly.
     getter display : String?
 
-    def initialize(@key : String, @type : String, @step_name : String, @display : String? = nil)
+    def initialize(@key : String, @fingerprint_tag : String, @step_name : String, @display : String? = nil)
     end
 
     def label : String
@@ -28,7 +41,7 @@ module Fluxion
     end
 
     def to_s(io : IO) : Nil
-      io << @step_name << '/' << @type << '/' << @key
+      io << @step_name << '/' << @fingerprint_tag << '/' << @key
     end
   end
 
@@ -174,8 +187,8 @@ module Fluxion
       false
     end
 
-    protected def item(key : String, type : String, display : String? = nil) : ItemRef
-      ItemRef.new(key, type, @name, display)
+    protected def item(key : String, fingerprint_tag : String, display : String? = nil) : ItemRef
+      ItemRef.new(key, fingerprint_tag, @name, display)
     end
   end
 end

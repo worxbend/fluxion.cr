@@ -153,8 +153,9 @@ module Fluxion::Registry
         end
       end
 
-      body = File.read(source_path(entry))
-      validate!(entry, body)
+      path = source_path(entry)
+      body = File.read(path)
+      validate!(entry, body, path)
 
       Dir.mkdir_p(@source.install_path, 0o700)
       write_atomically(destination, body)
@@ -169,8 +170,9 @@ module Fluxion::Registry
         raise ExecutionError.new("'#{entry.id}' is not installed, so there is nothing to publish")
       end
 
-      body = File.read(installed_path(entry))
-      validate!(entry, body)
+      path = installed_path(entry)
+      body = File.read(path)
+      validate!(entry, body, path)
 
       target = File.join(@source.mirror_path, entry.path)
       Dir.mkdir_p(File.dirname(target))
@@ -188,21 +190,13 @@ module Fluxion::Registry
     end
 
     # Parses the profile to prove it is usable, discarding the result.
-    private def validate!(entry : Entry, body : String) : Nil
-      directory = File.tempname("fluxion-registry")
-      Dir.mkdir_p(directory)
-      begin
-        path = File.join(directory, "#{entry.id}.yaml")
-        File.write(path, body)
-        Config::Loader.load(path, Host.facts)
-      rescue error : ValidationError
-        raise ExecutionError.new(
-          "'#{entry.id}' is not a valid profile, so it was not installed:\n#{error.message}")
-      rescue error : ConfigError
-        raise ExecutionError.new("'#{entry.id}' could not be read: #{error.message}")
-      ensure
-        FileUtils.rm_rf(directory) rescue nil
-      end
+    private def validate!(entry : Entry, body : String, path : String) : Nil
+      Config::Loader.load_string(body, File.dirname(path), path, Host.facts)
+    rescue error : ValidationError
+      raise ExecutionError.new(
+        "'#{entry.id}' is not a valid profile, so it was not installed:\n#{error.message}")
+    rescue error : ConfigError
+      raise ExecutionError.new("'#{entry.id}' could not be read: #{error.message}")
     end
 
     # The digest of what was installed, kept in a sibling directory so it never

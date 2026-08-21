@@ -68,45 +68,10 @@ module Fluxion
     # codes that count as success. `dnf check-update` exits 100 when updates
     # are available, which is the answer to the question, not a failure.
     def action_argv(action : PackageAction) : {Array(String), Set(Int32)}
-      ok = Set{0}
-      case self
-      in .apt?
-        case action.action
-        when "update"       then {["sudo", "apt-get", "update"] + action.args, ok}
-        when "upgrade"      then {["sudo", "apt-get", "upgrade", "-y"] + action.args, ok}
-        when "dist-upgrade" then {["sudo", "apt-get", "dist-upgrade", "-y"] + action.args, ok}
-        else                     raise unsupported(action)
-        end
-      in .dnf?
-        case action.action
-        when "check-update" then {["sudo", "dnf", "check-update"] + action.args, Set{0, 100}}
-        when "upgrade"      then {["sudo", "dnf", "upgrade", "-y"] + action.args, ok}
-        when "swap"         then {["sudo", "dnf", "swap", "-y"] + action.args, ok}
-        when "groupupdate", "group-update"
-          {["sudo", "dnf", "groupupdate", "-y"] + action.args, ok}
-        else raise unsupported(action)
-        end
-      in .pacman?, .paru?, .yay?
-        case action.action
-        when "sync-upgrade", "syu", "upgrade"
-          {["sudo", "pacman", "-Syu", "--noconfirm"] + action.args, ok}
-        else raise unsupported(action)
-        end
-      in .zypper?
-        prefix = ["sudo", "zypper", "--non-interactive"]
-        case action.action
-        when "refresh"  then {prefix + ["refresh"] + action.args, ok}
-        when "update"   then {prefix + ["update", "-y"] + action.args, ok}
-        when "dup"      then {prefix + ["dup", "-y"] + action.args, ok}
-        when "dup-from" then {prefix + ["dup", "-y", "--from"] + action.args, ok}
-        else                 raise unsupported(action)
-        end
-      in .cargo?, .flatpak?
-        # The same helper its four siblings use, so this arm names the manager
-        # and the action rather than leaving the reader to guess which of the
-        # two it was.
-        raise unsupported(action)
-      end
+      entry = PackageAction.entry_for(self, action.action)
+      raise unsupported(action) unless entry
+      prefix, ok = entry
+      {prefix + action.args, ok}
     end
 
     # Argv that reports whether a package is already installed, without

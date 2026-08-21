@@ -113,12 +113,12 @@ module Fluxion::Executor
       timeout = update.timeout
 
       case manager
-      when .zypper?
+      in .zypper?
         prefix = ["sudo", "zypper", "--non-interactive"]
         refresh = Command.new(prefix + ["refresh"], timeout: timeout)
         return [refresh] if update.refresh_only?
         [refresh, Command.new(prefix + [update.dist_upgrade? ? "dup" : "update", "-y"], timeout: timeout)]
-      when .dnf?
+      in .dnf?
         # `dnf check-update` exits 100 when updates are available, which is the
         # answer to the question rather than a failure.
         if update.refresh_only?
@@ -127,21 +127,21 @@ module Fluxion::Executor
         else
           [Command.new(["sudo", "dnf", "upgrade", "-y", "--refresh"], timeout: timeout)]
         end
-      when .pacman?, .paru?, .yay?
+      in .pacman?, .paru?, .yay?
         argv = update.refresh_only? ? ["sudo", "pacman", "-Sy", "--noconfirm"] : ["sudo", "pacman", "-Syu", "--noconfirm"]
         [Command.new(argv, timeout: timeout)]
-      when .apt?
+      in .apt?
         refresh = Command.new(["sudo", "apt-get", "update"], timeout: timeout)
         return [refresh] if update.refresh_only?
         verb = update.dist_upgrade? ? "full-upgrade" : "upgrade"
         [refresh, Command.new(["sudo", "apt-get", verb, "-y"], timeout: timeout)]
-      else
+      in .cargo?, .flatpak?
         # Not `[] of Command`. `run_commands` treats an empty sequence as done,
         # so a manager with no branch here reported `✔ ok` having run nothing,
-        # and `RunSummary#ok?` then exited 0. `step_parser` rejects the two
-        # managers that legitimately have no system-update path before a step
-        # can be built, so reaching this means the enum grew and this table did
-        # not.
+        # and `RunSummary#ok?` then exited 0. `step_parser` rejects these two
+        # before a step can be built, so this arm is unreachable in practice —
+        # it exists so the `case` stays exhaustive and a new enum member fails
+        # to compile here instead of failing mid-apply.
         raise ExecutionError.new(
           "No system-update commands defined for #{manager.config_name}")
       end

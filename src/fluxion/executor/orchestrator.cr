@@ -94,7 +94,13 @@ module Fluxion::Executor
           return @summary unless source_setups_succeeded?(profile)
 
           run_phases(phases)
-          @recorder.resume_at(nil) if @summary.next_phase.nil? && @summary.ok?
+
+          # Clearing the resume point says "there is nothing left to do". A
+          # cancelled run reaches here with no phases selected — a profile whose
+          # every phase was filtered out — and has plenty left to do.
+          if @summary.next_phase.nil? && @summary.ok? && !@cancellation.cancelled?
+            @recorder.resume_at(nil)
+          end
         ensure
           @recorder.flush
         end
@@ -107,8 +113,7 @@ module Fluxion::Executor
       private def run_phases(phases : Array(Phase)) : Nil
         phases.each do |phase|
           if @cancellation.cancelled?
-            @summary.next_phase = phase.name
-            @listener.on_event(ExecutionEvent.cancelled(phase.name, phase.name))
+            cancel_at(phase.name)
             break
           end
 
@@ -144,11 +149,28 @@ module Fluxion::Executor
             @recorder.resume_at(@summary.next_phase)
             break
           in PhaseOutcome::Cancelled
-            @summary.next_phase = phase.name
-            @recorder.resume_at(phase.name)
+            cancel_at(phase.name)
             break
           end
         end
+      end
+
+      # The single exit for cancellation, so every path that notices the signal
+      # records the same resume point and announces it the same way.
+      #
+      # The two arms above used to do half of this each: the one between phases
+      # emitted the event without writing the resume point to the state file,
+      # and the one for a phase interrupted mid-flight wrote the resume point
+      # without emitting anything. The second is the path a real Ctrl-C almost
+      # always takes — the signal arrives while a step is running, not in the
+      # window between two phases — and `ExecutionEvent.cancelled` is the only
+      # thing that makes `CLI::Reporter` print "Stopped at your request; state
+      # was saved" and the TUI show its cancellation notice. So the common
+      # interruption saved a resume point that nothing ever told the user about.
+      private def cancel_at(phase_name : String) : Nil
+        @summary.next_phase = phase_name
+        @recorder.resume_at(phase_name)
+        @listener.on_event(ExecutionEvent.cancelled(phase_name, phase_name))
       end
 
       # The dependency that stops this phase running, or nil.
@@ -184,9 +206,26 @@ module Fluxion::Executor
 
           step_failed = step_failed?(step)
           failed ||= step_failed
+
+          # Asked after every step, including the last, because the check at the
+          # top of the loop cannot see a cancellation that arrived *during* a
+          # step: `step_failed?` abandons its item loop on the signal and
+          # reports `false` — nothing failed — which is indistinguishable from
+          # every item having run. Without this the phase would be announced and
+          # recorded as completed, fingerprint and all, and the next
+          # `--skip-already-installed` run would skip the items that never ran.
+          #
+          # It comes before the `Failed` return because a signal that arrives
+          # during a step which also had a failed item is still a stop the user
+          # asked for: the `Failed` arm in `run_phases` records no resume point,
+          # while a phase stopped part-way through has to be resumable from
+          # itself.
+          return PhaseOutcome::Cancelled if @cancellation.cancelled?
           return PhaseOutcome::Failed if step_failed && !phase.continue_on_step_error?
         end
 
+        # Before the logout branch below for the same reason: the `Halted` arm
+        # points the resume at the phase *after* this one.
         return PhaseOutcome::Failed if failed
 
         @listener.on_event(ExecutionEvent.phase_completed(phase.name))
@@ -291,10 +330,8 @@ module Fluxion::Executor
       private def skip_decision(item : StepItem) : InstallationStatus?
         return unless @options.mode.probes?
 
-        if @options.mode.trusts_state?
-          if recorded = @recorder.recorded(item)
-            return recorded
-          end
+        if recorded = @recorder.recorded(item)
+          return recorded
         end
 
         status = @probes.probe(item, @runner)
@@ -305,16 +342,23 @@ module Fluxion::Executor
       # in either plain or TUI mode: a run that waits for input is a run that
       # hangs unattended.
 
-      # False when a source setup failed or the run was cancelled, in which case
-      # the caller stops: the packages that follow depend on the repository
-      # these configure.
+      # False when a source setup failed, in which case the caller stops: the
+      # packages that follow depend on the repository these configure.
+      #
+      # Cancellation deliberately does not answer false here. It stops the
+      # remaining setups but lets the caller carry on to `run_phases`, which
+      # owns cancellation: its first check records the resume point and emits
+      # the `Cancelled` event. Reporting cancellation as "the setups did not
+      # succeed" made `walk` return immediately instead, so a run interrupted
+      # during its source setups was the one cancellation that saved no resume
+      # point and told the user nothing.
       #
       # Named as a predicate, and for success, because its sibling
       # `step_failed?` returns true for the opposite outcome — two bare `Bool`s
       # with opposite polarity and verb names read identically at the call site.
       private def source_setups_succeeded?(profile : Profile) : Bool
         profile.source_setups.each do |setup|
-          return false if @cancellation.cancelled?
+          break if @cancellation.cancelled?
 
           unless @executors.for(setup.step)
             # A source setup Fluxion cannot perform would leave later package
@@ -324,7 +368,13 @@ module Fluxion::Executor
             return @options.read_only?
           end
 
-          return false if step_failed?(setup.step) && !@options.read_only?
+          if step_failed?(setup.step) && !@options.read_only?
+            # A setup that failed *because* the user interrupted it is a
+            # cancellation, not a failure, and belongs to `run_phases` like
+            # every other one.
+            break if @cancellation.cancelled?
+            return false
+          end
         end
 
         true
@@ -382,11 +432,19 @@ module Fluxion::Executor
 
       # What a prior run recorded about this item, if anything.
       #
+      # Nothing is answered from state unless the run mode trusts it: a
+      # `--reprobe` run must consult live probes only. The rule lives here, next
+      # to the state document it governs and beside the same check in
+      # `already_completed?`, rather than in the caller — a caller that forgot
+      # it would silently get state-trusting behaviour in every mode.
+      #
       # Answered from the document the recorder already holds. The store's own
       # lookup re-reads and re-parses the whole state file on every call, so
       # asking it once per item made a run cost a file read and a JSON parse
       # per package — the same mistake buffering the writes here avoids.
       def recorded(item : StepItem) : InstallationStatus::InstalledFromState?
+        return unless @options.mode.trusts_state?
+
         record = document.try(&.find(item.step_name, item.key, item.item_type.json_name))
         return unless record
 

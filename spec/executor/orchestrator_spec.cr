@@ -29,13 +29,28 @@ private class ExplodingRunner < Fluxion::Executor::FakeShellRunner
   end
 end
 
+# Trips the cancellation signal as soon as a matching command has run, standing
+# in for Ctrl-C arriving while a step is part-way through its items.
+private class CancellingRunner < Fluxion::Executor::FakeShellRunner
+  def initialize(@trigger : String, @cancellation : Fluxion::CancellationSignal)
+    super()
+  end
+
+  def run(command : Fluxion::Executor::Command, &sink : String ->) : Fluxion::ProcessResult
+    result = super(command, &sink)
+    @cancellation.cancel if command.argv.join(' ').includes?(@trigger)
+    result
+  end
+end
+
 private def run(subject : Fluxion::Profile,
                 runner : Fluxion::Executor::FakeShellRunner = Fluxion::Executor::FakeShellRunner.new,
                 options : Fluxion::Executor::RunOptions = Fluxion::Executor::RunOptions.new,
-                store : Fluxion::State::Store? = nil)
+                store : Fluxion::State::Store? = nil,
+                cancellation : Fluxion::CancellationSignal = Fluxion::CancellationSignal.new)
   listener = Fluxion::RecordingExecutionListener.new
   orchestrator = Fluxion::Executor::Orchestrator.new(runner, state: store)
-  summary = orchestrator.run(subject, options, listener)
+  summary = orchestrator.run(subject, options, listener, cancellation)
   {summary, listener, runner}
 end
 
@@ -232,6 +247,121 @@ describe Fluxion::Executor::Orchestrator do
     summary.succeeded.should eq(1)
   end
 
+  describe "cancellation" do
+    it "announces a cancellation that arrived while a phase was running" do
+      # The interrupt almost always lands while a step is mid-flight rather than
+      # in the gap between two phases, and the `Cancelled` event is the only
+      # thing that makes the reporter say the stop was clean and where to
+      # resume. That path used to save the resume point and say nothing.
+      cancellation = Fluxion::CancellationSignal.new
+      runner = CancellingRunner.new("install -y git", cancellation)
+      subject = profile([phase("base", [packages("tools", "git", "curl")] of Fluxion::Step)])
+
+      summary, listener, _ = run(subject, runner, cancellation: cancellation)
+
+      cancelled = listener.events.select(&.kind.cancelled?)
+      cancelled.size.should eq(1)
+      cancelled.first.step_name.should eq("base")
+      summary.next_phase.should eq("base")
+      # The signal is cooperative: the item in flight finishes, the next does
+      # not start.
+      runner.ran?("install -y curl").should be_false
+    end
+
+    it "announces a cancellation that arrived during a step that also failed" do
+      # A phase that stops on the first failing step used to return `Failed`
+      # before anything looked at the signal, so interrupting a run whose
+      # current step happened to have a failed item was reported as a failure
+      # and recorded no resume point — the user asked to stop and was told
+      # something broke.
+      cancellation = Fluxion::CancellationSignal.new
+      runner = CancellingRunner.new("install -y broken", cancellation)
+      runner.on("install -y broken", 1)
+      subject = profile([
+        phase("base", [packages("tools", "broken", "curl", continue_on_error: false)] of Fluxion::Step,
+          continue_on_step_error: false),
+      ])
+
+      summary, listener, _ = run(subject, runner, cancellation: cancellation)
+
+      cancelled = listener.events.select(&.kind.cancelled?)
+      cancelled.size.should eq(1)
+      summary.next_phase.should eq("base")
+      summary.failed_phases.should be_empty
+    end
+
+    it "announces a cancellation that arrived during a failing source setup" do
+      # Same shape one layer up: a source setup that both failed and was
+      # interrupted answered "the setups did not succeed", and the traversal
+      # returned before the cancellation could be recorded.
+      cancellation = Fluxion::CancellationSignal.new
+      runner = CancellingRunner.new("epel-release", cancellation)
+      runner.on("epel-release", 1)
+      setup = packages("epel", "epel-release", continue_on_error: false)
+      subject = Fluxion::Profile.new("test", Fluxion::TargetOs.new(Fluxion::Distribution::Fedora),
+        [phase("base", [packages("tools", "git")] of Fluxion::Step)],
+        source_setups: [Fluxion::SourceSetup.new(setup, Fluxion::PackageManager::Dnf)])
+
+      summary, listener, _ = run(subject, runner, cancellation: cancellation)
+
+      listener.events.count(&.kind.cancelled?).should eq(1)
+      summary.next_phase.should eq("base")
+    end
+
+    it "announces a cancellation that arrived during the source setups" do
+      # Cancelling here used to hand "the setups did not succeed" back to the
+      # traversal, which returned at once — the one interruption that recorded
+      # no resume point and told the user nothing.
+      cancellation = Fluxion::CancellationSignal.new
+      runner = CancellingRunner.new("install -y epel-release", cancellation)
+      subject = Fluxion::Profile.new("test", Fluxion::TargetOs.new(Fluxion::Distribution::Fedora),
+        [phase("base", [packages("tools", "git")] of Fluxion::Step)],
+        source_setups: [
+          Fluxion::SourceSetup.new(packages("epel", "epel-release"), Fluxion::PackageManager::Dnf),
+          Fluxion::SourceSetup.new(packages("extras", "rpmfusion-free"), Fluxion::PackageManager::Dnf),
+        ])
+
+      summary, listener, _ = run(subject, runner, cancellation: cancellation)
+
+      listener.events.count(&.kind.cancelled?).should eq(1)
+      summary.next_phase.should eq("base")
+      # Neither the remaining setup nor the phase it prepared may run.
+      runner.ran?("install -y rpmfusion-free").should be_false
+      runner.ran?("install -y git").should be_false
+    end
+
+    it "does not treat a phase cancelled during its last step as completed" do
+      # Recording it as completed, fingerprint and all, made the next
+      # `--skip-already-installed` run skip the items that never ran.
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        cancellation = Fluxion::CancellationSignal.new
+        runner = CancellingRunner.new("install -y git", cancellation)
+        subject = profile([phase("base", [packages("tools", "git", "curl")] of Fluxion::Step)])
+
+        run(subject, runner, cancellation: cancellation, store: store)
+
+        document = store.load("default")
+        document.phases.should be_empty
+        document.next_phase.should eq("base")
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "does not report a cancelled phase as completed to the listener" do
+      cancellation = Fluxion::CancellationSignal.new
+      runner = CancellingRunner.new("install -y git", cancellation)
+      subject = profile([phase("base", [packages("tools", "git", "curl")] of Fluxion::Step)])
+
+      _, listener, _ = run(subject, runner, cancellation: cancellation)
+
+      listener.events.any?(&.kind.phase_completed?).should be_false
+    end
+  end
+
   describe "state" do
     it "records successful items and completed phases" do
       directory = File.tempname("fluxion-state")
@@ -297,6 +427,31 @@ describe Fluxion::Executor::Orchestrator do
         _, _, second = run(changed, options: skipping, store: store)
 
         second.ran?("install -y curl").should be_true
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "ignores what state recorded when the run mode says to reprobe" do
+      # A characterization test, not a regression one: this passed before the
+      # guard moved into `Recorder#recorded` as well. It is here because nothing
+      # pinned the rule at all — `RunMode::LiveReprobe` was not constructed
+      # anywhere in the suite — and the guard is now the recorder's to keep.
+      # `--reprobe` exists for the case where the state file and the machine
+      # have drifted apart, so a recorded item must not skip anything: the only
+      # evidence that counts is a live probe.
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        subject = profile([phase("base", [packages("tools", "git")] of Fluxion::Step)])
+        run(subject, store: store)
+        store.load("default").find("tools", "git", "package").should_not be_nil
+
+        reprobing = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::LiveReprobe)
+        _, _, second = run(subject, options: reprobing, store: store)
+
+        second.ran?("install -y git").should be_true
       ensure
         FileUtils.rm_rf(directory)
       end

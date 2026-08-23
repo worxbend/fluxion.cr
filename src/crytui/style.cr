@@ -106,9 +106,9 @@ module CryTUI
   end
 
   struct Style
-    property foreground : Color?
-    property background : Color?
-    property modifiers : Modifier
+    getter foreground : Color?
+    getter background : Color?
+    getter modifiers : Modifier
 
     def initialize(@foreground = nil, @background = nil, @modifiers = Modifier::None)
     end

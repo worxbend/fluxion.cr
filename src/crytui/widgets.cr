@@ -27,6 +27,17 @@ module CryTUI
     end
 
     struct Block
+      # Which directions a box-drawing glyph's stroke reaches. Distinct from
+      # `Borders`, which says which sides of a block to draw: this describes a
+      # single character.
+      @[Flags]
+      enum BorderConnection
+        Left
+        Right
+        Up
+        Down
+      end
+
       getter title : String | Line?
       getter borders : Borders
       getter style : Style
@@ -54,28 +65,15 @@ module CryTUI
         buffer.set_style(area, @style)
         left, right, top, bottom = area.left, area.right - 1, area.top, area.bottom - 1
         if @borders.top?
-          (left..right).each do |x|
-            symbol = if x == left && @borders.left?
-                       @border_set.top_left
-                     elsif x == right && @borders.right?
-                       @border_set.top_right
-                     else
-                       @border_set.horizontal
-                     end
-            set_border(buffer, x, top, symbol)
-          end
+          render_horizontal_edge(buffer, top, left, right, @border_set.top_left, @border_set.top_right)
         end
+        # A block one row tall has its top and bottom edge on the same row.
+        # `set_border` merges strokes rather than replacing them, so drawing the
+        # bottom there would turn the corners into junctions (`┌` plus `└` is
+        # `├`). The bottom edge is skipped instead, and the row keeps whatever
+        # the top edge drew.
         if @borders.bottom? && bottom != top
-          (left..right).each do |x|
-            symbol = if x == left && @borders.left?
-                       @border_set.bottom_left
-                     elsif x == right && @borders.right?
-                       @border_set.bottom_right
-                     else
-                       @border_set.horizontal
-                     end
-            set_border(buffer, x, bottom, symbol)
-          end
+          render_horizontal_edge(buffer, bottom, left, right, @border_set.bottom_left, @border_set.bottom_right)
         end
         vertical_top = top + (@borders.top? ? 1 : 0)
         vertical_bottom = bottom - (@borders.bottom? ? 1 : 0)
@@ -85,20 +83,41 @@ module CryTUI
             set_border(buffer, right, y, @border_set.vertical) if @borders.right? && right != left
           end
         end
-        if (title = @title) && area.width >= 4
-          # Ratatui writes titles directly after the left border and does not
-          # synthesize padding. Callers include any desired surrounding spaces
-          # in the title itself.
-          title_x = left + (@borders.left? ? 1 : 0)
-          title_line = case title
-                       when Line
-                         title
-                       else
-                         Line.from(title, @border_style)
-                       end
-          title_right = area.right - (@borders.right? ? 1 : 0)
-          title_line.render(buffer, Rect.new(title_x, top, {title_right - title_x, 0}.max, 1), @border_style)
+        render_title(buffer, area)
+      end
+
+      # Draws one horizontal edge of the block: the corner glyphs at whichever
+      # ends have their adjacent side enabled, and the horizontal stroke in
+      # between. The top and the bottom edge differ only in which row they land
+      # on and which pair of corners they end with.
+      private def render_horizontal_edge(buffer : Buffer, row : Int32, left : Int32, right : Int32, start_corner : String, end_corner : String)
+        (left..right).each do |x|
+          symbol = if x == left && @borders.left?
+                     start_corner
+                   elsif x == right && @borders.right?
+                     end_corner
+                   else
+                     @border_set.horizontal
+                   end
+          set_border(buffer, x, row, symbol)
         end
+      end
+
+      # Ratatui writes titles directly after the left border and does not
+      # synthesize padding. Callers include any desired surrounding spaces
+      # in the title itself.
+      private def render_title(buffer : Buffer, area : Rect)
+        title = @title
+        return unless title && area.width >= 4
+        title_x = area.left + (@borders.left? ? 1 : 0)
+        title_line = case title
+                     when Line
+                       title
+                     else
+                       Line.from(title, @border_style)
+                     end
+        title_right = area.right - (@borders.right? ? 1 : 0)
+        title_line.render(buffer, Rect.new(title_x, area.top, {title_right - title_x, 0}.max, 1), @border_style)
       end
 
       # Adjacent blocks may deliberately overlap by one row or column. Merge
@@ -115,36 +134,43 @@ module CryTUI
         buffer.set_string(x, y, rendered, @border_style)
       end
 
-      private def border_connections(symbol : String) : Int32?
+      # Which glyph carries which strokes. This table and `border_symbol` are
+      # inverses of each other, so an entry added to one needs the matching
+      # entry in the other.
+      private def border_connections(symbol : String) : BorderConnection?
         case symbol
-        when "─", "━", "═"      then 0b0011 # left | right
-        when "│", "┃", "║"      then 0b1100 # up | down
-        when "┌", "╭", "┏", "╔" then 0b1010 # right | down
-        when "┐", "╮", "┓", "╗" then 0b1001 # left | down
-        when "└", "╰", "┗", "╚" then 0b0110 # right | up
-        when "┘", "╯", "┛", "╝" then 0b0101 # left | up
-        when "├"                then 0b1110
-        when "┤"                then 0b1101
-        when "┬"                then 0b1011
-        when "┴"                then 0b0111
-        when "┼"                then 0b1111
+        when "─", "━", "═"      then BorderConnection::Left | BorderConnection::Right
+        when "│", "┃", "║"      then BorderConnection::Up | BorderConnection::Down
+        when "┌", "╭", "┏", "╔" then BorderConnection::Right | BorderConnection::Down
+        when "┐", "╮", "┓", "╗" then BorderConnection::Left | BorderConnection::Down
+        when "└", "╰", "┗", "╚" then BorderConnection::Right | BorderConnection::Up
+        when "┘", "╯", "┛", "╝" then BorderConnection::Left | BorderConnection::Up
+        when "├"                then BorderConnection::Right | BorderConnection::Up | BorderConnection::Down
+        when "┤"                then BorderConnection::Left | BorderConnection::Up | BorderConnection::Down
+        when "┬"                then BorderConnection::Left | BorderConnection::Right | BorderConnection::Down
+        when "┴"                then BorderConnection::Left | BorderConnection::Right | BorderConnection::Up
+        when "┼"                then BorderConnection::All
         end
       end
 
-      private def border_symbol(connections : Int32) : String
+      private def border_symbol(connections : BorderConnection) : String
         case connections
-        when 0b0011 then @border_set.horizontal
-        when 0b1100 then @border_set.vertical
-        when 0b1010 then @border_set.top_left
-        when 0b1001 then @border_set.top_right
-        when 0b0110 then @border_set.bottom_left
-        when 0b0101 then @border_set.bottom_right
-        when 0b1110 then "├"
-        when 0b1101 then "┤"
-        when 0b1011 then "┬"
-        when 0b0111 then "┴"
-        when 0b1111 then "┼"
-        else             @border_set.horizontal
+        when BorderConnection::Left | BorderConnection::Right                          then @border_set.horizontal
+        when BorderConnection::Up | BorderConnection::Down                             then @border_set.vertical
+        when BorderConnection::Right | BorderConnection::Down                          then @border_set.top_left
+        when BorderConnection::Left | BorderConnection::Down                           then @border_set.top_right
+        when BorderConnection::Right | BorderConnection::Up                            then @border_set.bottom_left
+        when BorderConnection::Left | BorderConnection::Up                             then @border_set.bottom_right
+        when BorderConnection::Right | BorderConnection::Up | BorderConnection::Down   then "├"
+        when BorderConnection::Left | BorderConnection::Up | BorderConnection::Down    then "┤"
+        when BorderConnection::Left | BorderConnection::Right | BorderConnection::Down then "┬"
+        when BorderConnection::Left | BorderConnection::Right | BorderConnection::Up   then "┴"
+        when BorderConnection::All                                                     then "┼"
+        else
+          # Unreachable: the union of any two table entries is itself a table
+          # entry. The horizontal stroke is an arbitrary stand-in, not a glyph
+          # that means anything for the connections asked for.
+          @border_set.horizontal
         end
       end
     end

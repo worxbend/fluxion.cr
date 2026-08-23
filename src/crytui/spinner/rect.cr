@@ -276,59 +276,40 @@ module CryTUI
     # A RectSpinner fixed to a square, kept because it is the shape most
     # callers want and it reads better at the call site.
     struct SquareSpinner
-      getter tick : Int64
-      getter size : Int32
-      getter spin : Spin
-      getter centre : Centre
-      getter ticks_per_step : Int32
-      getter arc_style : Style
-      getter dim_style : Style
-      getter style : Style
-      getter block : Block?
-      getter alignment : Alignment
+      # Holding the RectSpinner rather than copying its fields keeps the
+      # normalising rules — the size clamp and the ticks-per-step floor — in
+      # one constructor, where they cannot drift apart. Only the default arc
+      # colour differs, so that stays here.
+      @rect : RectSpinner
 
       def initialize(tick : Int = 0,
                      size : Int = 2,
-                     @spin : Spin = Spin::Clockwise,
-                     @centre : Centre = Centre::Filled,
+                     spin : Spin = Spin::Clockwise,
+                     centre : Centre = Centre::Filled,
                      ticks_per_step : Int = 1,
-                     @arc_style : Style = Style.new(Color::WHITE),
-                     @dim_style : Style = Style.new(Color::DARK_GRAY),
-                     @style : Style = Style.new,
-                     @block : Block? = nil,
-                     @alignment : Alignment = Alignment::Left)
-        @tick = tick.to_i64
-        @size = size.to_i.clamp(2, 8)
-        @ticks_per_step = {ticks_per_step.to_i, 1}.max
-      end
-
-      def char_size : Tuple(Int32, Int32)
-        Spinner::SquareEngine.char_size(@size)
-      end
-
-      def lines : Array(Line)
-        rect.lines
-      end
-
-      def render(area : Rect, buffer : Buffer) : Nil
-        rect.render(area, buffer)
-      end
-
-      private def rect : RectSpinner
-        RectSpinner.new(
-          tick: @tick,
+                     arc_style : Style = Style.new(Color::WHITE),
+                     dim_style : Style = Style.new(Color::DARK_GRAY),
+                     style : Style = Style.new,
+                     block : Block? = nil,
+                     alignment : Alignment = Alignment::Left)
+        @rect = RectSpinner.new(
+          tick: tick,
           shape: RectShape::Square,
-          size: @size,
-          spin: @spin,
-          centre: @centre,
-          ticks_per_step: @ticks_per_step,
-          arc_style: @arc_style,
-          dim_style: @dim_style,
-          style: @style,
-          block: @block,
-          alignment: @alignment
+          size: size,
+          spin: spin,
+          centre: centre,
+          ticks_per_step: ticks_per_step,
+          arc_style: arc_style,
+          dim_style: dim_style,
+          style: style,
+          block: block,
+          alignment: alignment
         )
       end
+
+      # `shape` is deliberately absent: a square spinner has no shape to choose.
+      delegate tick, size, spin, centre, ticks_per_step, arc_style, dim_style,
+        style, block, alignment, char_size, lines, render, to: @rect
     end
   end
 end

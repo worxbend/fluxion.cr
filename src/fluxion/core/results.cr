@@ -38,10 +38,7 @@ module Fluxion
       # Version the executor observed after installing, when it could tell.
       getter detected_version : String?
 
-      # Digest of what was actually installed, recorded for provenance.
-      getter checksum : String?
-
-      def initialize(@item : String, @elapsed : Time::Span = Time::Span.zero, @detected_version : String? = nil, @checksum : String? = nil)
+      def initialize(@item : String, @elapsed : Time::Span = Time::Span.zero, @detected_version : String? = nil)
       end
     end
 

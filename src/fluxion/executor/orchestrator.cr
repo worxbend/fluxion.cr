@@ -371,6 +371,7 @@ module Fluxion::Executor
     private class Recorder
       def initialize(@store : State::Store?, @options : RunOptions)
         @document = nil.as(State::Document?)
+        @loaded = false
         @dirty = false
       end
 
@@ -389,10 +390,14 @@ module Fluxion::Executor
         record = document.try(&.find(item.step_name, item.key, item.item_type.json_name))
         return unless record
 
-        # A delegated step is only still done while the config it delegates to
-        # is the one that was applied. The digest is stored in `checksum`, which
-        # is otherwise unused for these kinds, so no new state field is needed
-        # and an older state file simply reports nil and re-runs once.
+        # A step whose work is decided by something outside its item keys — a
+        # delegated tool's config file, a shell script's inline body or remote
+        # sha256 pin, a packages step's pre-install actions — records a digest
+        # of that input, and is only still done while the digest still matches.
+        # That digest is the only thing Fluxion writes to `checksum`, so no new
+        # state field is needed; a state file that predates the digest, or one
+        # migrated from the Java implementation, reports something else and
+        # re-runs the item once.
         expected = item.step.try(&.content_digest)
         return if expected && record.checksum != expected
 
@@ -409,7 +414,7 @@ module Fluxion::Executor
             item_type: item.item_type.json_name,
             completed_at: Time.utc,
             version: result.detected_version,
-            checksum: result.checksum || item.step.try(&.content_digest),
+            checksum: item.step.try(&.content_digest),
           ))
           @dirty = true
         end
@@ -459,8 +464,15 @@ module Fluxion::Executor
         !@options.read_only? && !@store.nil?
       end
 
+      # The state file, read at most once per run.
+      #
+      # The flag remembers that the attempt happened, not just that it
+      # succeeded: a state file that cannot be read leaves `@document` nil, and
+      # guarding on the document alone would send every later caller back to
+      # the store to re-read and re-parse the same unreadable file.
       private def document : State::Document?
-        return @document if @document
+        return @document if @loaded
+        @loaded = true
         store = @store
         return unless store
         @document = store.load(@options.profile_name)

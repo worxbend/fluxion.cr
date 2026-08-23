@@ -51,8 +51,8 @@ module Fluxion::CLI
 
     EXAMPLE_PROFILE = <<-YAML
       # A starting point. Replace it with what your machines actually need.
-      apiVersion: initkit.io/v1alpha1
-      kind: WorkstationProfile
+      apiVersion: #{Config::Manifest::SUPPORTED_API_VERSION}
+      kind: #{Config::Manifest::SUPPORTED_KIND}
       metadata:
         name: workstation
       spec:

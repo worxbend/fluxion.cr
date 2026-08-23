@@ -59,7 +59,7 @@ module Fluxion::CLI
     end
 
     protected def store(source : Registry::Source = self.source) : Registry::Store
-      Registry::Store.new(source)
+      Registry::Store.new(source, deps.host_facts)
     end
 
     protected def git : Registry::Git

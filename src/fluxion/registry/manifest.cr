@@ -127,9 +127,14 @@ module Fluxion::Registry
       entries = parse_entries(diagnostics, root["entries"])
 
       return {nil, diagnostics.diagnostics} if diagnostics.errors?
+      # Unreachable in practice — a missing name recorded an error three
+      # statements up — but written as a guard so the compiler proves it
+      # instead of a `not_nil!` promising it. Parsing a file fetched from a
+      # remote repository is the last place to leave a runtime assertion.
+      return {nil, diagnostics.diagnostics} unless name
 
       manifest = new(
-        name.not_nil!,
+        name,
         entries,
         description: metadata["description"].string?.try(&.strip).presence,
         maintainer: metadata["maintainer"].string?.try(&.strip).presence,
@@ -158,25 +163,8 @@ module Fluxion::Registry
       end
 
       node.each_item do |item|
-        id = item["id"].string?.try(&.strip)
-        if id.nil? || id.empty?
-          diagnostics.error(item["id"].path, "id is required")
-          next
-        end
-
-        unless Entry.valid_id?(id)
-          diagnostics.error(item["id"].path,
-            "id must be lowercase letters, digits, '.', '_', or '-'",
-            "it becomes a filename when installed")
-          next
-        end
-
-        if previous = seen[id]?
-          diagnostics.error(item["id"].path,
-            "duplicates entry '#{id}' first declared at #{previous}")
-          next
-        end
-        seen[id] = item["id"].path
+        id = entry_id(diagnostics, item["id"], seen)
+        next unless id
 
         path = entry_path(diagnostics, item["path"], id)
         next unless path
@@ -193,6 +181,38 @@ module Fluxion::Registry
       end
 
       entries
+    end
+
+    # The id an entry is known by, or nil when the entry cannot have one.
+    #
+    # Three separate rules — present, shaped like a filename, not already
+    # taken — and each of them ends the entry, so they read better as one
+    # question the loop asks than as three guards inside it. The id is claimed
+    # in `seen` before the rest of the entry is parsed, so an entry with an
+    # unusable path still makes a later reuse of its id a duplicate.
+    private def self.entry_id(diagnostics : DiagnosticCollector, node : Config::Node,
+                              seen : Hash(String, String)) : String?
+      id = node.string?.try(&.strip)
+      if id.nil? || id.empty?
+        diagnostics.error(node.path, "id is required")
+        return
+      end
+
+      unless Entry.valid_id?(id)
+        diagnostics.error(node.path,
+          "id must be lowercase letters, digits, '.', '_', or '-'",
+          "it becomes a filename when installed")
+        return
+      end
+
+      if previous = seen[id]?
+        diagnostics.error(node.path,
+          "duplicates entry '#{id}' first declared at #{previous}")
+        return
+      end
+
+      seen[id] = node.path
+      id
     end
 
     # A path is only usable if it stays inside the registry's profile folder.

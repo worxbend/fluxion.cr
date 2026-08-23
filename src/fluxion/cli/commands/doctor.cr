@@ -59,13 +59,13 @@ module Fluxion::CLI
     end
 
     private def render(check : Check, width : Int32) : String
-      label, colour = case check.level
-                      in Level::Pass then {"pass", ->(text : String) { Style.green(text) }}
-                      in Level::Warn then {"warn", ->(text : String) { Style.yellow(text) }}
-                      in Level::Fail then {"fail", ->(text : String) { Style.red(text) }}
-                      end
+      label = case check.level
+              in Level::Pass then Style.green("pass")
+              in Level::Warn then Style.yellow("warn")
+              in Level::Fail then Style.red("fail")
+              end
 
-      "[#{colour.call(label)}] #{Style.pad(check.name, width)}  #{Style.dim(check.detail)}"
+      "[#{label}] #{Style.pad(check.name, width)}  #{Style.dim(check.detail)}"
     end
 
     private def host_checks : Array(Check)
@@ -137,15 +137,7 @@ module Fluxion::CLI
 
         step.delegated_config.try { |config| checks << delegated_check(step, config) }
 
-        case step
-        when DefaultShellStep
-          info = File.info?(step.shell_path)
-          checks << if info && info.permissions.owner_execute?
-            Check.new(Level::Pass, "shell path", step.shell_path)
-          else
-            Check.new(Level::Fail, "shell path", "#{step.shell_path} is not executable")
-          end
-        end
+        step.required_executable.try { |path| checks << executable_check(path) }
       end
 
       checks
@@ -154,6 +146,14 @@ module Fluxion::CLI
     private def command_check(command : String, required : Bool = true) : Check
       return Check.new(Level::Pass, "#{command} command", command) if Host.command_exists?(command)
       Check.new(required ? Level::Fail : Level::Warn, "#{command} command", "not found on PATH")
+    end
+
+    # Deliberately does not require a regular file: the executor rejects that
+    # case at run time, and `doctor` reports the one thing the user can fix.
+    private def executable_check(path : String) : Check
+      info = File.info?(path)
+      return Check.new(Level::Pass, "shell path", path) if info && info.permissions.owner_execute?
+      Check.new(Level::Fail, "shell path", "#{path} is not executable")
     end
   end
 
@@ -219,30 +219,30 @@ module Fluxion::CLI
       return findings unless info && info.file? && info.size <= MAX_DELEGATED_CONFIG_BYTES
 
       body = File.read(step.config)
-      document = YAML.parse(body)
-      return findings unless document.as_h?.try(&.[]?(YAML::Any.new("apiVersion"))).try(&.as_s?) == BINSTALLER_API_VERSION
+      # The same walker the profile loader uses. A missing key yields a node
+      # rather than nil, so reaching `spec.policy.mode` in a file that has
+      # neither is a lookup rather than a chain of nil checks.
+      root = Config::Node.root(YAML.parse(body))
+      return findings unless root["apiVersion"].string? == BINSTALLER_API_VERSION
 
-      spec = document.as_h?.try(&.[]?(YAML::Any.new("spec"))).try(&.as_h?)
-      mode = spec.try(&.[]?(YAML::Any.new("policy"))).try(&.as_h?)
-        .try(&.[]?(YAML::Any.new("mode"))).try(&.as_s?)
-      unless mode == "strict"
+      spec = root["spec"]
+      unless spec["policy"]["mode"].string? == "strict"
         findings << Finding.new(Diagnostic::Severity::Warning, "binstaller-not-strict", step.name,
           "#{File.basename(step.config)} does not set spec.policy.mode: strict, " \
           "so missing checksums and mutable URLs are only flagged rather than refused")
       end
 
-      unpinned = spec.try(&.[]?(YAML::Any.new("plan"))).try(&.as_a?).try do |plan|
-        plan.compact_map do |entry|
-          mapping = entry.as_h?
-          next unless mapping
-          download = mapping[YAML::Any.new("spec")]?.try(&.as_h?)
-            .try(&.[]?(YAML::Any.new("download"))).try(&.as_h?)
-          next if download.try(&.[]?(YAML::Any.new("checksum")))
-          mapping[YAML::Any.new("name")]?.try(&.as_s?)
-        end
+      unpinned = spec["plan"].items.compact_map do |entry|
+        # A plan of bare tool names is an ordinary shape for this file, and
+        # those entries have no checksum to look for.
+        next unless entry.mapping?
+        # A declared-but-empty `checksum:` counts as declared: the file is
+        # another tool's to interpret, and lint only reports the absent key.
+        next unless entry["spec"]["download"]["checksum"].missing?
+        entry["name"].string?
       end
 
-      if unpinned && !unpinned.empty?
+      unless unpinned.empty?
         findings << Finding.new(Diagnostic::Severity::Warning, "binstaller-unpinned", step.name,
           "#{unpinned.size == 1 ? "1 entry declares" : "#{unpinned.size} entries declare"} " \
           "no checksum: #{unpinned.first(5).join(", ")}")
@@ -250,11 +250,12 @@ module Fluxion::CLI
 
       findings
     rescue
-      # Advisory by contract. The file belongs to another tool, is written by
-      # hand, and an empty placeholder or a plan of bare tool names is an
-      # ordinary state for it to be in — `YAML::Any#[]` raises rather than
-      # returning nil for those, which turned `lint` into a crash with a
-      # contextless message naming neither the file nor the step.
+      # Advisory by contract. The file belongs to another tool and is written
+      # by hand, so it can be anything up to and including text `YAML.parse`
+      # refuses, which turned `lint` into a crash with a contextless message
+      # naming neither the file nor the step. The shapes that used to raise
+      # further down — an empty placeholder, a plan of bare tool names — are
+      # ordinary states for it to be in, and the walk above absorbs them.
       [] of Finding
     end
 
@@ -346,10 +347,14 @@ module Fluxion::CLI
 
     private def render_text(profile : Profile, findings : Array(Finding)) : Nil
       value = score(findings)
-      colour = value >= 90 ? ->(text : String) { Style.green(text) } : value >= 70 ? ->(text : String) { Style.yellow(text) } : ->(text : String) { Style.red(text) }
+      styled_score = case value
+                     when .>=(90) then Style.green(value.to_s)
+                     when .>=(70) then Style.yellow(value.to_s)
+                     else              Style.red(value.to_s)
+                     end
 
       puts "Profile: #{Style.bold(profile.name)}"
-      puts "Quality score: #{colour.call(value.to_s)}#{Style.dim("/100")}"
+      puts "Quality score: #{styled_score}#{Style.dim("/100")}"
 
       if findings.empty?
         puts

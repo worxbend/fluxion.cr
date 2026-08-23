@@ -7,7 +7,13 @@ module Fluxion::Registry
 
     getter source : Source
 
-    def initialize(@source : Source)
+    # Host facts arrive from the caller so a profile's `when` rules are judged
+    # against the host the command was told about rather than the process it
+    # happens to run in — `Deps#host_facts` is the seam a spec overrides to
+    # describe a machine it is not running on. The default is there for the
+    # callers that have no `Deps` in hand; `Host.facts` memoises, so taking it
+    # costs one read of /etc/os-release per process at most.
+    def initialize(@source : Source, @host_facts : HostFacts = Host.facts)
     end
 
     # The registry's manifest, with any diagnostics it produced.
@@ -191,7 +197,7 @@ module Fluxion::Registry
 
     # Parses the profile to prove it is usable, discarding the result.
     private def validate!(entry : Entry, body : String, path : String) : Nil
-      Config::Loader.load_string(body, File.dirname(path), path, Host.facts)
+      Config::Loader.load_string(body, File.dirname(path), path, @host_facts)
     rescue error : ValidationError
       raise ExecutionError.new(
         "'#{entry.id}' is not a valid profile, so it was not installed:\n#{error.message}")

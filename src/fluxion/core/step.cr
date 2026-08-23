@@ -121,6 +121,14 @@ module Fluxion
       [] of String
     end
 
+    # An absolute path that must already exist and be executable before this
+    # step can do anything. Distinct from `required_commands`, which are names
+    # resolved on PATH; this one is a literal path the profile chose. Nil for
+    # every kind that needs no such file, which is all of them but one today.
+    def required_executable : String?
+      nil
+    end
+
     # Path to another tool's config file, for the kinds that delegate their
     # work — binstaller, dotbot, nerd-fonts. Nil for every kind that does its
     # own work, which is most of them.

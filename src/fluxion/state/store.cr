@@ -55,8 +55,11 @@ module Fluxion::State
     def initialize(@phase, @status, @completed_at, @fingerprint = nil, @reason = nil)
     end
 
+    # Compared against the enum the writer records with, so the on-disk
+    # spelling of a status is decided in one place. An exact match: a status
+    # this reader does not recognise is a phase that has to run again.
     def completed? : Bool
-      @status == "completed"
+      @status == PhaseStatus::Completed.json_name
     end
   end
 
@@ -304,6 +307,7 @@ module Fluxion::State
     # item costs a file read and a JSON parse per package — quadratic in the
     # size of the state file over a run. Callers load a `Document` once and use
     # `Document#find`, which is the same answer without the re-read.
+
     private def prepare_directory : Nil
       return if Dir.exists?(@root)
       Dir.mkdir_p(@root, DIRECTORY_MODE)

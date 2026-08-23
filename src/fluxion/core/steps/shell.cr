@@ -382,6 +382,13 @@ module Fluxion
     def summary : String
       "login shell #{@shell_path}"
     end
+
+    # Setting a login shell that does not exist locks the user out of their own
+    # account, so the path is a precondition of the kind rather than a check
+    # `doctor` invented for it.
+    def required_executable : String?
+      @shell_path
+    end
   end
 
   # `type: assert` — require a host condition before continuing.

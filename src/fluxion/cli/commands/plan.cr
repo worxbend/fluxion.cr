@@ -258,7 +258,7 @@ module Fluxion::CLI
       # Nodes first, then edges: Mermaid accepts either, but grouping them
       # keeps a hand-edited diagram readable.
       puts "flowchart TD"
-      profile.phases.each { |phase| puts %(  #{node_id(phase.name)}["#{escape(phase.name)}"]) }
+      profile.phases.each { |phase| puts %(  #{node_id(phase.name)}["#{mermaid_label(phase.name)}"]) }
       profile.phases.each do |phase|
         phase.depends_on.each { |dependency| puts "  #{node_id(dependency)} --> #{node_id(phase.name)}" }
       end
@@ -267,9 +267,9 @@ module Fluxion::CLI
     private def render_dot(profile : Profile) : Nil
       puts "digraph fluxion {"
       puts "  rankdir=LR;"
-      profile.phases.each { |phase| puts %(  "#{escape(phase.name)}";) }
+      profile.phases.each { |phase| puts %(  "#{dot_escape(phase.name)}";) }
       profile.phases.each do |phase|
-        phase.depends_on.each { |dependency| puts %(  "#{escape(dependency)}" -> "#{escape(phase.name)}";) }
+        phase.depends_on.each { |dependency| puts %(  "#{dot_escape(dependency)}" -> "#{dot_escape(phase.name)}";) }
       end
       puts "}"
     end
@@ -293,13 +293,25 @@ module Fluxion::CLI
     end
 
     # Mermaid identifiers cannot contain punctuation, so the name is sanitized
-    # for the node id and kept verbatim in the label.
+    # for the node id; the display name is escaped separately by
+    # `mermaid_label`, because the two dialects do not escape alike.
     private def node_id(name : String) : String
       "p_#{name.gsub(/[^A-Za-z0-9_]/, "_")}"
     end
 
-    private def escape(text : String) : String
+    # Graphviz quotes a label and escapes an inner quote or backslash with a
+    # backslash.
+    private def dot_escape(text : String) : String
       text.gsub('\\', "\\\\").gsub('"', "\\\"")
+    end
+
+    # Mermaid has no escape character inside a quoted label: a backslash is an
+    # ordinary character there, and a quote ends the label early no matter what
+    # precedes it. The HTML entity is the one way to show a quote, so a phase
+    # named `Install "dev" tools` renders as written instead of as a broken
+    # node.
+    private def mermaid_label(name : String) : String
+      name.gsub('"', "#quot;")
     end
   end
 end

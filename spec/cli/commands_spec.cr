@@ -63,6 +63,27 @@ private VALID_PROFILE = <<-YAML
               apps: [com.spotify.Client]
   YAML
 
+# A phase name carrying a double quote, which the schema allows: only blank and
+# duplicate phase names are rejected. Mermaid and Graphviz disagree about how
+# such a name is written into a label, so the graph renderers need it.
+private QUOTED_PHASE_PROFILE = <<-YAML
+  apiVersion: initkit.io/v1alpha1
+  kind: WorkstationProfile
+  metadata:
+    name: p
+  spec:
+    target:
+      os:
+        distribution: fedora
+    phases:
+      - name: 'Install "dev" tools'
+        steps:
+          - name: tools
+            kind: dnf-packages
+            spec:
+              packages: [git]
+  YAML
+
 describe Fluxion::CLI::App do
   it "prints usage and exits cleanly with no arguments" do
     result = invoke_all([] of String)
@@ -373,6 +394,24 @@ describe Fluxion::CLI::GraphCommand do
       YAML
 
     result.stdout.should contain("p_base_cli_tools")
+  end
+
+  it "escapes a quote in a Mermaid label with the entity Mermaid understands" do
+    # A backslash escape is Graphviz's rule, not Mermaid's: inside a quoted
+    # Mermaid label a quote ends the label whatever precedes it, so a
+    # backslash-escaped one produces a broken node.
+    result = invoke("graph", profile: QUOTED_PHASE_PROFILE)
+
+    result.success?.should be_true
+    result.stdout.should contain(%(["Install #quot;dev#quot; tools"]))
+    result.stdout.should_not contain("\\\"")
+  end
+
+  it "keeps the Graphviz backslash escape in dot output" do
+    result = invoke("graph", "--format", "dot", profile: QUOTED_PHASE_PROFILE)
+
+    result.success?.should be_true
+    result.stdout.should contain(%("Install \\"dev\\" tools";))
   end
 end
 

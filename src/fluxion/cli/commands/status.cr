@@ -63,11 +63,14 @@ module Fluxion::CLI
     def self.build(profile : Profile, runner : Executor::ShellRunner,
                    probes : Executor::ProbeRegistry, store : State::Store,
                    profile_name : String) : self
-      document = begin
-        store.load(profile_name)
-      rescue ExecutionError
-        State::Document.new(profile_name)
-      end
+      # A state file that cannot be read is reported rather than replaced with
+      # an empty document: the store raises only for reasons that matter — the
+      # file is not a regular file, another account can write to it, its JSON
+      # is unreadable, or a newer Fluxion wrote it — and a report that quietly
+      # dropped half its inputs would say "state-only: 0" while meaning
+      # "state: unknown". A profile with no state file yet is not one of those
+      # reasons: `State::Store#load` returns an empty document for it.
+      document = store.load(profile_name)
 
       registry = Executor::ExecutorRegistry.default
 
@@ -75,7 +78,7 @@ module Fluxion::CLI
       # order is preserved through both the sweep and the zip below, so the
       # report reads in the order the profile is written.
       items = [] of StepItem
-      profile.steps.each do |step|
+      declared_steps(profile).each do |step|
         executor = registry.for(step)
         next unless executor
         executor.items(step).each { |item| items << item }
@@ -101,6 +104,20 @@ module Fluxion::CLI
       end
 
       new(profile, entries)
+    end
+
+    # Everything the orchestrator would carry out, in the order it does so:
+    # the source setups first, because the repositories and remotes they add
+    # are what the packages after them install from (see
+    # `Executor::Orchestrator#source_setups_succeeded?`), then the steps of
+    # every phase.
+    #
+    # Sweeping `profile.steps` alone left every repository and Flatpak remote
+    # out of the report — those live in `profile.source_setups`, not in any
+    # phase — and a previous run's record of one was then reported as
+    # "no longer declared" even though `spec.sources` still declares it.
+    private def self.declared_steps(profile : Profile) : Array(Step)
+      profile.source_setups.map(&.step) + profile.steps
     end
 
     private def self.identity(step : String, key : String, type : String) : String
@@ -258,8 +275,6 @@ module Fluxion::CLI
     # The filters are deliberately not combinable: each answers one question,
     # and intersecting them produces a set nobody asked for.
     private def filtered(report : StatusReport) : Array(StatusReport::Entry)
-      return [] of StatusReport::Entry if @summary_only
-
       if @failed
         wanted = [StatusReport::Classification::Missing,
                   StatusReport::Classification::Unknown,
@@ -303,6 +318,18 @@ module Fluxion::CLI
     end
 
     private def render_json(report : StatusReport, entries : Array(StatusReport::Entry)) : Nil
+      # `--summary` promises the aggregate counts and nothing else, so the
+      # listing is left out rather than emitted empty. An empty `items` next to
+      # a `summary` counting forty-two of them is a document that contradicts
+      # itself, and a program reading `items` would believe the wrong half.
+      if @summary_only
+        puts({
+          "profileName" => report.profile.name,
+          "summary"     => report.summary,
+        }.to_json)
+        return
+      end
+
       puts({
         "profileName" => report.profile.name,
         "summary"     => report.summary,
@@ -450,14 +477,21 @@ module Fluxion::CLI
 
       profile = report.profile
       phase = profile.phases.find { |candidate| candidate.steps.any?(&.name.== entry.step) }
-
+      # JSON keeps `phase` null when there is no phase: a null is a value a
+      # program can test, whereas a parenthesised label is prose.
       if @format.json?
         puts(entry_json(entry).merge({"phase" => phase.try(&.name)}).to_json)
         return ExitCode::Success
       end
 
+      # A source setup belongs to no phase — it runs before all of them — so
+      # the text view names where the item came from rather than calling it
+      # "(unknown)".
+      origin = phase.try(&.name) ||
+               (profile.source_setups.any?(&.name.== entry.step) ? "(source setup)" : "(unknown)")
+
       puts "#{Style.bold("Item:")} #{Style.bold(entry.display)}"
-      puts "#{Style.dim("Phase:")}  #{phase.try(&.name) || "(unknown)"}"
+      puts "#{Style.dim("Phase:")}  #{origin}"
       puts "#{Style.dim("Step:")}   #{entry.step}"
       puts "#{Style.dim("Type:")}   #{entry.type}"
       puts "#{Style.dim("Status:")} #{colour_for(entry.classification, entry.classification.label)}"

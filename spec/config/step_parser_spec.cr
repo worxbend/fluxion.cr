@@ -41,6 +41,40 @@ describe Fluxion::Config::StepParser do
       message.should contain("the digest is what makes the key trustworthy")
     end
 
+    it "does not also call a rejected key URL missing" do
+      # The URL is declared, so "gpgCheck requires a signing-key URL" on top of
+      # the scheme complaint would tell the same path first that its value is
+      # wrong and then that it is absent.
+      result = parse_step(<<-STEP)
+        - name: docker
+          kind: rpm-repository
+          spec:
+            baseUrl: https://download.docker.com/linux/fedora/stable
+            gpgKeyUrl: http://download.docker.com/linux/fedora/gpg
+            checksum:
+              algorithm: sha256
+              value: #{SHA}
+        STEP
+
+      result.error_messages.any?(&.includes?("must use https")).should be_true
+      result.error_messages.any?(&.includes?("requires a signing-key URL")).should be_false
+    end
+
+    it "still requires a key when neither half of the pair is declared" do
+      # An explicitly null `gpgKeyUrl` counts as undeclared, so the trust check
+      # has to keep firing for it rather than reading the key as "reported on".
+      result = parse_step(<<-STEP)
+        - name: docker
+          kind: rpm-repository
+          spec:
+            baseUrl: https://download.docker.com/linux/fedora/stable
+            gpgKeyUrl:
+            checksum:
+        STEP
+
+      result.error_messages.any?(&.includes?("requires a signing-key URL")).should be_true
+    end
+
     it "refuses an enabled repository that disables gpgCheck" do
       result = parse_step(<<-STEP)
         - name: docker
@@ -278,6 +312,54 @@ describe Fluxion::Config::StepParser do
   end
 
   describe "system kinds" do
+    it "reports a file-writes step whose file list is empty" do
+      # An empty list used to drop the whole step from the profile without a
+      # word, so `validate` reported success while `plan` showed nothing.
+      result = parse_step(<<-STEP)
+        - name: configs
+          kind: file-writes
+          spec:
+            files: []
+        STEP
+
+      message = result.error_messages.find!(&.includes?("must contain at least one file"))
+      message.should contain("spec.files")
+      result.profile.steps.should be_empty
+    end
+
+    it "reports a file-writes step whose file list is not a list" do
+      result = parse_step(<<-STEP)
+        - name: configs
+          kind: file-writes
+          spec:
+            files:
+              destination: /etc/tool.conf
+              content: enabled=true
+        STEP
+
+      result.error_messages.any?(&.includes?("must contain at least one file")).should be_true
+    end
+
+    it "reports a group entry it cannot read instead of dropping it" do
+      # A mapping in the list used to vanish, so the plan added the user to
+      # fewer groups than the profile declares and `validate` said nothing.
+      result = parse_step(<<-STEP)
+        - name: g
+          kind: user-groups
+          spec:
+            groups:
+              - docker
+              - name: wheel
+        STEP
+
+      result.error_messages.any?(&.includes?("must be a group name")).should be_true
+    end
+
+    it "still reads a bare scalar group list" do
+      result = parse_step("- name: g\n  kind: user-groups\n  spec:\n    groups: docker\n")
+      result.error_messages.should be_empty
+    end
+
     it "rejects group-removal syntax" do
       result = parse_step("- name: g\n  kind: user-groups\n  spec:\n    groups: ['-docker']\n")
       message = result.error_messages.find!(&.includes?("append-only"))

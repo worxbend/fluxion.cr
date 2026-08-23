@@ -23,14 +23,14 @@ end
 # binaries it provides indented under it, and a source in parentheses when the
 # crate came from a git checkout or a local path instead of crates.io.
 private CARGO_LISTING = <<-LISTING
-fd-find v10.2.0:
-    fd
-ripgrep v14.1.0:
-    rg
-mycrate v0.1.0 (/home/me/src):
-    mycrate
+  fd-find v10.2.0:
+      fd
+  ripgrep v14.1.0:
+      rg
+  mycrate v0.1.0 (/home/me/src):
+      mycrate
 
-LISTING
+  LISTING
 
 private def cargo_runner(exit_code : Int32 = 0,
                          stdout : String = CARGO_LISTING) : Fluxion::Executor::FakeShellRunner

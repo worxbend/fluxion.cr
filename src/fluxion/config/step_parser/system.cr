@@ -3,7 +3,20 @@ module Fluxion::Config
   module StepParser
     private def user_groups(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
       groups_node = node["groups"]
-      groups = groups_node.string_list
+      # `Node#string_list` drops an item it cannot read as a scalar, so a list
+      # holding a mapping added the user to fewer groups than the profile
+      # declares, with no diagnostic. A declared list is walked so each
+      # unreadable item is named; a bare scalar (`groups: docker`) still goes
+      # through `string_list`, which reads it as a one-element list.
+      groups = if groups_node.sequence?
+                 groups_node.items.compact_map do |entry|
+                   value = entry.string?
+                   context.error(entry.path, "must be a group name") if value.nil?
+                   value
+                 end
+               else
+                 groups_node.string_list
+               end
 
       if groups.empty?
         context.error(groups_node.path, "requires at least one group")
@@ -192,12 +205,13 @@ module Fluxion::Config
         file_write_entry(context, entry, "#{name}[#{index}]")
       end.compact
 
-      # An entry that resolves to no files is dropped rather than failing:
-      # every file may legitimately have been excluded by its own `when`.
-      return if files.empty? && files_node.present?
-
       if files.empty?
-        context.error(node.path, "must contain at least one file")
+        # A step that declares no usable file used to disappear from the plan
+        # without a word, so `validate` reported success while `plan` showed
+        # nothing. Point at the declared list when there is one, and at the
+        # spec itself when neither `files` nor `writes` was declared with a
+        # value — an explicit `files:` holding nothing reads as absent here.
+        context.error(files_node.present? ? files_node.path : node.path, "must contain at least one file")
         return
       end
       report_duplicates(context, files_node.path, files.map(&.item_key), "destination")

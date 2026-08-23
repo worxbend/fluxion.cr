@@ -381,17 +381,22 @@ module Fluxion::Config
     # order is undefined rather than merely surprising.
     private def validate_graph(context : Context, phases : Array(Phase)) : Nil
       names = phases.map(&.name).to_set
+      resolvable = true
       phases.each_with_index do |phase, index|
         phase.depends_on.each do |dependency|
           next if names.includes?(dependency)
+          resolvable = false
           context.error("spec.phases[#{index}].dependsOn",
             "phase '#{phase.name}' declares dependency on unknown phase '#{dependency}'")
         end
       end
 
-      # A cycle can only be looked for once the graph is otherwise sound; a
-      # missing or duplicated name would report as a cycle and mislead.
-      return if context.diagnostics.errors?
+      # A cycle can only be looked for once every name resolves: an unknown
+      # dependency leaves `Phase#ordered_phases`' ready set empty too, and would
+      # be reported as a cycle it is not. Any other error in the profile is no
+      # reason to stay silent about the graph — the point of collecting
+      # diagnostics is that one run names every mistake.
+      return unless resolvable
 
       begin
         Profile.new("graph-check", TargetOs.new(Distribution::Fedora), phases).ordered_phases

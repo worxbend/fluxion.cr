@@ -264,6 +264,31 @@ describe Fluxion::Config::Manifest do
       result.error_messages.any?(&.includes?("Circular dependency")).should be_true
     end
 
+    it "reports a dependency cycle even when another field is also wrong" do
+      # The cycle check used to be skipped whenever anything else in the run had
+      # reported, so a profile with both faults took two runs to fix: one to
+      # learn about the package name, another to learn about the graph.
+      result = ProfileHelpers.parse(ProfileHelpers.manifest_phases(<<-PHASES))
+        - name: a
+          dependsOn: [b]
+          steps:
+            - name: a-tools
+              kind: dnf-packages
+              spec:
+                packages: ["-rf"]
+        - name: b
+          dependsOn: [a]
+          steps:
+            - name: b-tools
+              kind: dnf-packages
+              spec:
+                packages: [curl]
+        PHASES
+
+      result.error_messages.any?(&.includes?("must not be interpreted as an option")).should be_true
+      result.error_messages.any?(&.includes?("Circular dependency")).should be_true
+    end
+
     it "orders phases by their dependencies rather than by declaration" do
       result = ProfileHelpers.parse(ProfileHelpers.manifest_phases(<<-PHASES))
         - name: desktop
@@ -625,6 +650,50 @@ describe Fluxion::Config::Manifest do
       result.errors.should be_empty
       candidates = result.step("sdks").as(Fluxion::SdkmanPackagesStep).candidates
       candidates.map(&.to_s).should eq(["maven", "java 21.0.2-tem"])
+    end
+
+    it "reports a package entry it cannot name instead of dropping it" do
+      # A dropped entry means the plan installs fewer packages than the profile
+      # lists, which used to happen with no diagnostic at all.
+      result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+        - name: tools
+          kind: dnf-packages
+          spec:
+            packages:
+              - git
+              - version: "1.2"
+              - []
+        STEPS
+
+      messages = result.error_messages.select(&.includes?("must be a package name or an object with a name"))
+      messages.size.should eq(2)
+      messages.any?(&.includes?("spec.phases[0].steps[0].spec.packages[1]")).should be_true
+    end
+
+    it "still accepts a package entry written in the object form" do
+      result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+        - name: tools
+          kind: dnf-packages
+          spec:
+            packages:
+              - name: git
+        STEPS
+
+      result.errors.should be_empty
+      result.step("tools").as(Fluxion::PackagesStep).packages.should eq(["git"])
+    end
+
+    it "reports a Flatpak app id it cannot read instead of dropping it" do
+      result = ProfileHelpers.parse(ProfileHelpers.manifest(<<-STEPS), ProfileHelpers.fedora_host)
+        - name: apps
+          kind: flatpak-packages
+          spec:
+            apps:
+              - com.spotify.Client
+              - id: org.gnome.Calculator
+        STEPS
+
+      result.error_messages.any?(&.includes?("must be a Flatpak application id")).should be_true
     end
 
     it "rejects shell metacharacters in a sdkman candidate" do

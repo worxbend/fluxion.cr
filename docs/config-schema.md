@@ -640,8 +640,8 @@ package kinds so Fluxion can still isolate and report individual packages.
 ```
 
 Each item needs an absolute `destination` and exactly one of a string `content`
-or an absolute local `source`. Optional fields are `owner`, `group`, `mode`, and
-an item-level `when`. `writes` is accepted as an alias for `files`.
+or an absolute local `source`. Optional fields are `owner`, `group` and `mode`.
+`writes` is accepted as an alias for `files`.
 
 There is no per-item `sudo`. Fluxion derives the privilege it needs from the
 destination's parent directory: an unprivileged atomic rename when that
@@ -650,8 +650,8 @@ root-owned directory, and a refusal otherwise. So an item cannot ask for a
 privileged write into a directory it can already write, nor opt out of `sudo`
 for somewhere like `/etc`.
 
-An entry whose items are all excluded by their own `when` is dropped rather than
-failed.
+The list has to hold at least one usable item. An empty list, or one whose every
+item was rejected, is reported as an error rather than dropped from the plan.
 
 ### `nerd-fonts`
 

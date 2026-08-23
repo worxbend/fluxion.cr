@@ -18,7 +18,12 @@ module Fluxion::Config
 
       packages_node = spec["packages"]
       packages = packages_node.items.compact_map do |entry|
-        entry.scalar? ? entry.string? : context.optional_string(entry["name"])
+        value = entry.scalar? ? entry.string? : context.optional_string(entry["name"])
+        # A dropped entry means the plan installs fewer packages than the
+        # profile lists, so say which entry cannot be named rather than
+        # shrinking the list in silence.
+        context.error(entry.path, "must be a package name or an object with a name") if value.nil?
+        value
       end
 
       if packages.empty?
@@ -62,7 +67,20 @@ module Fluxion::Config
       # Flatpak CLI and most published fragments use that name.
       ids_node = spec["apps"]
       ids_node = spec["appIds"] unless ids_node.present?
-      app_ids = ids_node.string_list
+      # `Node#string_list` drops an item it cannot read as a scalar, which for a
+      # declared list means installing fewer apps than the profile asks for. A
+      # declared list is walked here so each unreadable item is named; a bare
+      # scalar (`apps: com.spotify.Client`) still goes through `string_list`,
+      # which reads it as a one-element list.
+      app_ids = if ids_node.sequence?
+                  ids_node.items.compact_map do |entry|
+                    value = entry.string?
+                    context.error(entry.path, "must be a Flatpak application id") if value.nil?
+                    value
+                  end
+                else
+                  ids_node.string_list
+                end
 
       if app_ids.empty?
         context.error(spec["apps"].path, "must contain at least one item")

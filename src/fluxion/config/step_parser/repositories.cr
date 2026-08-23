@@ -186,7 +186,14 @@ module Fluxion::Config
       gpg_check = context.bool(node["gpgCheck"], true)
       key = signing_key(context, node["gpgKeyUrl"], node["checksum"], label)
 
-      if gpg_check && key.nil?
+      # The one path on which `signing_key` returns nil without having said
+      # anything: neither half of the pair was declared. When either half IS
+      # declared it has already reported — a bad URL, a bad digest, or the two
+      # not being configured together — and "requires a signing-key URL" on top
+      # of that reads as a second, contradictory fault at the same path.
+      # `present?` rather than `missing?`, so an explicit `gpgKeyUrl:` null is
+      # still treated as undeclared and still rejected.
+      if gpg_check && key.nil? && !node["gpgKeyUrl"].present? && !node["checksum"].present?
         context.error(node["gpgKeyUrl"].path, "gpgCheck requires a signing-key URL")
       end
       if enabled && !gpg_check

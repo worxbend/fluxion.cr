@@ -1,4 +1,52 @@
 module Fluxion
+  # The pre-install actions each manager accepts, mapped to the argv prefix
+  # that runs them and the exit codes that count as success.
+  #
+  # A module rather than constants on `PackageManager` itself, because Crystal
+  # reads an uppercase assignment inside an `enum` body as a member and rejects
+  # a value that is not an integer. `PackageManager#action_table` is what the
+  # rest of the codebase asks; nothing outside this file names these tables.
+  module PackageActionTable
+    OK        = Set{0}
+    OK_OR_100 = Set{0, 100}
+
+    PACMAN_SYU     = ["sudo", "pacman", "-Syu", "--noconfirm"]
+    ZYPPER_COMMAND = ["sudo", "zypper", "--non-interactive"]
+
+    # One table per manager, below. Declaration order inside each is the order
+    # `fluxion kinds` prints the actions in, so the keys are listed the way
+    # they should read.
+
+    NO_ACTIONS = {} of String => {Array(String), Set(Int32)}
+
+    APT_ACTIONS = {
+      "update"       => {["sudo", "apt-get", "update"], OK},
+      "upgrade"      => {["sudo", "apt-get", "upgrade", "-y"], OK},
+      "dist-upgrade" => {["sudo", "apt-get", "dist-upgrade", "-y"], OK},
+    }
+
+    DNF_ACTIONS = {
+      "check-update" => {["sudo", "dnf", "check-update"], OK_OR_100},
+      "upgrade"      => {["sudo", "dnf", "upgrade", "-y"], OK},
+      "swap"         => {["sudo", "dnf", "swap", "-y"], OK},
+      "groupupdate"  => {["sudo", "dnf", "groupupdate", "-y"], OK},
+      "group-update" => {["sudo", "dnf", "groupupdate", "-y"], OK},
+    }
+
+    PACMAN_ACTIONS = {
+      "sync-upgrade" => {PACMAN_SYU, OK},
+      "syu"          => {PACMAN_SYU, OK},
+      "upgrade"      => {PACMAN_SYU, OK},
+    }
+
+    ZYPPER_ACTIONS = {
+      "refresh"  => {ZYPPER_COMMAND + ["refresh"], OK},
+      "update"   => {ZYPPER_COMMAND + ["update", "-y"], OK},
+      "dup"      => {ZYPPER_COMMAND + ["dup", "-y"], OK},
+      "dup-from" => {ZYPPER_COMMAND + ["dup", "-y", "--from"], OK},
+    }
+  end
+
   # Every package manager Fluxion can drive.
   #
   # Flatpak and Cargo sit alongside the system managers because profiles select
@@ -64,11 +112,35 @@ module Fluxion
       end
     end
 
+    # The pre-install actions this manager has, keyed by verb.
+    #
+    # An exhaustive `case`, like the sibling argv methods, so that adding a
+    # ninth manager is a compile error here rather than a manager that quietly
+    # accepts no actions at all.
+    def action_table : Hash(String, {Array(String), Set(Int32)})
+      case self
+      in .apt?                   then PackageActionTable::APT_ACTIONS
+      in .dnf?                   then PackageActionTable::DNF_ACTIONS
+      in .pacman?, .paru?, .yay? then PackageActionTable::PACMAN_ACTIONS
+      in .zypper?                then PackageActionTable::ZYPPER_ACTIONS
+      in .cargo?, .flatpak?      then PackageActionTable::NO_ACTIONS
+      end
+    end
+
+    def supports_action?(action : String) : Bool
+      action_table.has_key?(action.strip.downcase)
+    end
+
+    # In declaration order, which is the order `fluxion kinds` prints.
+    def supported_actions : Array(String)
+      action_table.keys
+    end
+
     # Argv for a pre-install action such as a metadata refresh, plus the exit
     # codes that count as success. `dnf check-update` exits 100 when updates
     # are available, which is the answer to the question, not a failure.
     def action_argv(action : PackageAction) : {Array(String), Set(Int32)}
-      entry = PackageAction.entry_for(self, action.action)
+      entry = action_table[action.action]?
       raise unsupported(action) unless entry
       prefix, ok = entry
       {prefix + action.args, ok}

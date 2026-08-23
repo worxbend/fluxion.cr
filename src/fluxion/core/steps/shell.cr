@@ -56,8 +56,7 @@ module Fluxion
 
     # An empty `allowedExitCodes` means "only zero", not "any code". Both
     # including structs normalise through this in their constructor rather than
-    # repeating the conditional, which is what the previous private class-level
-    # version was for — except nothing ever called it.
+    # repeating the conditional.
     protected def self.normalize_exit_codes(codes : Array(Int32)) : Array(Int32)
       codes.empty? ? [0] : codes
     end
@@ -178,10 +177,9 @@ module Fluxion
 
   # `type: shell-script` — run local or HTTPS-fetched shell scripts.
   class ShellScriptStep < Step
-    # Named for what it holds, matching `ShellCommandStep#commands`. It was
-    # `@items` with a `getter items` that `Step`'s own `items` override silently
-    # shadowed, so the class had two names for one collection and one of them
-    # was unreachable.
+    # Named `scripts`, not `items`, and matching `ShellCommandStep#commands`:
+    # `Step#items` is the `ItemRef` view, and an `items` getter here would be
+    # shadowed by that override.
     getter scripts : Array(ShellScriptItem)
     getter working_dir : String?
 
@@ -196,9 +194,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String
@@ -227,12 +224,10 @@ module Fluxion
       item.shell || @shell
     end
 
-    # Inline bodies live in the profile but in no item key, so editing one
-    # would otherwise leave a completed phase looking unchanged and be skipped.
+    # Inline bodies and remote `sha256` pins live in the profile but in no item
+    # key, so editing a body or re-pinning a URL would otherwise leave a
+    # completed phase looking unchanged and be skipped.
     def content_digest : String?
-      # Inline bodies live in the profile but in no item key. A remote script's
-      # `sha256` is the same shape of problem: the item key is the URL, so
-      # re-pinning to a new release left the step looking unchanged.
       inputs = @scripts.compact_map do |script|
         digest = script.sha256
         script.content.try { |body| "content=#{body}" } || digest.try { |sha| "sha256=#{sha.value}" }
@@ -267,9 +262,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String
@@ -304,9 +298,8 @@ module Fluxion
       name : String,
       @shell : ShellKind = ShellKind::Zsh,
       description : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, false, nil, condition)
+      super(name, description, false, nil)
     end
 
     def kind : String
@@ -342,9 +335,8 @@ module Fluxion
       @shell_path : String,
       description : String? = nil,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, false, probe_command, condition)
+      super(name, description, false, probe_command)
     end
 
     def kind : String
@@ -384,9 +376,8 @@ module Fluxion
       @shell : String = DEFAULT_SHELL,
       @working_dir : String? = nil,
       description : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, false, nil, condition)
+      super(name, description, false, nil)
     end
 
     def kind : String
@@ -426,9 +417,8 @@ module Fluxion
       @message : String,
       description : String? = nil,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, false, probe_command, condition)
+      super(name, description, false, probe_command)
     end
 
     def kind : String
@@ -491,9 +481,8 @@ module Fluxion
       @resume_from : ResumeMode = ResumeMode::Next,
       @exit_code : Int32 = DEFAULT_EXIT_CODE,
       description : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, false, nil, condition)
+      super(name, description, false, nil)
     end
 
     def kind : String

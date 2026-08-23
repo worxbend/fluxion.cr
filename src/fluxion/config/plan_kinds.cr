@@ -35,8 +35,8 @@ module Fluxion::Config
       # Pre-install actions this kind's `spec.actions` accepts.
       #
       # Asked of the manager rather than written out here. It used to be a
-      # literal per kind, and those literals were verbatim copies of
-      # `PackageAction::SUPPORTED` in core — the parser validated against the
+      # literal per kind, and those literals were verbatim copies of the
+      # action table in core — the parser validated against the
       # core copy while `fluxion kinds` printed this one, with nothing
       # comparing them. A new action added to one was either silently rejected
       # or silently undocumented, which is exactly the drift this table's own

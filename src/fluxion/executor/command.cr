@@ -42,8 +42,9 @@ module Fluxion::Executor
   # Two rules, both about not trusting `PATH` for anything that runs as root:
   #
   # * A privileged effect always becomes `sudo -n -- <target> ...`. `-n` means
-  #   it can never sit waiting for a password on a terminal nobody is watching;
-  #   authentication happens once, up front, through the preflight.
+  #   it can never sit waiting for a password on a terminal nobody is watching:
+  #   with no cached credential the command fails immediately instead of
+  #   hanging.
   # * The target is resolved to a real path under a root-owned system
   #   directory. Otherwise a writable directory earlier on `PATH` would decide
   #   what runs as root.
@@ -80,22 +81,6 @@ module Fluxion::Executor
       return 3 if argv.size >= 4 && argv[1] == "-n" && argv[2] == "--"
       return 1 if argv.size >= 2 && !argv[1].starts_with?('-')
       nil
-    end
-
-    # Confirms sudo is usable without prompting. Run once before any mutation.
-    def validate_argv : Array(String)
-      [executable, "-n", "-v"]
-    end
-
-    # Validates a password read from the user, with the prompt suppressed
-    # because Fluxion has already drawn its own.
-    def validate_with_password_argv : Array(String)
-      [executable, "-S", "-p", "", "-v"]
-    end
-
-    # Drops the cached credential at the end of a run.
-    def invalidate_argv : Array(String)
-      [executable, "-k"]
     end
 
     def executable : String

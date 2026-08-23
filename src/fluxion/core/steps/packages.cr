@@ -11,56 +11,15 @@ module Fluxion
       @action = action.strip.downcase
     end
 
-    OK        = Set{0}
-    OK_OR_100 = Set{0, 100}
-
-    PACMAN_SYU = ["sudo", "pacman", "-Syu", "--noconfirm"]
-    ZYPPER     = ["sudo", "zypper", "--non-interactive"]
-
-    PACMAN_ACTIONS = {
-      "sync-upgrade" => {PACMAN_SYU, OK},
-      "syu"          => {PACMAN_SYU, OK},
-      "upgrade"      => {PACMAN_SYU, OK},
-    }
-
-    # The actions each manager accepts, mapped to the argv prefix that runs
-    # them and the exit codes that count as success.
-    SUPPORTED = {
-      PackageManager::Apt => {
-        "update"       => {["sudo", "apt-get", "update"], OK},
-        "upgrade"      => {["sudo", "apt-get", "upgrade", "-y"], OK},
-        "dist-upgrade" => {["sudo", "apt-get", "dist-upgrade", "-y"], OK},
-      },
-      PackageManager::Dnf => {
-        "check-update" => {["sudo", "dnf", "check-update"], OK_OR_100},
-        "upgrade"      => {["sudo", "dnf", "upgrade", "-y"], OK},
-        "swap"         => {["sudo", "dnf", "swap", "-y"], OK},
-        "groupupdate"  => {["sudo", "dnf", "groupupdate", "-y"], OK},
-        "group-update" => {["sudo", "dnf", "groupupdate", "-y"], OK},
-      },
-      PackageManager::Pacman => PACMAN_ACTIONS,
-      PackageManager::Paru   => PACMAN_ACTIONS,
-      PackageManager::Yay    => PACMAN_ACTIONS,
-      PackageManager::Zypper => {
-        "refresh"  => {ZYPPER + ["refresh"], OK},
-        "update"   => {ZYPPER + ["update", "-y"], OK},
-        "dup"      => {ZYPPER + ["dup", "-y"], OK},
-        "dup-from" => {ZYPPER + ["dup", "-y", "--from"], OK},
-      },
-    }
-
+    # Which verbs exist is the manager's own knowledge, alongside its install
+    # and query argv — these two read as questions about an action, so they
+    # stay here and forward.
     def self.supported?(manager : PackageManager, action : String) : Bool
-      !!SUPPORTED[manager]?.try(&.has_key?(action.strip.downcase))
+      manager.supports_action?(action)
     end
 
     def self.supported_for(manager : PackageManager) : Array(String)
-      SUPPORTED[manager]?.try(&.keys) || [] of String
-    end
-
-    # The argv prefix and success codes for this action under `manager`, or nil
-    # when the manager does not have the verb.
-    def self.entry_for(manager : PackageManager, action : String)
-      SUPPORTED[manager]?.try(&.[]?(action))
+      manager.supported_actions
     end
 
     def to_s(io : IO) : Nil
@@ -87,9 +46,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = true,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String
@@ -145,9 +103,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = true,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String
@@ -192,9 +149,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = true,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String
@@ -245,9 +201,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = true,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String
@@ -292,9 +247,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String

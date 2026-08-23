@@ -67,10 +67,11 @@ module Fluxion
 
     # The step's `when` guard. Nil when the step declared none.
     #
-    # Settable because a step carries its `when` and `execution.continueOnError`
-    # alongside the `spec` it is built from, and threading both through every
-    # kind's constructor would add two parameters to twenty-seven signatures
-    # for no gain.
+    # Settable rather than a constructor argument because
+    # `Config::Manifest#parse_step` resolves the `when` block before the step
+    # exists — it skips outright a step whose guard is unmet — and
+    # `#build_step` then uses the surviving condition to relax the
+    # package-manager check before assigning it to the finished step.
     property condition : Condition?
 
     setter continue_on_error : Bool
@@ -80,7 +81,6 @@ module Fluxion
       @description : String? = nil,
       @continue_on_error : Bool = false,
       @probe_command : String? = nil,
-      @condition : Condition? = nil,
     )
     end
 
@@ -94,11 +94,11 @@ module Fluxion
     # Abstract, and answered by the step, because this value is load-bearing
     # well past the executor: it is what the state file persists, the key
     # `ProbeRegistry` dispatches on, and half of `status`'s dedupe identity.
-    # It used to be decided by a `case` over the step hierarchy, which Crystal
-    # cannot check for exhaustiveness — so a new kind whose arm nobody added
-    # fell through to a default and recorded its items under the wrong type,
-    # with no compile error to say so. As an abstract method the compiler
-    # refuses to build a subclass that forgets it.
+    # A `case` over the step hierarchy cannot be checked for exhaustiveness by
+    # Crystal, so a new kind whose arm nobody added would fall through to a
+    # default and record its items under the wrong type, with no compile error
+    # to say so. As an abstract method the compiler refuses to build a subclass
+    # that forgets it.
     abstract def item_type : ItemType
 
     # Everything this step installs, in declaration order.

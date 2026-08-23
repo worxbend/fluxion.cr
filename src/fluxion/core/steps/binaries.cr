@@ -74,9 +74,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def delegation_inputs : Array(String)
@@ -128,9 +127,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String
@@ -172,9 +170,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String
@@ -252,9 +249,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def kind : String
@@ -295,9 +291,8 @@ module Fluxion
       description : String? = nil,
       continue_on_error : Bool = false,
       probe_command : String? = nil,
-      condition : Condition? = nil,
     )
-      super(name, description, continue_on_error, probe_command, condition)
+      super(name, description, continue_on_error, probe_command)
     end
 
     def self.commit?(revision : String) : Bool

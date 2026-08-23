@@ -80,10 +80,8 @@ module Fluxion
       getter message : String
       getter exit_code : Int32
 
-      # `next_plan_entry` used to sit here, always passed nil and never read —
-      # a third word for "phase" alongside `phase` and `step`. Where to resume
-      # is `RunSummary#next_phase`, decided by the orchestrator, which is the
-      # only thing that knows what comes next. The `nextPlanEntry` key in
+      # Where to resume is `RunSummary#next_phase`, decided by the orchestrator
+      # — the only thing that knows what comes next. The `nextPlanEntry` key in
       # `State::Store` is unrelated: it is the legacy Java spelling, kept
       # because those state files are read directly.
       def initialize(@item : String, @message : String, @exit_code : Int32 = 75)
@@ -108,6 +106,15 @@ module Fluxion
   abstract struct InstallationStatus
     abstract def item : String
 
+    # How this status reads in `status`, in `plan`, and as a skipped item's
+    # reason.
+    #
+    # Answered by each variant rather than by a `case` over the hierarchy,
+    # which Crystal cannot check for exhaustiveness — a fifth variant whose arm
+    # nobody added would write nothing at all, and render as an empty string
+    # with no compile error to say so.
+    abstract def to_s(io : IO) : Nil
+
     # A prior run recorded this as successfully installed.
     struct InstalledFromState < InstallationStatus
       getter item : String
@@ -115,6 +122,12 @@ module Fluxion
       getter version : String?
 
       def initialize(@item : String, @installed_at : Time, @version : String? = nil)
+      end
+
+      def to_s(io : IO) : Nil
+        io << "installed (state"
+        @version.try { |value| io << ": " << value }
+        io << ')'
       end
     end
 
@@ -125,6 +138,12 @@ module Fluxion
 
       def initialize(@item : String, @detected_version : String? = nil)
       end
+
+      def to_s(io : IO) : Nil
+        io << "installed (probe"
+        @detected_version.try { |value| io << ": " << value }
+        io << ')'
+      end
     end
 
     # Neither state nor probe can confirm it. Treated as absent.
@@ -132,6 +151,10 @@ module Fluxion
       getter item : String
 
       def initialize(@item : String)
+      end
+
+      def to_s(io : IO) : Nil
+        io << "not installed"
       end
     end
 
@@ -143,34 +166,14 @@ module Fluxion
 
       def initialize(@item : String, @reason : String)
       end
+
+      def to_s(io : IO) : Nil
+        io << "unknown: " << @reason
+      end
     end
 
     def installed? : Bool
       is_a?(InstalledFromState) || is_a?(InstalledByProbe)
     end
-
-    def to_s(io : IO) : Nil
-      case status = self
-      when InstalledFromState
-        io << "installed (state"
-        status.version.try { |value| io << ": " << value }
-        io << ')'
-      when InstalledByProbe
-        io << "installed (probe"
-        status.detected_version.try { |value| io << ": " << value }
-        io << ')'
-      when NotInstalled then io << "not installed"
-      when Unknown      then io << "unknown: " << status.reason
-      end
-    end
   end
-
-  # Deliberately absent: a `SkipDecision` variant type pairing an item key with
-  # the `InstallationStatus` that justified skipping it.
-  #
-  # It was declared and documented here but never constructed anywhere in `src`
-  # or `spec`, while `Orchestrator#skip_decision` answered the same question
-  # with a plain nilable `InstallationStatus` — which is all the caller needs,
-  # since it already knows the item. Reintroducing the type means finding a
-  # second caller first.
 end

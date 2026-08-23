@@ -260,17 +260,10 @@ module Fluxion
     # key, so editing a body or re-pinning a URL would otherwise leave a
     # completed phase looking unchanged and be skipped.
     def content_digest : String?
-      inputs = @scripts.compact_map do |script|
+      Step.digest_of(@scripts.compact_map do |script|
         digest = script.sha256
         script.content.try { |body| "content=#{body}" } || digest.try { |sha| "sha256=#{sha.value}" }
-      end
-      return if inputs.empty?
-      # Length-prefixed, like the phase fingerprint in `Store`: a bare
-      # separator between bodies lets one script's text spill across the
-      # boundary and impersonate its neighbour.
-      accumulator = Digest::SHA256.new
-      inputs.each { |value| accumulator << value.bytesize.to_s << ":" << value }
-      accumulator.hexfinal
+      end)
     end
 
     def summary : String
@@ -308,6 +301,40 @@ module Fluxion
 
     def items : Array(ItemRef)
       @commands.map { |command| item(command.name, "command") }
+    end
+
+    # An item key here is the command's `name`, which is the command itself
+    # only when the profile wrote the item as a bare string or a bare array.
+    # An item that carries its own `name:`, and a mapping item that gives
+    # `argv:` without a name (the parser then names it `step[index]`), hide
+    # what they run from the fingerprint — so editing the command behind a
+    # stable name left a completed phase looking unchanged and it was skipped
+    # without running anything. This is the same hole
+    # `ShellScriptStep#content_digest` closes for inline bodies.
+    #
+    # A shell string whose name already *is* that string contributes nothing:
+    # it is in the item key already, and hashing it a second time would give
+    # every bare-string profile — which is nearly all of them — a digest where
+    # it used to have none, invalidating completed phases for no gain.
+    #
+    # An argv vector always contributes, even when the auto-generated name
+    # matches, because the key holds only the joined *text* and the text loses
+    # what the vector said. `["echo", "hello world"]` and
+    # `["echo hello", "world"]` are both named "echo hello world", and a bare
+    # string rewritten as the equivalent array crosses the shell/direct-exec
+    # boundary this file's header calls load-bearing while the name does not
+    # move. Each element is inspected so the boundaries between them survive
+    # the join.
+    def content_digest : String?
+      Step.digest_of(@commands.compact_map do |command|
+        if argv = command.argv
+          next "argv=#{argv.map(&.inspect).join(' ')}"
+        end
+
+        executed = command.shell_command
+        next if executed.nil? || executed == command.name
+        "command=#{executed}"
+      end)
     end
 
     def requires_approval?(item_key : String) : Bool

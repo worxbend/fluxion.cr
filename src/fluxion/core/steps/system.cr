@@ -141,6 +141,21 @@ module Fluxion
       "#{@scope}:#{key}"
     end
 
+    # An item key is `global:user.email` — the setting's name, never the value
+    # it is being set to. Correcting a mistyped address therefore changed
+    # nothing the phase fingerprint could see, so a completed phase stayed
+    # completed and the old address stayed in `~/.gitconfig`.
+    #
+    # Each entry carries its role for the reason `DelegatedConfig` documents:
+    # the digest sees one flat list, so an unlabelled value could be read as
+    # the scope beside it.
+    def content_digest : String?
+      return if @entries.empty?
+      inputs = ["scope=#{@scope}"]
+      sorted_keys.each { |key| inputs << "entry=#{key}=#{@entries[key]}" }
+      Step.digest_of(inputs)
+    end
+
     def summary : String
       "#{@entries.size} git config entr#{@entries.size == 1 ? "y" : "ies"}"
     end
@@ -201,6 +216,23 @@ module Fluxion
 
     def items : Array(ItemRef)
       @repos.map { |repo| item(repo.destination, "git-repo") }
+    end
+
+    # An item key is the destination directory — where the clone lands, not
+    # what is meant to be in it. Bumping the pinned `ref` is the one edit this
+    # kind exists for, and it left the phase fingerprint identical, so a
+    # completed phase was skipped and the old commit stayed checked out.
+    def content_digest : String?
+      return if @repos.empty?
+      inputs = [] of String
+      @repos.each do |repo|
+        inputs << "url=#{repo.url}"
+        inputs << "destination=#{repo.destination}"
+        inputs << "ref=#{repo.ref}"
+        inputs << "depth=#{repo.depth}"
+        inputs << "submodules=#{repo.submodules?}"
+      end
+      Step.digest_of(inputs)
     end
 
     def summary : String
@@ -319,6 +351,23 @@ module Fluxion
       @units.map { |unit| item(unit.qualified_name, "systemd-unit") }
     end
 
+    # An item key is the unit's name, and every field that says what should
+    # happen to that unit — enabled, masked, started or stopped — lives beside
+    # it and reached no digest. Turning `enabled: true` into `masked: true` is
+    # the opposite instruction under an unchanged key, so a completed phase was
+    # skipped and the unit kept running.
+    def content_digest : String?
+      return if @units.empty?
+      inputs = ["scope=#{@scope}"]
+      @units.each do |unit|
+        inputs << "unit=#{unit.qualified_name}"
+        inputs << "enabled=#{unit.enabled?}"
+        inputs << "state=#{unit.state}"
+        inputs << "masked=#{unit.masked?}"
+      end
+      Step.digest_of(inputs)
+    end
+
     def summary : String
       "#{Text.pluralize(@units.size, "unit")} (#{@scope})"
     end
@@ -374,6 +423,21 @@ module Fluxion
 
     def items : Array(ItemRef)
       item_keys.map { |key| item(key, "system-setting") }
+    end
+
+    # The item keys are the bare setting names — `timezone`, `hostname`,
+    # `locale:LANG` — so moving the machine from `UTC` to `Europe/Warsaw`
+    # produced an identical fingerprint and the completed phase was skipped
+    # with the old zone still set.
+    def content_digest : String?
+      return if empty?
+      inputs = [] of String
+      @local_rtc.try { |value| inputs << "localRtc=#{value}" }
+      @ntp.try { |value| inputs << "ntp=#{value}" }
+      @timezone.try { |value| inputs << "timezone=#{value}" }
+      @hostname.try { |value| inputs << "hostname=#{value}" }
+      @locale.keys.sort!.each { |key| inputs << "locale:#{key}=#{@locale[key]}" }
+      Step.digest_of(inputs)
     end
 
     def summary : String
@@ -436,6 +500,29 @@ module Fluxion
 
     def items : Array(ItemRef)
       @files.map { |file| item(file.item_key, "file-write", file.name) }
+    end
+
+    # The item key is the destination — where the file lands, not what it should
+    # contain. Everything that decides the contents is in no key at all, and
+    # unlike the other kinds there is no file-write probe to catch the drift on
+    # a second pass: `ProbeRegistry.default` registers none, so a completed
+    # phase whose inline content was edited would be skipped forever.
+    #
+    # `source` is hashed as the path it names rather than the bytes at that
+    # path. Reading it here would put IO in a step, which this layer does not
+    # do; the executor compares the real contents before writing anything, so
+    # the cost of missing an edit to a source file is one command that decides
+    # nothing needs doing.
+    def content_digest : String?
+      Step.digest_of(@files.flat_map do |file|
+        values = ["destination=#{file.destination}"]
+        file.content.try { |body| values << "content=#{body}" }
+        file.source.try { |path| values << "source=#{path}" }
+        file.owner.try { |owner| values << "owner=#{owner}" }
+        file.group.try { |group| values << "group=#{group}" }
+        file.mode.try { |mode| values << "mode=#{mode}" }
+        values
+      end)
     end
 
     def summary : String

@@ -12,6 +12,12 @@ private def phase(name : String, steps : Array(Fluxion::Step),
   Fluxion::Phase.new(name, steps, depends_on, restart, continue_on_step_error)
 end
 
+# The fingerprint of a phase holding one step, which is how the "editing this
+# field has to be visible" cases below are stated.
+private def fingerprint_of(step : Fluxion::Step) : String
+  Fluxion::State::Fingerprint.of(phase("base", [step] of Fluxion::Step))
+end
+
 private def profile(phases : Array(Fluxion::Phase))
   Fluxion::Profile.new("test", Fluxion::TargetOs.new(Fluxion::Distribution::Fedora), phases)
 end
@@ -515,6 +521,129 @@ describe Fluxion::State::Fingerprint do
     subject = phase("base", [packages("tools", "git")] of Fluxion::Step)
     Fluxion::State::Fingerprint.of(subject).should eq(Fluxion::State::Fingerprint.of(subject))
     packages("tools", "git").content_digest.should be_nil
+  end
+
+  it "changes when a named shell command's body is edited" do
+    # A shell-command item's key is its `name`. A command that hides behind a
+    # stable name — `name: setup` — could be rewritten from `echo one` to
+    # anything at all and the phase still hashed the same, so a completed phase
+    # was skipped and the new command never ran.
+    before = fingerprint_of(Fluxion::ShellCommandStep.new("s",
+      [Fluxion::ShellCommandItem.new(name: "setup", shell_command: "echo one")]))
+    after = fingerprint_of(Fluxion::ShellCommandStep.new("s",
+      [Fluxion::ShellCommandItem.new(name: "setup", shell_command: "echo two")]))
+
+    before.should_not eq(after)
+  end
+
+  it "changes when a named shell command's argv is edited" do
+    before = fingerprint_of(Fluxion::ShellCommandStep.new("s",
+      [Fluxion::ShellCommandItem.new(name: "setup", argv: ["mkdir", "-p", "/a"])]))
+    after = fingerprint_of(Fluxion::ShellCommandStep.new("s",
+      [Fluxion::ShellCommandItem.new(name: "setup", argv: ["rm", "-rf", "/a"])]))
+
+    before.should_not eq(after)
+  end
+
+  it "is unchanged for a bare shell string that is its own item key" do
+    # The command is already in the item key, so hashing it again would hand
+    # every such profile — which is nearly all of them — a digest where it had
+    # none and invalidate completed phases for no gain.
+    bare_string = Fluxion::ShellCommandStep.new("s", [Fluxion::ShellCommandItem.shell("true")])
+
+    bare_string.content_digest.should be_nil
+  end
+
+  it "changes when an argv vector is re-split without changing its item key" do
+    # An argv item always contributes, even when its auto-generated name is the
+    # joined command, because the name keeps only the joined text and the text
+    # is exactly what loses the vector's boundaries.
+    one_word = Fluxion::ShellCommandStep.new("s",
+      [Fluxion::ShellCommandItem.new(name: "echo hello world", argv: ["echo", "hello world"])])
+    two_words = Fluxion::ShellCommandStep.new("s",
+      [Fluxion::ShellCommandItem.new(name: "echo hello world", argv: ["echo hello", "world"])])
+
+    one_word.items.map(&.key).should eq(two_words.items.map(&.key))
+    one_word.content_digest.should_not eq(two_words.content_digest)
+  end
+
+  it "changes when a bare string is rewritten as the equivalent argv vector" do
+    # The two run differently — one through a shell, one exec'd directly — and
+    # the parser names them identically, so the fingerprint is the only place
+    # that crossing can show up.
+    as_string = Fluxion::ShellCommandStep.new("s", [Fluxion::ShellCommandItem.shell("mkdir -p /a")])
+    as_argv = Fluxion::ShellCommandStep.new("s",
+      [Fluxion::ShellCommandItem.new(name: "mkdir -p /a", argv: ["mkdir", "-p", "/a"])])
+
+    as_string.content_digest.should_not eq(as_argv.content_digest)
+  end
+
+  it "changes when a written file's inline content is edited" do
+    # The item key is the destination, and nothing else about the file reaches
+    # the fingerprint. There is no file-write probe either, so an edited body
+    # would have been skipped on every later run rather than caught on the next
+    # one.
+    with_body = ->(body : String) do
+      fingerprint_of(Fluxion::FileWriteStep.new("files",
+        [Fluxion::FileWriteItem.new("conf", "/etc/tool.conf", content: body)]))
+    end
+
+    with_body.call("enabled=true").should_not eq(with_body.call("enabled=false"))
+  end
+
+  it "changes when a written file's mode or owner is edited" do
+    with_mode = ->(mode : String) do
+      fingerprint_of(Fluxion::FileWriteStep.new("files",
+        [Fluxion::FileWriteItem.new("conf", "/etc/tool.conf", content: "x", mode: mode)]))
+    end
+
+    with_mode.call("0644").should_not eq(with_mode.call("0600"))
+  end
+
+  it "changes when a git config value is edited" do
+    # The item key is `global:user.email`, which is the setting's name and not
+    # the address it holds, so correcting a mistyped address was invisible.
+    with_email = ->(address : String) do
+      fingerprint_of(Fluxion::GitConfigStep.new("git", {"user.email" => address}))
+    end
+
+    with_email.call("a@example.com").should_not eq(with_email.call("b@example.com"))
+  end
+
+  it "changes when a repository's pinned commit is bumped" do
+    # The item key is the destination directory, so the one edit this kind
+    # exists for — moving `ref` to a newer commit — hashed identically.
+    with_ref = ->(ref : String) do
+      fingerprint_of(Fluxion::GitRepoStep.new("repos",
+        [Fluxion::GitRepo.new("https://example.com/x.git", "/opt/x", ref)]))
+    end
+
+    with_ref.call("a" * 40).should_not eq(with_ref.call("b" * 40))
+  end
+
+  it "changes when a unit is masked instead of enabled" do
+    # The item key is the unit name, so `enabled: true` and `masked: true` —
+    # opposite instructions for the same unit — used to hash alike.
+    enabled = fingerprint_of(Fluxion::SystemdUnitStep.new("units",
+      [Fluxion::SystemdUnit.new("docker", enabled: true, state: Fluxion::SystemdState::Started)]))
+    masked = fingerprint_of(Fluxion::SystemdUnitStep.new("units",
+      [Fluxion::SystemdUnit.new("docker", enabled: false, state: Fluxion::SystemdState::Stopped, masked: true)]))
+
+    enabled.should_not eq(masked)
+  end
+
+  it "changes when a host setting's value is edited" do
+    # The item keys are the bare setting names — `timezone`, `hostname` — so
+    # moving the machine to another zone left the phase looking unchanged.
+    with_timezone = ->(zone : String) do
+      fingerprint_of(Fluxion::SystemSettingStep.new("host", timezone: zone))
+    end
+
+    with_timezone.call("UTC").should_not eq(with_timezone.call("Europe/Warsaw"))
+  end
+
+  it "reports no digest for the host settings a profile left unset" do
+    Fluxion::SystemSettingStep.new("host").content_digest.should be_nil
   end
 
   it "changes when a package is added" do

@@ -154,21 +154,61 @@ module Fluxion
 
     # SHA-256 over whatever decides this step's work but is not in its item keys.
     #
-    # `Fingerprint.of` hashes step scalars and item keys, which is enough for a
-    # step that names what it installs. It is not enough for two shapes:
+    # Read `State::Fingerprint.of` before deciding a new kind does not need
+    # this, because it sees far less than the name "fingerprint" suggests. It
+    # hashes the phase's name, `continueOnStepError`, `dependsOn` and restart
+    # policy, and then, per step, only the four scalars declared on this base
+    # class — `name`, `kind`, `continueOnError`, `probeCommand` — plus each
+    # item's `fingerprint_tag/key` and the value returned here. No field
+    # declared by a subclass is ever hashed unless it reaches the digest
+    # through an item key or through this method.
+    #
+    # So a kind whose item key names WHERE the work lands rather than WHAT it
+    # should become MUST override this. Two shapes make the point:
     #
     # * A delegated kind — binstaller, dotbot, nerd-fonts-installer — whose item
     #   key is a path to another tool's config. The work changes when that file
     #   changes, and nothing in the fingerprint saw it, so once the step
     #   succeeded editing the config never ran it again.
-    # * An inline script body, which lives in the profile but is not part of any
-    #   item key.
+    # * A value written to a named place: an inline script body, a `git config`
+    #   value behind the key `global:user.email`, a unit's desired state behind
+    #   its unit name. The place is in the item key, the value is not.
+    #
+    # Overriding this is one of two gates, not the whole story. Once the
+    # fingerprint changes the phase is re-entered, but each item is still
+    # offered to its probe, and a probe that only asks "does this path exist"
+    # reports the item installed however stale its contents are. A kind whose
+    # probe is blind to the value needs that probe taught to compare the value
+    # as well, otherwise a changed digest re-runs the bookkeeping and leaves
+    # the host untouched.
     #
     # For a delegated config the file's *bytes* are hashed, never parsed:
     # Fluxion does not know those schemas and should not learn them, and an
-    # upstream field rename cannot break a byte hash. Nil when neither applies.
+    # upstream field rename cannot break a byte hash. Nil when nothing outside
+    # the item keys decides the work.
     def content_digest : String?
       nil
+    end
+
+    # Length-prefixed SHA-256 over the values a `content_digest` is built from.
+    #
+    # The same length-prefixed idea `State::Fingerprint` and `DelegatedConfig`
+    # use — though not an interchangeable digest, since those two frame a role
+    # and its value separately and this frames one already-joined string — and
+    # for the same reason: joining with a bare separator lets one value's text spill
+    # across the boundary and impersonate its neighbour, so `["ab", "c"]` and
+    # `["a", "bc"]` would hash alike. Each caller is responsible for giving
+    # every value its role — `ref=abc`, not `abc` — because the list is flat
+    # and two opposite settings otherwise collapse into one hash.
+    #
+    # Nil for an empty list, so a step with nothing beyond its item keys keeps
+    # reporting no digest and does not churn state that was written before the
+    # kind hashed anything.
+    protected def self.digest_of(values : Array(String)) : String?
+      return if values.empty?
+      accumulator = Digest::SHA256.new
+      values.each { |value| accumulator << value.bytesize.to_s << ":" << value }
+      accumulator.hexfinal
     end
 
     # Whether one of this step's items declared `confirm`, and so needs

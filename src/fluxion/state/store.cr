@@ -275,6 +275,12 @@ module Fluxion::State
     # crash mid-write leaves the previous state intact rather than a truncated
     # file that would be read as "nothing is installed".
     def save(document : Document) : Nil
+      # The writer decides which shape was written, not the file it was read
+      # from. Nothing today can reach here carrying another number — `parse`
+      # refuses a newer file and migrates an older one into a fresh `Document`
+      # — but the stamp describes the bytes this method is about to produce, so
+      # it belongs to this method rather than to whatever was read earlier.
+      document.schema_version = Document::SCHEMA_VERSION
       document.last_run_at = Time.utc
       document.fluxion_version = VERSION
 

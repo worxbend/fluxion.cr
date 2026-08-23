@@ -55,7 +55,7 @@ describe "delegated config change detection" do
         named = Fluxion::BinstallerProfileStep.new("portable", path, only: ["locked"])
         flag = Fluxion::BinstallerProfileStep.new("portable", path, locked: true)
         file = Fluxion::BinstallerProfileStep.new("portable", path, lock_file: "locked")
-        [named, flag, file].map(&.content_digest).uniq.size.should eq(3)
+        [named, flag, file].map(&.content_digest).uniq!.size.should eq(3)
       end
     end
 

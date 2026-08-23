@@ -140,10 +140,10 @@ module Fluxion::TUI
         Phase.new(
           phase.name,
           steps,
-          phase.depends_on.select { |name| phase?(name) },
-          phase.restart_policy,
-          phase.continue_on_step_error?,
-          phase.description,
+          depends_on: phase.depends_on.select { |name| phase?(name) },
+          restart_policy: phase.restart_policy,
+          continue_on_step_error: phase.continue_on_step_error?,
+          description: phase.description,
         )
       end
 

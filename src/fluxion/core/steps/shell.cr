@@ -144,9 +144,13 @@ module Fluxion
       !@content.nil?
     end
 
-    # Stable identity for plans and state. A remote script is keyed by its URL
-    # with credentials and query parameters stripped.
-    def key : String
+    # Human-facing label for where the script comes from, used as the item's
+    # `display`: the local path for `script:`, the item name for an inline
+    # `content:` body, or the URL with credentials and query parameters
+    # stripped for `url:`. This is not the item key — that is `name`, which is
+    # what `ShellScriptExecutor#find` and `requires_approval?` match on and
+    # what state and plans record.
+    def source_label : String
       script = @script
       return script if script
 
@@ -235,7 +239,7 @@ module Fluxion
     end
 
     def items : Array(ItemRef)
-      @scripts.map { |script| item(script.name, "script", script.key) }
+      @scripts.map { |script| item(script.name, "script", script.source_label) }
     end
 
     def requires_approval?(item_key : String) : Bool

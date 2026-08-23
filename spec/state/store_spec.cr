@@ -227,5 +227,83 @@ describe Fluxion::State::Store do
         document.phases.should be_empty
       end
     end
+
+    it "salvages a legacy timestamp that names an impossible date" do
+      # `migrate` exists to rescue a file rather than refuse it, so a timestamp
+      # whose fields are out of range has to fall back to the epoch the same way
+      # unparseable text does.
+      with_store do |store|
+        body = %({"schemaVersion": 7, "profileName": "default", "lastRunAt": "2024-13-45T00:00:00Z"})
+        store.parse(body, "default").last_run_at.should eq(Time.unix(0))
+      end
+    end
+
+    it "salvages a legacy timestamp with an impossible zone offset" do
+      with_store do |store|
+        body = %({"schemaVersion": 7, "profileName": "default", "lastRunAt": "2024-01-01T00:00:00+99:00"})
+        store.parse(body, "default").last_run_at.should eq(Time.unix(0))
+      end
+    end
+  end
+
+  describe "profile identity" do
+    # The filename is what `load` reads and what `save` writes. A file whose
+    # `profileName` field disagrees with its filename used to make the two
+    # methods address different files, so an edit was written somewhere nobody
+    # ever read back.
+    it "adopts the requested profile when the file names a different one" do
+      with_store do |store|
+        body = %({"schemaVersion": 7, "profileName": "workstation"})
+        store.parse(body, "default").profile_name.should eq("default")
+      end
+    end
+
+    it "adopts the requested profile for a current-schema file too" do
+      with_store do |store|
+        document = Fluxion::State::Document.new("workstation")
+        store.parse(document.to_json, "default").profile_name.should eq("default")
+      end
+    end
+
+    it "saves an edit back to the file it was loaded from" do
+      with_store do |store|
+        legacy = <<-JSON
+          {
+            "schemaVersion" : 7,
+            "profileName" : "workstation",
+            "entries" : [ {
+              "profileName" : "workstation",
+              "moduleName" : "tools",
+              "itemKey" : "git",
+              "itemType" : "PACKAGE",
+              "completedAt" : "2026-07-31T21:50:00Z"
+            } ]
+          }
+          JSON
+        Dir.mkdir_p(store.root, 0o700)
+        File.write(store.path("default"), legacy)
+
+        document = store.load("default")
+        document.forget_item("git").should eq(1)
+        store.save(document)
+
+        Dir.children(store.root).should eq(["default.state.json"])
+        store.load("default").find("tools", "git", "package").should be_nil
+      end
+    end
+
+    it "does not fail to save a file whose recorded profile is not a safe slug" do
+      # `save` derives the path from the document's profile name, so a name that
+      # never passed `path` on the way in used to make every write raise — and
+      # inside a run that error is swallowed, so nothing was recorded at all.
+      with_store do |store|
+        body = %({"schemaVersion": 7, "profileName": "my workstation"})
+        Dir.mkdir_p(store.root, 0o700)
+        File.write(store.path("default"), body)
+
+        store.save(store.load("default"))
+        Dir.children(store.root).should eq(["default.state.json"])
+      end
+    end
   end
 end

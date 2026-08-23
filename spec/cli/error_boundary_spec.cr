@@ -52,6 +52,45 @@ describe "IO error boundaries" do
         FileUtils.rm_rf(directory)
       end
     end
+
+    # Crystal's `Time` JSON mapper raises outside the `JSON::ParseException`
+    # family, in three different classes. Each one used to escape `load` as a
+    # plain `Exception`, which the callers that degrade on `ExecutionError` —
+    # the orchestrator's recorder, `status`, `resume` — could not absorb, so one
+    # corrupt character in a timestamp aborted the whole command.
+    {
+      "text that is not a timestamp"         => "whenever",
+      "a date whose fields are out of range" => "2024-13-45T00:00:00Z",
+      "an impossible zone offset"            => "2024-01-01T00:00:00+99:00",
+    }.each do |description, stamp|
+      it "translates #{description} in a state file" do
+        directory = File.tempname("fluxion-timestamp")
+        Dir.mkdir_p(directory, 0o700)
+        body = {
+          schemaVersion:  Fluxion::State::Document::SCHEMA_VERSION,
+          profileName:    "default",
+          lastRunAt:      "2026-07-31T21:54:18Z",
+          fluxionVersion: "1.0.0",
+          items:          [{
+            profile:     "default",
+            step:        "tools",
+            itemKey:     "git",
+            itemType:    "package",
+            completedAt: stamp,
+          }],
+          phases: [] of String,
+        }.to_json
+        File.write(File.join(directory, "default.state.json"), body, perm: 0o600)
+
+        begin
+          expect_raises(Fluxion::ExecutionError, /Failed to read state file/) do
+            Fluxion::State::Store.new(directory).load("default")
+          end
+        ensure
+          FileUtils.rm_rf(directory)
+        end
+      end
+    end
   end
 
   describe Fluxion::Executor::Downloader do

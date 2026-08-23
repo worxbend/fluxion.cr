@@ -197,11 +197,22 @@ module Fluxion::State
       end
 
       parse(File.read(file), profile, file)
-    rescue error : JSON::ParseException | File::Error
-      # Both shapes are translated: a malformed file and an unreadable one are
-      # equally the state layer's problem to describe. `File::Error` used to
-      # escape untranslated from `File.info`/`File.read`, and because it is an
-      # `IO::Error` subclass the CLI's top-level rescue turned it into exit 0.
+    rescue error : JSON::ParseException | File::Error | Time::Format::Error | Time::Error | ArgumentError
+      # Every shape a bad file can take is translated: a malformed document and
+      # an unreadable one are equally the state layer's problem to describe.
+      # `File::Error` used to escape untranslated from `File.info`/`File.read`,
+      # and because it is an `IO::Error` subclass the CLI's top-level rescue
+      # turned it into exit 0.
+      #
+      # The three timestamp classes are here because Crystal's `Time` JSON
+      # mapper does not raise inside the `JSON::ParseException` family at all.
+      # Parsing a `Time` field reaches `Time::Format::ISO_8601_DATE_TIME`, which
+      # raises `Time::Format::Error` (a direct `Exception`, not a `Time::Error`)
+      # for text that is not a timestamp, `ArgumentError` for a field that is out
+      # of range such as month 13, and `Time::Location::InvalidTimezoneOffsetError`
+      # (a `Time::Error`) for an offset like `+99:00`. Callers of `load` degrade
+      # gracefully on `ExecutionError` only, so any of those escaping untranslated
+      # aborted a whole run over one corrupt character.
       raise ExecutionError.new("Failed to read state file #{file}: #{error.message}")
     end
 
@@ -215,8 +226,22 @@ module Fluxion::State
           "State file was written by a newer Fluxion (schema #{version}): #{file}")
       end
 
-      return migrate(raw, profile) if version <= Document::LEGACY_SCHEMA_VERSION
-      Document.from_json(body)
+      document = if version <= Document::LEGACY_SCHEMA_VERSION
+                   migrate(raw, profile)
+                 else
+                   Document.from_json(body)
+                 end
+
+      # The filename is the identity of a state file; the `profileName` field
+      # inside it is a copy that a migrated or hand-edited file can disagree
+      # with. `save` derives the path back from this field, so leaving a foreign
+      # name here would send the next write to a different file than the one
+      # that was read — the edit would look applied and then be invisible on the
+      # next run. Adopting the requested name also keeps the field a value that
+      # `path` already accepted, so `save` cannot fail on an unsafe slug that
+      # arrived from the file's contents.
+      document.profile_name = profile
+      document
     end
 
     # Maps the Java layout onto this one.
@@ -267,7 +292,12 @@ module Fluxion::State
       text = value.try(&.as_s?)
       return Time.unix(0) unless text
       Time.parse_rfc3339(text)
-    rescue Time::Format::Error
+    rescue Time::Format::Error | Time::Error | ArgumentError
+      # A corrupt legacy timestamp becomes the epoch rather than failing the
+      # migration, and corruption has three shapes here: text that is not a
+      # timestamp, a field out of range such as month 13 (`ArgumentError`), and
+      # an impossible zone offset (`Time::Error`). Rescuing only the first left
+      # the other two aborting a read of a file this method exists to salvage.
       Time.unix(0)
     end
 

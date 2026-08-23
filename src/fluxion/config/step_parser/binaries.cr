@@ -31,16 +31,28 @@ module Fluxion::Config
       pinned
     end
 
-    private def binstaller(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
+    # A delegated installer's config is a path to a file whose schema belongs
+    # to that installer, never an inline object Fluxion would then be on the
+    # hook for validating. All three kinds enforce the same rule over the same
+    # `config`/`configPath` aliases, so the rule is stated here once.
+    #
+    # The wording stays per-caller: each kind names the installer that owns the
+    # file, and rewording them into one sentence would change what users read.
+    private def installer_config_path(context : Context, node : Node,
+                                      message : String, hint : String? = nil) : String?
       config_node = node["config", "configPath"]
       if config_node.mapping?
-        context.error(config_node.path,
-          "must be a path to a BinaryDistributionProfile, not an inline object",
-          "binstaller owns that schema")
+        context.error(config_node.path, message, hint)
         return
       end
 
-      config = context.local_path(config_node)
+      context.local_path(config_node)
+    end
+
+    private def binstaller(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
+      config = installer_config_path(context, node,
+        "must be a path to a BinaryDistributionProfile, not an inline object",
+        "binstaller owns that schema")
       return unless config
 
       locked = context.bool(node["locked"], false)
@@ -70,18 +82,12 @@ module Fluxion::Config
       version = pinned_installer_version(context, node["installerVersion"],
         NerdFontsStep::DEFAULT_INSTALLER_VERSION, "installerVersion")
 
-      # A path, never an inline object. Fluxion used to accept a font list and
-      # render it into the installer's format at run time, which made Fluxion
-      # the owner of a schema it does not control and cannot validate.
-      config_node = node["config", "configPath"]
-      if config_node.mapping?
-        context.error(config_node.path,
-          "must be a path to a nerd-fonts-installer config, not an inline object",
-          "the installer owns that schema; move release, destination and families into that file")
-        return
-      end
-
-      config = context.local_path(config_node)
+      # Fluxion used to accept a font list here and render it into the
+      # installer's format at run time, which made Fluxion the owner of a
+      # schema it does not control and cannot validate.
+      config = installer_config_path(context, node,
+        "must be a path to a nerd-fonts-installer config, not an inline object",
+        "the installer owns that schema; move release, destination and families into that file")
       return unless config
 
       NerdFontsStep.new(
@@ -94,12 +100,7 @@ module Fluxion::Config
     end
 
     private def dotbot(context : Context, node : Node, name : String, description : String?, probe : String?) : Step?
-      config_node = node["config", "configPath"]
-      if config_node.mapping?
-        context.error(config_node.path, "must be a path string")
-        return
-      end
-      config = context.local_path(config_node)
+      config = installer_config_path(context, node, "must be a path string")
       return unless config
 
       version = pinned_installer_version(context, node["installerVersion"],

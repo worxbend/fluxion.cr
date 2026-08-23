@@ -126,13 +126,33 @@ module Fluxion::Config
       best_distance = Int32::MAX
 
       ALL.each do |kind|
-        distance = StepParser.levenshtein(id, kind.id)
+        distance = levenshtein(id, kind.id)
         next if distance > budget || distance >= best_distance
         best = kind.id
         best_distance = distance
       end
 
       best.try { |match| "Did you mean '#{match}'?" }
+    end
+
+    # Edit distance between two kind ids, used only to rank the suggestion
+    # above. It lived on `StepParser` until nothing there wanted it: a module
+    # that turns a `spec:` payload into a `Step` has no business exporting a
+    # general string algorithm, and the one caller was always here.
+    private def levenshtein(a : String, b : String) : Int32
+      previous = (0..b.size).to_a
+      current = Array.new(b.size + 1, 0)
+
+      a.each_char_with_index do |a_char, i|
+        current[0] = i + 1
+        b.each_char_with_index do |b_char, j|
+          cost = a_char == b_char ? 0 : 1
+          current[j + 1] = Math.min(Math.min(current[j] + 1, previous[j + 1] + 1), previous[j] + cost)
+        end
+        previous = current.dup
+      end
+
+      previous[b.size]
     end
 
     # The internal step type each kind maps onto. Only the kinds whose spec

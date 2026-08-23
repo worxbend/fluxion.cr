@@ -31,14 +31,20 @@ module Fluxion::Config
     # A required string field. Records a diagnostic and returns "" when absent,
     # so the surrounding parse can keep going and report everything else too.
     def require_string(node : Node, subject : String? = nil) : String
-      value = node.string?
-      if value.nil? || value.strip.empty?
+      value = optional_string(node)
+      if value.nil?
         error(node.path, "#{subject || "value"} is required")
         return ""
       end
       value
     end
 
+    # What "the profile gave us a value here" means, decided once: a key that is
+    # absent, holds a non-scalar, or holds nothing but whitespace all read as
+    # nil. Every field accessor below asks through this rather than repeating
+    # the test, so the blank-string policy is one decision and not a dozen
+    # copies a reader has to re-verify. The value comes back unstripped; each
+    # caller decides whether trimming belongs in what it stores.
     def optional_string(node : Node) : String?
       value = node.string?
       return if value.nil? || value.strip.empty?
@@ -81,18 +87,17 @@ module Fluxion::Config
       algorithm_node = node["algorithm"]
       algorithm = ChecksumAlgorithm.from_config?(algorithm_node.string?)
       unless algorithm
-        raw = algorithm_node.string?
-        if raw.nil? || raw.strip.empty?
-          error(algorithm_node.path, "checksum algorithm is required")
-        else
+        if raw = optional_string(algorithm_node)
           error(algorithm_node.path, "unsupported checksum algorithm '#{raw.strip}'", "only sha256 is supported")
+        else
+          error(algorithm_node.path, "checksum algorithm is required")
         end
         return
       end
 
       value_node = node["value"]
-      raw_value = value_node.string?
-      if raw_value.nil? || raw_value.strip.empty?
+      raw_value = optional_string(value_node)
+      if raw_value.nil?
         error(value_node.path, "checksum value is required")
         return
       end
@@ -107,8 +112,8 @@ module Fluxion::Config
 
     # A bare `sha256: <hex>` field.
     def sha256(node : Node) : Checksum?
-      raw = node.string?
-      return if raw.nil? || raw.strip.empty?
+      raw = optional_string(node)
+      return unless raw
       case parsed = Checksum.parse(ChecksumAlgorithm::Sha256, raw)
       in Checksum then parsed
       in String
@@ -118,8 +123,8 @@ module Fluxion::Config
     end
 
     def fingerprint(node : Node) : Fingerprint?
-      raw = node.string?
-      return if raw.nil? || raw.strip.empty?
+      raw = optional_string(node)
+      return unless raw
       case parsed = Fingerprint.parse(raw)
       in Fingerprint then parsed
       in String
@@ -135,8 +140,8 @@ module Fluxion::Config
     # fix. Credentials in a URL are rejected outright: they end up in process
     # listings, and Fluxion would have to redact them everywhere afterwards.
     def https_url(node : Node, required : Bool = true) : String?
-      raw = node.string?
-      if raw.nil? || raw.strip.empty?
+      raw = optional_string(node)
+      if raw.nil?
         error(node.path, "URL is required") if required
         return
       end
@@ -168,8 +173,8 @@ module Fluxion::Config
 
     # An absolute, normalized filesystem path, after `~` expansion.
     def absolute_path(node : Node, required : Bool = true) : String?
-      raw = node.string?
-      if raw.nil? || raw.strip.empty?
+      raw = optional_string(node)
+      if raw.nil?
         error(node.path, "path is required") if required
         return
       end
@@ -192,8 +197,8 @@ module Fluxion::Config
 
     # A path that may be relative, resolved against the profile directory.
     def local_path(node : Node, required : Bool = true) : String?
-      raw = node.string?
-      if raw.nil? || raw.strip.empty?
+      raw = optional_string(node)
+      if raw.nil?
         error(node.path, "path is required") if required
         return
       end
@@ -222,8 +227,8 @@ module Fluxion::Config
     OCTAL_MODE = /\A[0-7]{3,4}\z/
 
     def file_mode(node : Node) : String?
-      raw = node.string?
-      return if raw.nil? || raw.strip.empty?
+      raw = optional_string(node)
+      return unless raw
       value = raw.strip
       unless value.matches?(OCTAL_MODE)
         error(node.path, "must be a 3 or 4 digit octal mode")
@@ -235,8 +240,8 @@ module Fluxion::Config
     # Durations accept the ISO-8601 form as well as the compact ones
     # (`30m`, `90s`, `500ms`, `120`), because profiles use both.
     def duration(node : Node, default : Time::Span) : Time::Span
-      raw = node.string?
-      return default if raw.nil? || raw.strip.empty?
+      raw = optional_string(node)
+      return default unless raw
 
       value = raw.strip
       parsed = parse_duration(value)

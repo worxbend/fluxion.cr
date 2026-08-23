@@ -64,11 +64,7 @@ module Fluxion::Config
       declared = root["spec"]["vars"]
       return {} of String => String unless declared.mapping?
 
-      raw = {} of String => String
-      declared.each_entry do |key, value|
-        text = value.string?
-        raw[key] = text if text
-      end
+      raw = declared.string_map
 
       resolved = {} of String => String
       raw.each_key { |key| resolve_var(key, raw, resolved, [] of String, declared.path) }
@@ -106,7 +102,7 @@ module Fluxion::Config
         mapped = {} of YAML::Any => YAML::Any
         raw.each do |key, child|
           name = key.as_s? || key.to_s
-          mapped[key] = walk(child, child_path(path, name), step)
+          mapped[key] = walk(child, Node.child_path(path, name), step)
         end
         YAML::Any.new(mapped)
       when Array(YAML::Any)
@@ -199,11 +195,6 @@ module Fluxion::Config
       return unless name
       kind = mapping[YAML::Any.new("kind")]?.try(&.as_s?).try(&.strip.downcase)
       StepContext.new(name, kind || "")
-    end
-
-    private def child_path(parent : String, key : String) : String
-      return key if parent.empty?
-      key.matches?(/\A[A-Za-z_][A-Za-z0-9_]*\z/) ? "#{parent}.#{key}" : "#{parent}.['#{key}']"
     end
 
     # Which step a node belongs to, so errors can name it and so the

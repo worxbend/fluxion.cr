@@ -16,12 +16,6 @@ module Fluxion::Executor
 
     MASK = "<redacted>"
 
-    # Names that almost always hold a secret. Written once and reused for
-    # environment variables, `--flag value` pairs, and `name=value` text.
-    SENSITIVE_NAME = "(?:api[._-]?key|access[._-]?key|private[._-]?key|" \
-                     "key[._-]?passphrase|passphrase|authorization|token|" \
-                     "secret|password|passwd|credentials?)"
-
     # A quoted string or a bare token. Used as the value half of every
     # assignment pattern so `--token "a b"` masks the whole quoted value.
     QUOTED_OR_TOKEN = "(?:\"[^\"]*\"?|'[^']*'?|[^\\s,;\\]}]+)"
@@ -40,9 +34,9 @@ module Fluxion::Executor
       # curl --user / -u
       {/(?i)(?<!\S)(--user(?:=|\s+)|-u\s+)#{QUOTED_OR_TOKEN}/, "\\1#{MASK}"},
       # token=..., "secret": ..., PASSWORD = ...
-      {/(?i)(?<![a-z0-9])(["']?#{SENSITIVE_NAME}["']?)(\s*[=:]\s*)(?!["']?(?:basic|bearer)\b)#{QUOTED_OR_TOKEN}/, "\\1\\2#{MASK}"},
+      {/(?i)(?<![a-z0-9])(["']?#{ShellEnvironmentVariable::SENSITIVE_NAME_FRAGMENT}["']?)(\s*[=:]\s*)(?!["']?(?:basic|bearer)\b)#{QUOTED_OR_TOKEN}/, "\\1\\2#{MASK}"},
       # --token <value> / --token=<value>
-      {/(?i)(?<![a-z0-9])(-{1,2}#{SENSITIVE_NAME})(\s+|=)#{QUOTED_OR_TOKEN}/, "\\1\\2#{MASK}"},
+      {/(?i)(?<![a-z0-9])(-{1,2}#{ShellEnvironmentVariable::SENSITIVE_NAME_FRAGMENT})(\s+|=)#{QUOTED_OR_TOKEN}/, "\\1\\2#{MASK}"},
       # A bare bearer token anywhere.
       {/(?i)bearer\s+[a-z0-9._~+\/=-]+/, "Bearer #{MASK}"},
       # A whole PEM private key block, however long.
@@ -54,19 +48,12 @@ module Fluxion::Executor
       PATTERNS.reduce(text) { |result, (pattern, replacement)| result.gsub(pattern, replacement) }
     end
 
-    # Hoisted out of `sensitive_name?` because a regex literal with
-    # interpolation is rebuilt — and so recompiled by PCRE2 — on every
-    # evaluation, which measured 28x the cost of matching against a constant.
-    # `sensitive_name?` runs once per argv element, so that recompilation was
-    # dominating the check it exists to perform.
-    private CAMEL_BOUNDARY         = /([a-z0-9])([A-Z])/
-    private SENSITIVE_NAME_PATTERN = /(^|[^a-z0-9])#{SENSITIVE_NAME}($|[^a-z0-9])/
-
-    # True when a name suggests its value is a secret. Splits camelCase first
-    # so `githubToken` is caught as well as `GITHUB_TOKEN`.
+    # True when a name suggests its value is a secret. The list of names lives
+    # on `ShellEnvironmentVariable` in core so that the parser's inference —
+    # which decides whether a profile's variable is marked sensitive at all —
+    # and this scrubber cannot drift apart.
     def sensitive_name?(name : String) : Bool
-      normalized = name.gsub(CAMEL_BOUNDARY, "\\1_\\2").downcase
-      normalized.matches?(SENSITIVE_NAME_PATTERN)
+      ShellEnvironmentVariable.sensitive_name?(name)
     end
 
     # Strips everything that could steer the terminal.

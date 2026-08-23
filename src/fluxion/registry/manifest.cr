@@ -157,7 +157,7 @@ module Fluxion::Registry
         return entries
       end
 
-      node.each_item do |item, _|
+      node.each_item do |item|
         id = item["id"].string?.try(&.strip)
         if id.nil? || id.empty?
           diagnostics.error(item["id"].path, "id is required")

@@ -79,21 +79,18 @@ module Fluxion::Config
       url = has_url ? context.https_url(url_node) : nil
       return if has_url && url.nil?
 
+      # Resolved before the shared block below because a missing path reports
+      # its own error, and the splat has to come first in the argument list.
+      script = has_script ? context.local_path(script_node) : nil
+
       ShellScriptItem.new(
+        **shell_item_fields(context, node, inherited_dir),
         name: context.optional_string(node["name"]) || fallback_name,
-        script: has_script ? context.local_path(script_node) : nil,
+        script: script,
         url: url,
         content: has_content ? content_node.string? : nil,
         shell: shell,
         args: node["args"].string_list,
-        working_dir: context.local_path(node["cwd", "workingDir"], required: false) || inherited_dir,
-        environment: environment(context, node["env"]),
-        sudo: context.bool(node["sudo"], false),
-        allowed_exit_codes: exit_codes(context, node["allowedExitCodes"]),
-        creates: context.local_path(node["creates"], required: false),
-        unless_command: context.optional_string(node["unless"]),
-        confirm: confirm(context, node["confirm"]),
-        timeout: item_timeout(context, node),
         sha256: sha256,
       )
     end
@@ -209,19 +206,29 @@ module Fluxion::Config
       end
 
       ShellCommandItem.new(
+        **shell_item_fields(context, node, inherited_dir),
         name: context.optional_string(node["name"]) || shell_command || fallback_name,
         shell_command: shell_command,
         argv: argv,
         shell: context.optional_string(node["shell"]) || shell,
-        working_dir: context.local_path(node["cwd", "workingDir"], required: false) || inherited_dir,
-        environment: environment(context, node["env"]),
-        sudo: context.bool(node["sudo"], false),
-        allowed_exit_codes: exit_codes(context, node["allowedExitCodes"]),
-        creates: context.local_path(node["creates"], required: false),
-        unless_command: context.optional_string(node["unless"]),
-        confirm: confirm(context, node["confirm"]),
-        timeout: item_timeout(context, node),
       )
+    end
+
+    # The option block both structured item kinds share, read once here the way
+    # `ShellItemFields` names it in the domain. Splatted into both constructors
+    # so adding or re-defaulting a shared option is one edit rather than two
+    # lists a hundred lines apart that nothing checks against each other.
+    private def shell_item_fields(context : Context, node : Node, inherited_dir : String?)
+      {
+        working_dir:        context.local_path(node["cwd", "workingDir"], required: false) || inherited_dir,
+        environment:        environment(context, node["env"]),
+        sudo:               context.bool(node["sudo"], false),
+        allowed_exit_codes: exit_codes(context, node["allowedExitCodes"]),
+        creates:            context.local_path(node["creates"], required: false),
+        unless_command:     context.optional_string(node["unless"]),
+        confirm:            confirm(context, node["confirm"]),
+        timeout:            item_timeout(context, node),
+      }
     end
 
     private def item_timeout(context : Context, node : Node) : Time::Span
@@ -239,7 +246,7 @@ module Fluxion::Config
     private def exit_codes(context : Context, node : Node) : Array(Int32)
       return [] of Int32 unless node.present?
       codes = [] of Int32
-      node.each_item do |entry, _|
+      node.each_item do |entry|
         value = entry.int?
         if value.nil? || value < 0
           context.error(entry.path, "allowedExitCodes must contain non-negative integers")
@@ -298,7 +305,7 @@ module Fluxion::Config
             context.error(value.path, "value must be a string")
             next
           end
-          variables << ShellEnvironmentVariable.new(name, text, sensitive_name?(name))
+          variables << ShellEnvironmentVariable.new(name, text, ShellEnvironmentVariable.sensitive_name?(name))
           next
         end
 
@@ -316,19 +323,10 @@ module Fluxion::Config
         if value["sensitive"].present? && sensitive.nil?
           context.error(value["sensitive"].path, "must be a boolean")
         end
-        variables << ShellEnvironmentVariable.new(name, text, sensitive.nil? ? sensitive_name?(name) : sensitive)
+        variables << ShellEnvironmentVariable.new(name, text,
+          sensitive.nil? ? ShellEnvironmentVariable.sensitive_name?(name) : sensitive)
       end
       variables
-    end
-
-    # Names that almost always carry a secret. Getting this wrong in the safe
-    # direction only costs a `<redacted>` in the output; getting it wrong the
-    # other way leaks a token into logs and state.
-    SENSITIVE_NAME = /(^|[^a-z0-9])(?:api[._-]?key|access[._-]?key|private[._-]?key|key[._-]?passphrase|passphrase|authorization|token|secret|password|passwd|credentials?)($|[^a-z0-9])/
-
-    def sensitive_name?(name : String) : Bool
-      normalized = name.gsub(/([a-z0-9])([A-Z])/, "\\1_\\2").downcase
-      normalized.matches?(SENSITIVE_NAME)
     end
 
     private def shell_reload(context : Context, node : Node, name : String, description : String?) : Step?

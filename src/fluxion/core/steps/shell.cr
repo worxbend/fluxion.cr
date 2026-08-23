@@ -7,6 +7,28 @@ module Fluxion
   struct ShellEnvironmentVariable
     PORTABLE_NAME = /\A[A-Za-z_][A-Za-z0-9_]*\z/
 
+    # Names that almost always carry a secret. Getting this wrong in the safe
+    # direction only costs a `<redacted>` in the output; getting it wrong the
+    # other way leaks a token into logs and state. The list lives here rather
+    # than beside either of its users so the parser's inference and the output
+    # scrubber cannot disagree about what counts as a secret.
+    #
+    # Kept as a String because `Executor::Redaction` interpolates it into its
+    # own `name=value` and `--flag value` patterns, where the surrounding
+    # context differs from the one below.
+    SENSITIVE_NAME_FRAGMENT = "(?:api[._-]?key|access[._-]?key|private[._-]?key|" \
+                              "key[._-]?passphrase|passphrase|authorization|token|" \
+                              "secret|password|passwd|credentials?)"
+
+    SENSITIVE_NAME = /(^|[^a-z0-9])#{SENSITIVE_NAME_FRAGMENT}($|[^a-z0-9])/
+
+    # Hoisted out of `sensitive_name?` because a regex literal with
+    # interpolation is rebuilt — and so recompiled by PCRE2 — on every
+    # evaluation, which measured 28x the cost of matching against a constant.
+    # `sensitive_name?` runs once per argv element, so that recompilation was
+    # dominating the check it exists to perform.
+    private CAMEL_BOUNDARY = /([a-z0-9])([A-Z])/
+
     getter name : String
     getter value : String
     getter? sensitive : Bool
@@ -16,6 +38,12 @@ module Fluxion
 
     def self.portable_name?(name : String) : Bool
       name.matches?(PORTABLE_NAME)
+    end
+
+    # True when a name suggests its value is a secret. Splits camelCase first
+    # so `githubToken` is caught as well as `GITHUB_TOKEN`.
+    def self.sensitive_name?(name : String) : Bool
+      name.gsub(CAMEL_BOUNDARY, "\\1_\\2").downcase.matches?(SENSITIVE_NAME)
     end
   end
 

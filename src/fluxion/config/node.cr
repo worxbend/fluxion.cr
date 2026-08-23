@@ -100,8 +100,8 @@ module Fluxion::Config
       sequence.map_with_index { |value, index| Node.new(value, "#{@path}[#{index}]") }
     end
 
-    def each_item(& : Node, Int32 ->) : Nil
-      items.each_with_index { |node, index| yield node, index }
+    def each_item(& : Node ->) : Nil
+      items.each { |node| yield node }
     end
 
     # Scalar as a string, whatever its YAML type. A release written as `44`
@@ -174,11 +174,20 @@ module Fluxion::Config
       result
     end
 
+    # The one place the diagnostic path syntax is decided. Public because the
+    # interpolator walks raw YAML rather than nodes and still has to name the
+    # locations it reports, and a diagnostic has to spell a field the same way
+    # whichever pass produced it.
+    #
+    # Keys that are not plain identifiers are bracketed so the path stays
+    # unambiguous when a profile uses a dotted or hyphenated key.
+    def self.child_path(parent : String, key : String) : String
+      return key if parent.empty?
+      key.matches?(/\A[A-Za-z_][A-Za-z0-9_]*\z/) ? "#{parent}.#{key}" : "#{parent}.['#{key}']"
+    end
+
     private def child_path(key : String) : String
-      return key if @path.empty?
-      # Keys that are not plain identifiers are bracketed so the path stays
-      # unambiguous when a profile uses a dotted or hyphenated key.
-      key.matches?(/\A[A-Za-z_][A-Za-z0-9_]*\z/) ? "#{@path}.#{key}" : "#{@path}.['#{key}']"
+      Node.child_path(@path, key)
     end
   end
 end

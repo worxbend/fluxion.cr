@@ -88,15 +88,14 @@ module Fluxion::Config
 
       distribution = Distribution.from_config?(os["distribution"].string?)
       unless distribution
-        raw = os["distribution"].string?
         # The accepted list is derived rather than written out, so adding a
         # distribution cannot leave this hint naming an outdated set.
         accepted = "one of #{Distribution.values.map(&.config_name).join(", ")}"
-        if raw.nil? || raw.strip.empty?
-          context.error(os["distribution"].path, "is required", accepted)
-        else
+        if raw = context.optional_string(os["distribution"])
           context.error(os["distribution"].path,
             "unsupported target OS distribution: #{raw.strip}", accepted)
+        else
+          context.error(os["distribution"].path, "is required", accepted)
         end
         distribution = Distribution::Fedora
       end
@@ -159,7 +158,7 @@ module Fluxion::Config
           return phases
         end
 
-        node.each_item do |entry, _|
+        node.each_item do |entry|
           phases << parse_phase(entry)
         end
 
@@ -187,7 +186,7 @@ module Fluxion::Config
         @context.error(steps_node.path, "at least one step is required") if steps_node.items.empty?
 
         steps = [] of Step
-        steps_node.each_item do |step_node, _|
+        steps_node.each_item do |step_node|
           step = parse_step(step_node, label, unmet)
           steps << step if step
         end
@@ -428,7 +427,7 @@ module Fluxion::Config
         section_node = node[section]
         next unless section_node.present?
 
-        section_node.each_item do |entry, _|
+        section_node.each_item do |entry|
           name = context.optional_string(entry["name"])
           if name.nil?
             context.error(entry["name"].path, "is required")

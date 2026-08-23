@@ -8,22 +8,6 @@ module Fluxion::Config
   module StepParser
     extend self
 
-    def levenshtein(a : String, b : String) : Int32
-      previous = (0..b.size).to_a
-      current = Array.new(b.size + 1, 0)
-
-      a.each_char_with_index do |a_char, i|
-        current[0] = i + 1
-        b.each_char_with_index do |b_char, j|
-          cost = a_char == b_char ? 0 : 1
-          current[j + 1] = Math.min(Math.min(current[j] + 1, previous[j + 1] + 1), previous[j] + cost)
-        end
-        previous = current.dup
-      end
-
-      previous[b.size]
-    end
-
     # One branch per supported step type. Splitting the table would only
     # relocate the branching somewhere less obvious to read.
     #
@@ -85,12 +69,11 @@ module Fluxion::Config
       backend_node = node["backend"]
       backend = ToolBackend.from_config?(backend_node.string?)
       unless backend
-        raw = backend_node.string?
-        if raw.nil? || raw.strip.empty?
-          context.error(backend_node.path, "backend is required")
-        else
+        if raw = context.optional_string(backend_node)
           context.error(backend_node.path, "'#{raw.strip}' is not a supported backend",
             "expected one of #{ToolBackend.config_names.join(", ")}")
+        else
+          context.error(backend_node.path, "backend is required")
         end
         return
       end

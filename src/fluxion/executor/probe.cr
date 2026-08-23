@@ -79,16 +79,23 @@ module Fluxion::Executor
 
       result = runner.run(Command.new(manager.query_argv(item.key), timeout: PROBE_TIMEOUT))
 
+      # Exhaustive on purpose. Cargo used to fall into a default written for
+      # rpm and pacman, which reported every crate installed because
+      # `cargo install --list` exits 0 whatever was asked of it. Writing the
+      # arms out means the next `PackageManager` member fails to compile here
+      # rather than inheriting a default whose contract does not hold for it.
       case manager
-      when .apt?
+      in .apt?
         return InstallationStatus::NotInstalled.new(item.key) unless result.success?
         status, _, version = result.stdout.strip.partition('\t')
         return InstallationStatus::NotInstalled.new(item.key) unless status == "install ok installed"
         InstallationStatus::InstalledByProbe.new(item.key, version.presence)
-      when .flatpak?
+      in .flatpak?
         installed = result.stdout.lines.any? { |line| line.strip == item.key }
         installed ? InstallationStatus::InstalledByProbe.new(item.key) : InstallationStatus::NotInstalled.new(item.key)
-      else
+      in .cargo?
+        interpret_cargo_listing(item.key, result)
+      in .dnf?, .zypper?, .pacman?, .paru?, .yay?
         interpret_query(item.key, result, manager)
       end
     end
@@ -96,14 +103,38 @@ module Fluxion::Executor
     # rpm and pacman both use exit 1 for "not installed" and anything else for
     # a real failure, which is the difference between NotInstalled and Unknown.
     private def interpret_query(key : String, result : ProcessResult, manager : PackageManager) : InstallationStatus
-      return InstallationStatus::InstalledByProbe.new(key, extract_version(result.stdout, manager)) if result.success?
+      return InstallationStatus::InstalledByProbe.new(key, extract_version(result.stdout, manager, key)) if result.success?
       return InstallationStatus::NotInstalled.new(key) if result.exit_code == 1
 
       InstallationStatus::Unknown.new(key,
         "#{manager.query_argv(key).first} exited #{result.exit_code}")
     end
 
-    private def extract_version(stdout : String, manager : PackageManager) : String?
+    # `cargo install --list` prints every installed crate and pays no attention
+    # to the name it was asked about, so its exit code says nothing about this
+    # item and the listing has to be scanned the way the flatpak arm scans its
+    # own.
+    #
+    # Each crate is a line at column 0 reading "name vX.Y.Z:", with the source
+    # in parentheses when it came from a git checkout or a local path, and the
+    # binaries it provides indented underneath. Matching on the name followed
+    # by a space is therefore enough to tell a crate named `rg` from a binary
+    # named `rg` listed under some other crate.
+    private def interpret_cargo_listing(key : String, result : ProcessResult) : InstallationStatus
+      unless result.success?
+        return InstallationStatus::Unknown.new(key, "cargo install --list exited #{result.exit_code}")
+      end
+
+      line = result.stdout.lines.find(&.starts_with?("#{key} "))
+      return InstallationStatus::NotInstalled.new(key) unless line
+
+      # "ripgrep v14.1.0:" and "mycrate v0.1.0 (/home/me/src):" both yield the
+      # bare version, since only the first spelling carries the colon.
+      version = line.split(' ')[1]?.try(&.lchop('v').rchop(':'))
+      InstallationStatus::InstalledByProbe.new(key, version.presence)
+    end
+
+    private def extract_version(stdout : String, manager : PackageManager, key : String) : String?
       line = stdout.lines.first?.try(&.strip)
       return if line.nil? || line.empty?
 
@@ -112,9 +143,13 @@ module Fluxion::Executor
         # `pacman -Q git` prints "git 2.45.2".
         line.split(' ')[1]?
       else
-        # `rpm -q git` prints "git-2.45.2-1.fc44.x86_64".
-        _, _, remainder = line.partition('-')
-        remainder.presence
+        # `rpm -q docker-compose` prints "docker-compose-2.29.7-1.fc41.x86_64".
+        # A package name may itself contain hyphens, so the key is removed as a
+        # literal prefix instead of splitting on the first hyphen, which used to
+        # report "compose-2.29.7-1.fc41.x86_64" as the version. The split stays
+        # as the fallback for the case where rpm answered with a different name
+        # than the key, as it does for a capability or file-path query.
+        (line.lchop?("#{key}-") || line.partition('-')[2]).presence
       end
     end
 
@@ -284,6 +319,10 @@ module Fluxion::Executor
     end
 
     def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
+      # Same guard as `GitRepoProbe`: without git there is no answer to give,
+      # and "git is missing" is not the same claim as "the key is unset".
+      return InstallationStatus::Unknown.new(item.key, "git is not on PATH") unless runner.command_exists?("git")
+
       scope, _, key = item.key.partition(':')
       return InstallationStatus::Unknown.new(item.key, "malformed git-config item key") if key.empty?
 
@@ -291,7 +330,15 @@ module Fluxion::Executor
       desired = step.try(&.entries[key]?)
 
       result = runner.run(Command.new(["git", "config", "--#{scope}", "--get", key], timeout: PROBE_TIMEOUT))
-      return InstallationStatus::NotInstalled.new(item.key) unless result.success?
+      unless result.success?
+        # `git config --get` exits 1 for "that key is not set", which is a real
+        # answer. Any other code — 128 when `--local` is used outside a work
+        # tree — means the question was never answered, and reporting that as
+        # absence would tell the user a key is missing that may well be set.
+        return InstallationStatus::NotInstalled.new(item.key) if result.exit_code == 1
+        return InstallationStatus::Unknown.new(item.key,
+          "git config --#{scope} --get exited #{result.exit_code}")
+      end
 
       current = result.stdout.strip
       return InstallationStatus::NotInstalled.new(item.key) if current.empty?
@@ -302,6 +349,23 @@ module Fluxion::Executor
 
   # systemd units, checked against the state the profile asked for.
   class SystemdUnitProbe < Probe
+    # Every word `systemctl is-enabled` and `systemctl is-active` can print.
+    #
+    # The lists exist because the runner folds stderr into stdout, so a
+    # systemctl that cannot answer at all — the ordinary case inside a
+    # container, where it writes "System has not been booted with systemd as
+    # init system (PID 1). Can't operate." and exits 1 — hands this probe a
+    # sentence where a state word belongs. Exit codes cannot tell the two
+    # apart, because the legitimate `disabled` also exits 1 and `is-active`
+    # exits non-zero for the legitimate `inactive` and `failed`. The word
+    # itself is the only signal that a question was answered.
+    IS_ENABLED_WORDS = %w[enabled enabled-runtime linked linked-runtime alias
+      masked masked-runtime static indirect disabled generated transient
+      not-found bad bad-setting]
+
+    IS_ACTIVE_WORDS = %w[active reloading inactive deactivating activating
+      failed maintenance refreshing unknown]
+
     def supports?(item : StepItem) : Bool
       item.item_type.systemd_unit?
     end
@@ -318,6 +382,14 @@ module Fluxion::Executor
       enabled = runner.run(Command.new(
         ["systemctl", scope.flag, "is-enabled", item.key], timeout: PROBE_TIMEOUT))
       word = enabled.stdout.lines.first?.try(&.strip) || ""
+      unless IS_ENABLED_WORDS.includes?(word)
+        # The rejected text, not the exit code, is why this probe gave up —
+        # `disabled` exits 1 legitimately, so the code says nothing on its own.
+        # The runner merges stderr into stdout, so the text quoted here is the
+        # diagnostic systemctl actually produced.
+        return InstallationStatus::Unknown.new(item.key,
+          "systemctl is-enabled said #{word.inspect} (exit #{enabled.exit_code})")
+      end
 
       return InstallationStatus::InstalledByProbe.new(item.key, word) if unit.nil?
 
@@ -336,7 +408,17 @@ module Fluxion::Executor
 
       active = runner.run(Command.new(
         ["systemctl", scope.flag, "is-active", item.key], timeout: PROBE_TIMEOUT))
-      running = active.stdout.lines.first?.try(&.strip) == "active"
+      state = active.stdout.lines.first?.try(&.strip) || ""
+      unless IS_ACTIVE_WORDS.includes?(state)
+        return InstallationStatus::Unknown.new(item.key,
+          "systemctl is-active said #{state.inspect} (exit #{active.exit_code})")
+      end
+
+      # `unknown` is in the vocabulary above even though systemd does not list
+      # it among the active states, because `is-active` prints it for a unit it
+      # has never heard of; treating that as "not running" is the honest
+      # reading, and it is what this probe did before the allowlist existed.
+      running = state == "active"
 
       satisfied = unit.state.started? ? running : !running
       satisfied ? InstallationStatus::InstalledByProbe.new(item.key, word) : InstallationStatus::NotInstalled.new(item.key)

@@ -183,12 +183,7 @@ module Fluxion::Executor
     protected abstract def argv(step : Step, executable : String, preview : Bool) : Array(String)
 
     def commands(step : Step, item : StepItem) : Array(Command)
-      [Command.new(argv(step, spec.executable, true), timeout: preview_timeout)]
-    end
-
-    # Same as the run unless the delegate's dry run is cheaper.
-    def preview_timeout : Time::Span
-      timeout
+      [Command.new(argv(step, spec.executable, true), timeout: timeout)]
     end
 
     def execute(step : Step, item : StepItem, runner : ShellRunner, &sink : String ->) : StepResult
@@ -274,7 +269,6 @@ module Fluxion::Executor
   # `binstaller-profile` — hand binary distribution to binstaller.
   class BinstallerExecutor < DelegatedToolExecutor
     APPLY_TIMEOUT = 30.minutes
-    PLAN_TIMEOUT  = 5.minutes
 
     def supports?(step : Step) : Bool
       step.is_a?(BinstallerProfileStep)
@@ -286,10 +280,6 @@ module Fluxion::Executor
 
     def timeout : Time::Span
       APPLY_TIMEOUT
-    end
-
-    def preview_timeout : Time::Span
-      PLAN_TIMEOUT
     end
 
     def config_label : String

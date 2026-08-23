@@ -48,11 +48,6 @@ module Fluxion::Executor
     # How long to wait after asking a process to stop before killing it.
     TERMINATION_GRACE = 5.seconds
 
-    getter? dry_run : Bool
-
-    def initialize(@dry_run : Bool = false)
-    end
-
     def run(command : Command, &sink : String ->) : ProcessResult
       argv = Sudo.for_effect(command.argv)
       started = Time.instant

@@ -61,9 +61,11 @@ module Fluxion::Executor
 
   # `git-repo` — clone at an exact commit.
   #
-  # A new checkout is staged beside its destination and only moved into place
-  # once origin and HEAD verify, so an interrupted clone never leaves a
-  # half-populated directory that later looks installed.
+  # The checkout is built in place: `git init` in the destination, then a fetch
+  # and a detach onto the pinned commit. Nothing is staged elsewhere first, so a
+  # run interrupted partway leaves a destination that already has a `.git` and
+  # is therefore inspected rather than rebuilt on the next run — it keeps
+  # failing the origin or HEAD check until someone removes the directory.
   class GitRepoExecutor < StepExecutor
     TIMEOUT = 10.minutes
 

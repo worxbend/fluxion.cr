@@ -101,4 +101,42 @@ describe Fluxion::Executor::FileWriteExecutor do
       execute(step).should be_a(Fluxion::StepResult::Failure)
     end
   end
+
+  it "fails without writing anything when the source is a directory" do
+    with_directory do |directory|
+      # `File.exists?` answers true for a directory, and `File.read` on one
+      # raises `IO::Error` — an error outside Fluxion's own set, so it used to
+      # escape the per-item boundary and abort the whole run instead of failing
+      # this one file.
+      source = File.join(directory, "tree")
+      Dir.mkdir_p(source)
+      destination = File.join(directory, "copied")
+
+      result = execute(write_step(Fluxion::FileWriteItem.new(
+        name: "copied", destination: destination, source: source)))
+
+      result.should be_a(Fluxion::StepResult::Failure)
+      result.as(Fluxion::StepResult::Failure)
+        .error_message.should contain("source is not a regular file")
+      File.exists?(destination).should be_false
+    end
+  end
+
+  it "still copies through a symlink that points at a regular file" do
+    with_directory do |directory|
+      # The file-type check has to follow symlinks the way `File.read` does,
+      # otherwise refusing "not a regular file" would break a perfectly ordinary
+      # dotfiles layout where the named source is a link.
+      target = File.join(directory, "template")
+      link = File.join(directory, "link")
+      destination = File.join(directory, "copied")
+      File.write(target, "from a link\n")
+      File.symlink(target, link)
+
+      execute(write_step(Fluxion::FileWriteItem.new(
+        name: "copied", destination: destination, source: link)))
+
+      File.read(destination).should eq("from a link\n")
+    end
+  end
 end

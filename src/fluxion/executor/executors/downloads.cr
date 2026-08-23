@@ -169,11 +169,7 @@ module Fluxion::Executor
       content = if inline = file.content
                   inline
                 else
-                  source = file.source.not_nil!
-                  unless File.exists?(source)
-                    return StepResult::Failure.new(item.key, "source file not found: #{source}", 1)
-                  end
-                  File.read(source)
+                  read_source(file.source.not_nil!)
                 end
 
       Installer.new(runner).write(content, file.destination,
@@ -182,6 +178,27 @@ module Fluxion::Executor
       StepResult::Success.new(item.key, Time.instant - started)
     rescue error : Error
       failure(item, error)
+    end
+
+    # `File.exists?` is also true for a directory, a FIFO and a socket. Reading
+    # a directory or a socket raises `IO::Error` — which is not a
+    # `Fluxion::Error`, so it escaped both this executor's rescue and the
+    # orchestrator's and took the whole run down instead of failing one item.
+    # A FIFO does not even raise: `File.read` on one blocks until something
+    # opens the other end, so the run would hang with no explanation. Requiring
+    # a regular file answers both.
+    # `File.info?` follows symlinks, matching what `File.read` itself does, so
+    # a symlink pointing at a regular file is still copied.
+    private def read_source(source : String) : String
+      info = File.info?(source)
+      raise ExecutionError.new("source file not found: #{source}") unless info
+      raise ExecutionError.new("source is not a regular file: #{source}") unless info.file?
+      File.read(source)
+    rescue error : IO::Error
+      # A regular file the user cannot read raises `File::Error`, an `IO::Error`
+      # subclass, which would otherwise escape the same way. The two raises
+      # above are `ExecutionError`s and so pass through this clause untouched.
+      raise ExecutionError.new("could not read source file #{source}: #{error.message}")
     end
 
     private def find(step : Step, item : StepItem) : FileWriteItem?

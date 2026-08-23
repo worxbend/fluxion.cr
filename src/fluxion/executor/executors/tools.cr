@@ -132,7 +132,15 @@ module Fluxion::Executor
       end
 
       destination = cache_path(spec)
-      Dir.mkdir_p(File.dirname(destination), 0o700)
+      begin
+        Dir.mkdir_p(File.dirname(destination), 0o700)
+      rescue error : File::Error
+        # Same reasoning as the rename below: a cache root that cannot be
+        # created — because something else already sits at that path, or the
+        # directory above it is not writable — raises outside Fluxion's error
+        # set and would abort the whole run rather than this one step.
+        raise ExecutionError.new("Failed to install #{spec.name}: #{error.message}")
+      end
 
       with_workspace do |workspace|
         archive = File.join(workspace, asset)
@@ -144,10 +152,32 @@ module Fluxion::Executor
           raise TrustError.new("#{asset} does not contain an executable named #{spec.executable}")
         end
 
-        extracted = File.join(workspace, spec.executable)
-        Archive.extract(archive, member.path, extracted)
-        File.chmod(extracted, 0o700)
-        File.rename(extracted, destination)
+        # The executable is staged beside its destination rather than inside
+        # the workspace. The workspace lives under `TMPDIR`, which on a host
+        # with a tmpfs `/tmp` — the systemd default — is a different filesystem
+        # from the cache root, and renaming across filesystems fails with
+        # EXDEV. That failure arrived as a `File::Error`, which is outside
+        # Fluxion's own error set, so it slipped past every per-item
+        # `rescue error : Error` and aborted the entire run instead of failing
+        # one step.
+        staged = "#{destination}.fluxion-#{Random::Secure.hex(8)}"
+        begin
+          Archive.extract(archive, member.path, staged)
+          File.chmod(staged, 0o700)
+          # Rename last, and within the destination's own directory: the
+          # publish is atomic, so a concurrent reader sees either no tool at
+          # all or the whole one.
+          File.rename(staged, destination)
+        rescue error
+          File.delete(staged) rescue nil
+          # A trust failure keeps its own type so its message stays truthful
+          # about which thing went wrong: "this archive is not what the catalog
+          # describes" is a different answer than "the filesystem refused the
+          # write". Both reach the same exit code today, so the distinction is
+          # for whoever reads the message.
+          raise error if error.is_a?(Error)
+          raise ExecutionError.new("Failed to install #{spec.name}: #{error.message}")
+        end
       end
 
       destination

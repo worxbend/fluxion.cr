@@ -247,7 +247,6 @@ module Fluxion::Config
         owner: context.optional_string(entry["owner"]),
         group: context.optional_string(entry["group"]),
         mode: context.file_mode(entry["mode"]),
-        sudo: context.bool(entry["sudo"], false),
       )
     end
 

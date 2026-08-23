@@ -393,7 +393,6 @@ module Fluxion
     getter owner : String?
     getter group : String?
     getter mode : String?
-    getter? sudo : Bool
     getter condition : Condition?
 
     def initialize(
@@ -404,7 +403,6 @@ module Fluxion
       @owner : String? = nil,
       @group : String? = nil,
       @mode : String? = nil,
-      @sudo : Bool = false,
       @condition : Condition? = nil,
     )
     end

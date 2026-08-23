@@ -81,6 +81,10 @@ combined checksum file.
 - Colour is automatic and honours `NO_COLOR`.
 - State schema numbering continues from the Java version's 7, so a machine that
   has run both never sees a version go backwards.
+- `file-writes` items have no `sudo` flag. Privilege is derived by
+  `Installer#privilege_for` from the destination's parent directory rather than
+  declared per item, so a profile cannot ask for a privileged write into a
+  directory it can already write, nor opt out of `sudo` for `/etc`.
 
 ## Conventions
 

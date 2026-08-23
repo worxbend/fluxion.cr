@@ -634,15 +634,21 @@ package kinds so Fluxion can still isolate and report individual packages.
         owner: root
         group: root
         mode: "0644"
-        sudo: true
       - name: local-copy
         destination: ~/.config/tool/local.conf
         source: /home/me/dotfiles/tool/local.conf
 ```
 
 Each item needs an absolute `destination` and exactly one of a string `content`
-or an absolute local `source`. Optional fields are `owner`, `group`, `mode`,
-`sudo`, and an item-level `when`. `writes` is accepted as an alias for `files`.
+or an absolute local `source`. Optional fields are `owner`, `group`, `mode`, and
+an item-level `when`. `writes` is accepted as an alias for `files`.
+
+There is no per-item `sudo`. Fluxion derives the privilege it needs from the
+destination's parent directory: an unprivileged atomic rename when that
+directory is writable, a structured `sudo install` when it is a secure
+root-owned directory, and a refusal otherwise. So an item cannot ask for a
+privileged write into a directory it can already write, nor opt out of `sudo`
+for somewhere like `/etc`.
 
 An entry whose items are all excluded by their own `when` is dropped rather than
 failed.

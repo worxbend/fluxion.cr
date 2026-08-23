@@ -86,6 +86,45 @@ describe Fluxion::Executor::SystemShellRunner do
     result.success?.should be_true
     result.stdout.should contain("20000")
   end
+
+  it "keeps output the process wrote before it exited even when the sink is slow" do
+    # Output is read on a fiber of its own, and that fiber only makes progress
+    # while the sink lets it. A sink that stalls on its first line parks the
+    # reading fiber for long enough that the process finishes and its output is
+    # left sitting in the pipe unread — the moment at which closing the pipe
+    # would throw that output away instead of reporting it.
+    lines = [] of String
+    stalled = false
+
+    result = runner.run(command("/bin/sh", "-c", "seq 1 5000", timeout: 30.seconds)) do |line|
+      unless stalled
+        stalled = true
+        sleep 100.milliseconds
+      end
+      lines << line
+    end
+
+    result.success?.should be_true
+    lines.size.should eq(5000)
+    lines.last.should eq("5000")
+    result.stdout.should contain("\n5000\n")
+    result.stdout.should_not contain("drain budget ran out")
+  end
+
+  it "does not leak the pipe it read the output through" do
+    # Not a regression test — the pipe was closed before the drain wait existed
+    # too. It pins the new close placement: the drain returns without closing
+    # when the stream ended on its own, so the unconditional close after it is
+    # now the only one on that path, and counting the process's own descriptors
+    # is the way to notice if it is ever dropped.
+    pending! "no /proc on this host" unless Dir.exists?("/proc/self/fd")
+
+    runner.run(command("/bin/echo", "warm-up"))
+    before = Dir.children("/proc/self/fd").size
+    20.times { runner.run(command("/bin/echo", "hi")) }
+
+    Dir.children("/proc/self/fd").size.should be <= before + 2
+  end
 end
 
 describe Fluxion::Executor::Command do

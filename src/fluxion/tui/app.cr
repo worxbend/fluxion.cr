@@ -32,24 +32,29 @@ module Fluxion::TUI
 
     # Keys, read on their own fiber, for every screen this app shows.
     #
+    # Memoised so the whole run shares one reader rather than starting a fresh
+    # one per screen — see `App.start_key_reader` for why that matters.
+    private def keys : Channel(CryTUI::KeyEvent)
+      @keys ||= App.start_key_reader
+    end
+
+    @keys : Channel(CryTUI::KeyEvent)? = nil
+
+    # Starts a fiber that reads STDIN and publishes the keypresses it decodes
+    # on the returned channel.
+    #
     # Input and animation cannot both own the loop: a screen that blocks on
     # `read` stops animating between keypresses, and one that polls with a
     # timeout burns the CPU. Keys arrive on a channel instead, and each screen
     # waits for whichever comes first — a key or the next frame deadline.
     #
-    # One reader for the whole run, not one per screen. A fiber blocked in
+    # Call this once per process, never once per screen. A fiber blocked in
     # `STDIN.read` cannot be called off, so a second reader started for the
     # execution screen left two fibers racing for the same keyboard — and the
     # one still holding the selector's channel won often enough that keys
     # pressed during the run simply vanished.
-    private def keys : Channel(CryTUI::KeyEvent)
-      @keys ||= start_key_reader
-    end
-
-    @keys : Channel(CryTUI::KeyEvent)? = nil
-
-    private def start_key_reader : Channel(CryTUI::KeyEvent)
-      keys = Channel(CryTUI::KeyEvent).new(64)
+    def self.start_key_reader(capacity : Int32 = 64) : Channel(CryTUI::KeyEvent)
+      keys = Channel(CryTUI::KeyEvent).new(capacity)
 
       spawn do
         parser = CryTUI::InputParser.new

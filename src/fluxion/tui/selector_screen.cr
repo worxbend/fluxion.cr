@@ -137,18 +137,21 @@ module Fluxion::TUI
 
     # One branch per binding. A keymap is a table by nature, and extracting
     # halves of it would only make a reader hunt for where a key is handled.
+    # Every key that names an `ActionKind` is routed through `perform` so the
+    # meaning of the action lives in one place; the rest have no action to
+    # name, and inventing one would add surface rather than remove it.
     private def handle_key(event : CryTUI::KeyEvent) : Outcome
       case event.code
-      when .up?        then move(-1)
-      when .down?      then move(1)
+      when .up?        then perform(ActionKind::NavigateUp)
+      when .down?      then perform(ActionKind::NavigateDown)
       when .left?      then perform(ActionKind::Collapse)
       when .right?     then perform(ActionKind::Expand)
       when .page_up?   then move(-page)
       when .page_down? then move(page)
-      when .home?      then move_to(0)
-      when .end?       then move_to({@rows.size - 1, 0}.max)
+      when .home?      then perform(ActionKind::NavigateTop)
+      when .end?       then perform(ActionKind::NavigateBottom)
       when .tab?       then perform(ActionKind::FocusNextPane)
-      when .enter?     then return run_if_possible
+      when .enter?     then return perform(ActionKind::Run)
       when .escape?    then return clear_or_cancel
       when .character?
         return handle_character(event)
@@ -160,21 +163,26 @@ module Fluxion::TUI
     private def handle_character(event : CryTUI::KeyEvent) : Outcome
       return Outcome::Cancel if event.character == 'c' && event.modifiers.control?
 
+      # `?` can toggle here because `handle` returns into `handle_help` while
+      # the panel is open, so this method is only ever reached with `@help`
+      # false and the toggle can only open the panel. A future path that got
+      # here with it open would turn `?` into a key that closes the panel it
+      # was pressed to see.
       case event.character
-      when 'x' then toggle
-      when 'j' then move(1)
-      when 'k' then move(-1)
+      when 'x' then perform(ActionKind::ToggleSelection)
+      when 'j' then perform(ActionKind::NavigateDown)
+      when 'k' then perform(ActionKind::NavigateUp)
       when 'h' then perform(ActionKind::Collapse)
       when 'l' then perform(ActionKind::Expand)
-      when 'a' then select_all
-      when 'n' then select_none
+      when 'a' then perform(ActionKind::SelectAll)
+      when 'n' then perform(ActionKind::SelectNone)
       when 'i' then perform(ActionKind::InvertSelection)
       when 'o' then perform(ActionKind::SelectOnlyThis)
       when 'R' then perform(ActionKind::ResumeFromState)
-      when '/' then start_search
-      when '?' then @help = true
-      when 'r' then return run_if_possible
-      when 'q' then return Outcome::Cancel
+      when '/' then perform(ActionKind::StartSearch)
+      when '?' then perform(ActionKind::ToggleHelp)
+      when 'r' then return perform(ActionKind::Run)
+      when 'q' then return perform(ActionKind::Quit)
       end
 
       Outcome::Continue
@@ -477,7 +485,7 @@ module Fluxion::TUI
       spans << CryTUI::Span.new(Host.facts.to_s, Theme.hint)
 
       lines = [CryTUI::Line.new(spans), resume_line]
-      block = Chrome.panel(Theme.symbol("⚡", "#"), "profile", "", nil, false, @frame)
+      block = Chrome.panel(Theme.symbol("⚡", "#"), "profile", @frame)
       CryTUI::Widgets::StyledText.new(lines, block: block).render(area, buffer)
     end
 
@@ -510,8 +518,8 @@ module Fluxion::TUI
 
     private def render_tree(buffer : CryTUI::Buffer, area : CryTUI::Rect) : Nil
       hint = searching? ? "match: #{@query}" : "x toggles · h/l folds"
-      block = Chrome.panel(Theme.symbol("❖", "+"), "phases and steps", hint,
-        @selection.profile.phases.size, @pane.tree?, @frame)
+      block = Chrome.panel(Theme.symbol("❖", "+"), "phases and steps", @frame,
+        hint: hint, count: @selection.profile.phases.size, focused: @pane.tree?)
 
       items = @rows.map { |row| CryTUI::Widgets::ListItem.new([row_line(row)]) }
       if items.empty?
@@ -580,8 +588,8 @@ module Fluxion::TUI
       lines = row ? detail_lines(row) : [CryTUI::Line.from("nothing to show", Theme.hint)]
       scroll = @detail_scroll.clamp(0, {lines.size - 1, 0}.max)
 
-      block = Chrome.panel(Theme.symbol("≡", "="), "what this does", "j/k scrolls",
-        row.try(&.step).try(&.items.size), @pane.detail?, @frame)
+      block = Chrome.panel(Theme.symbol("≡", "="), "what this does", @frame,
+        hint: "j/k scrolls", count: row.try(&.step).try(&.items.size), focused: @pane.detail?)
       CryTUI::Widgets::StyledText.new(lines, block: block, scroll: scroll).render(area, buffer)
     end
 
@@ -637,7 +645,7 @@ module Fluxion::TUI
                 "enter run · ? keys · q quit"
               end
 
-      block = Chrome.panel(Theme.symbol("▸", ">"), "selection", "", nil, false, @frame)
+      block = Chrome.panel(Theme.symbol("▸", ">"), "selection", @frame)
       CryTUI::Widgets::StyledText.new(
         [summary, CryTUI::Line.from(hints, Theme.hint)],
         block: block

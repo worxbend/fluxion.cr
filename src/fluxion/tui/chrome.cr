@@ -14,8 +14,8 @@ module Fluxion::TUI
     # border thickens and brightens when the pane has focus — which is the only
     # thing distinguishing the pane your keys are talking to from the one
     # beside it.
-    def panel(icon : String, label : String, hint : String, count : Int32?, focused : Bool,
-              frame : Int) : W::Block
+    def panel(icon : String, label : String, frame : Int, *,
+              hint : String = "", count : Int32? = nil, focused : Bool = false) : W::Block
       theme = Theme.palette
       heading = " #{icon}  #{label} "
       spans = if Theme.rich?
@@ -162,7 +162,7 @@ module Fluxion::TUI
         return if box.empty?
 
         Chrome.clear(buffer, box)
-        block = Chrome.panel(Theme.symbol("⌨", "keys"), Keymap.title(pending), "", nil, true, frame)
+        block = Chrome.panel(Theme.symbol("⌨", "keys"), Keymap.title(pending), frame, focused: true)
         block.render(box, buffer)
         inner = block.inner(box)
 
@@ -223,7 +223,8 @@ module Fluxion::TUI
         return if box.empty?
 
         Chrome.clear(buffer, box)
-        block = Chrome.panel(Theme.symbol("◈", "?"), "keybindings", "? or esc to close", nil, true, frame)
+        block = Chrome.panel(Theme.symbol("◈", "?"), "keybindings", frame,
+          hint: "? or esc to close", focused: true)
         W::StyledText.new(lines, block: block).render(box, buffer)
       end
     end

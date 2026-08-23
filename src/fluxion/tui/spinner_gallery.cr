@@ -43,20 +43,7 @@ module Fluxion::TUI
     # the next frame deadline.
     def self.run(page : Page = Page::Frames) : Nil
       gallery = new(page)
-      keys = Channel(CryTUI::KeyEvent).new(16)
-
-      spawn do
-        parser = CryTUI::InputParser.new
-        buffer = Bytes.new(1024)
-        loop do
-          read = STDIN.read(buffer)
-          break if read.zero?
-          parser.feed(String.new(buffer[0, read])).each do |event|
-            keys.send(event) if event.is_a?(CryTUI::KeyEvent)
-          end
-        end
-      rescue IO::Error
-      end
+      keys = App.start_key_reader(16)
 
       App.terminal do |terminal|
         loop do

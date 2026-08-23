@@ -156,18 +156,31 @@ module Fluxion::TUI
     private def complete(event : ExecutionEvent, result : StepResult) : Nil
       @summary.record(result)
 
-      state, detail = case result
-                      when StepResult::Success then {RunTree::ItemState::Succeeded, nil}
-                      when StepResult::Failure then {RunTree::ItemState::Failed, result.error_message}
-                      when StepResult::Skipped then {RunTree::ItemState::Skipped, result.reason}
-                      when StepResult::DryRun  then {RunTree::ItemState::Preview, result.would_execute.join(' ')}
-                      when StepResult::Paused  then {RunTree::ItemState::Paused, result.message}
-                      else                          {RunTree::ItemState::Succeeded, nil}
-                      end
-
       row = @tree.item(event.step_name, event.item)
-      row.state = state
-      row.detail = detail || row.detail
+
+      # No `else`: a variant this screen does not know about leaves the row as
+      # it was rather than claiming the item succeeded. Crystal cannot check a
+      # `case … in` over an abstract struct's subtypes, so this cannot be made
+      # exhaustive at compile time; staying silent at least keeps the screen
+      # consistent with `CLI::Reporter#item_completed` and `RunSummary#record`,
+      # which also match the five variants and nothing else.
+      case result
+      when StepResult::Success
+        row.state = RunTree::ItemState::Succeeded
+      when StepResult::Failure
+        row.state = RunTree::ItemState::Failed
+        row.detail = result.error_message
+      when StepResult::Skipped
+        row.state = RunTree::ItemState::Skipped
+        row.detail = result.reason
+      when StepResult::DryRun
+        row.state = RunTree::ItemState::Preview
+        row.detail = result.would_execute.join(' ')
+      when StepResult::Paused
+        row.state = RunTree::ItemState::Paused
+        row.detail = result.message
+      end
+
       row.finished_at = Time.instant
     end
 
@@ -204,17 +217,22 @@ module Fluxion::TUI
       end
     end
 
+    # One branch per binding. A keymap is a table by nature, and extracting
+    # halves of it would only make a reader hunt for where a key is handled.
+    # Every key that names an `ActionKind` is routed through `perform` so the
+    # meaning of the action lives in one place; the rest have no action to
+    # name, and inventing one would add surface rather than remove it.
     private def handle_key(event : CryTUI::KeyEvent) : Outcome
       case event.code
-      when .up?        then move(-1)
-      when .down?      then move(1)
-      when .left?      then collapse
-      when .right?     then expand
+      when .up?        then perform(ActionKind::NavigateUp)
+      when .down?      then perform(ActionKind::NavigateDown)
+      when .left?      then perform(ActionKind::Collapse)
+      when .right?     then perform(ActionKind::Expand)
       when .page_up?   then move(-page)
       when .page_down? then move(page)
-      when .home?      then move_to(0)
-      when .end?       then move_to({nodes.size - 1, 0}.max)
-      when .tab?       then @pane = @pane.next
+      when .home?      then perform(ActionKind::NavigateTop)
+      when .end?       then perform(ActionKind::NavigateBottom)
+      when .tab?       then perform(ActionKind::FocusNextPane)
       when .enter?     then pin
       when .escape?    then return escape
       when .character? then return handle_character(event)
@@ -226,16 +244,21 @@ module Fluxion::TUI
     private def handle_character(event : CryTUI::KeyEvent) : Outcome
       return stop_or_exit if event.character == 'c' && event.modifiers.control?
 
+      # `?` can toggle here because `handle` returns into `handle_help` while
+      # the panel is open, so this method is only ever reached with `@help`
+      # false and the toggle can only open the panel. A future path that got
+      # here with it open would turn `?` into a key that closes the panel it
+      # was pressed to see.
       case event.character
-      when 'j' then move(1)
-      when 'k' then move(-1)
-      when 'h' then collapse
-      when 'l' then expand
-      when 'f' then toggle_follow
-      when 'e' then toggle_failures
-      when 'o' then @show_output = !@show_output
-      when '?' then @help = true
-      when 'q' then return stop_or_exit
+      when 'j' then perform(ActionKind::NavigateDown)
+      when 'k' then perform(ActionKind::NavigateUp)
+      when 'h' then perform(ActionKind::Collapse)
+      when 'l' then perform(ActionKind::Expand)
+      when 'f' then perform(ActionKind::ToggleFollow)
+      when 'e' then perform(ActionKind::ToggleFilterFailures)
+      when 'o' then perform(ActionKind::ToggleOutput)
+      when '?' then perform(ActionKind::ToggleHelp)
+      when 'q' then return perform(ActionKind::Quit)
       end
 
       Outcome::Continue
@@ -501,7 +524,7 @@ module Fluxion::TUI
       spans << CryTUI::Span.new(Theme.symbol("  │  ", "  |  "), Theme.border)
       spans << CryTUI::Span.new(activity, activity_style)
 
-      block = Chrome.panel(Theme.symbol("⚡", "#"), "progress", "", nil, false, @frame)
+      block = Chrome.panel(Theme.symbol("⚡", "#"), "progress", @frame)
       block.render(area, buffer)
       inner = block.inner(area)
       return if inner.empty?
@@ -578,7 +601,8 @@ module Fluxion::TUI
       @cursor = @cursor.clamp(0, {rows.size - 1, 0}.max)
 
       hint = @failures_only ? "failures only" : (@follow ? "following" : "paused")
-      block = Chrome.panel(Theme.symbol("❖", "+"), "run", hint, rows.size, @pane.tree?, @frame)
+      block = Chrome.panel(Theme.symbol("❖", "+"), "run", @frame,
+        hint: hint, count: rows.size, focused: @pane.tree?)
 
       items = rows.map { |node| CryTUI::Widgets::ListItem.new(node_lines(node)) }
       if items.empty?
@@ -683,7 +707,8 @@ module Fluxion::TUI
       lines = visible_output
       title, hint = output_title
 
-      block = Chrome.panel(Theme.symbol("▤", "|"), title, hint, lines.size, @pane.output?, @frame)
+      block = Chrome.panel(Theme.symbol("▤", "|"), title, @frame,
+        hint: hint, count: lines.size, focused: @pane.output?)
       block.render(area, buffer)
       inner = block.inner(area)
       return if inner.empty?
@@ -779,7 +804,7 @@ module Fluxion::TUI
                 "? keys · q stop"
               end
 
-      block = Chrome.panel(Theme.symbol("▸", ">"), "summary", "", nil, false, @frame)
+      block = Chrome.panel(Theme.symbol("▸", ">"), "summary", @frame)
       CryTUI::Widgets::StyledText.new(
         [CryTUI::Line.new(parts), CryTUI::Line.from(hints, Theme.hint)],
         block: block

@@ -662,3 +662,83 @@ describe "tool-packages probe" do
     runner.ran?("pipx list --short").should be_true
   end
 end
+
+private def sdkman_item(candidate : String, version : String? = nil) : Fluxion::StepItem
+  entry = Fluxion::SdkmanCandidate.new(candidate, version)
+  step = Fluxion::SdkmanPackagesStep.new("sdkman-candidates", [entry])
+  Fluxion::StepItem.new("sdkman-candidates", candidate, Fluxion::ItemType::SdkmanPackage, entry.to_s, step: step)
+end
+
+# Lays out `<SDKMAN_DIR>/candidates/<candidate>/<version>` the way `sdk
+# install` leaves it, with `current` linked to the default version.
+private def sdkman_candidate(directory : String, candidate : String, versions : Array(String),
+                             current : String? = nil) : Nil
+  root = File.join(directory, "candidates", candidate)
+  versions.each { |version| Dir.mkdir_p(File.join(root, version, "bin")) }
+  Dir.mkdir_p(root)
+  File.symlink(current, File.join(root, "current")) if current
+end
+
+private def with_sdkman_dir(& : String -> T) : T forall T
+  with_probe_dir do |directory|
+    previous = ENV["SDKMAN_DIR"]?
+    ENV["SDKMAN_DIR"] = directory
+    begin
+      yield directory
+    ensure
+      previous ? (ENV["SDKMAN_DIR"] = previous) : ENV.delete("SDKMAN_DIR")
+    end
+  end
+end
+
+# `sdkman-packages` had no probe, so `status` called every candidate unknown
+# and `--re-probe` ran `sdk install` for each one again.
+describe "sdkman-packages probe" do
+  registry = Fluxion::Executor::ProbeRegistry.default
+  runner = Fluxion::Executor::FakeShellRunner.new
+
+  it "reports a candidate with a current version as installed, with that version" do
+    with_sdkman_dir do |directory|
+      sdkman_candidate(directory, "java", ["25.0.4-tem"], current: "25.0.4-tem")
+
+      status = registry.probe(sdkman_item("java"), runner)
+      status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("25.0.4-tem")
+    end
+  end
+
+  it "reports a candidate that is missing, or whose current link dangles, as absent" do
+    with_sdkman_dir do |directory|
+      registry.probe(sdkman_item("maven"), runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+
+      sdkman_candidate(directory, "gradle", [] of String, current: "9.1.0")
+      registry.probe(sdkman_item("gradle"), runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "reports a pinned candidate by its version, whatever current points at" do
+    with_sdkman_dir do |directory|
+      sdkman_candidate(directory, "java", ["21.0.4-tem", "25.0.4-tem"], current: "25.0.4-tem")
+
+      registry.probe(sdkman_item("java", "21.0.4-tem"), runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      registry.probe(sdkman_item("java", "17.0.12-tem"), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "looks in ~/.sdkman when SDKMAN_DIR is not set, as sdkman-init.sh does" do
+    with_probe_dir do |home|
+      previous_home, previous_dir = ENV["HOME"]?, ENV["SDKMAN_DIR"]?
+      ENV["HOME"] = home
+      ENV.delete("SDKMAN_DIR")
+      begin
+        sdkman_candidate(File.join(home, ".sdkman"), "sbt", ["1.11.7"], current: "1.11.7")
+        registry.probe(sdkman_item("sbt"), runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      ensure
+        previous_home ? (ENV["HOME"] = previous_home) : ENV.delete("HOME")
+        ENV["SDKMAN_DIR"] = previous_dir if previous_dir
+      end
+    end
+  end
+end

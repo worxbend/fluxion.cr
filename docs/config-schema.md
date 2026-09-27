@@ -506,6 +506,13 @@ argv interface — it is a set of shell functions — so its operands are
 interpolated into a shell command and are rejected unless they are inert
 (letters, digits, `.`, `_`, `+`, `-`).
 
+Candidates have a built-in probe that reads SDKMAN's directory (`SDKMAN_DIR`,
+or `~/.sdkman` when it is unset, as `sdkman-init.sh` does): an unpinned
+candidate is installed when `candidates/<candidate>/current` resolves to a
+version, reported as that version, and a pinned one when
+`candidates/<candidate>/<version>` exists, whichever version is the default.
+No `probeCommand` is needed.
+
 ### `flatpak-packages`
 
 ```yaml

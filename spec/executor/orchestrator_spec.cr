@@ -104,10 +104,8 @@ describe Fluxion::Executor::Orchestrator do
 
     summary.succeeded.should eq(2)
     summary.ok?.should be_true
-    runner.argv.should eq([
-      ["sudo", "dnf", "install", "-y", "git"],
-      ["sudo", "dnf", "install", "-y", "curl"],
-    ])
+    # One transaction for the list; see "package batching" below.
+    runner.argv.should eq([["sudo", "dnf", "install", "-y", "git", "curl"]])
   end
 
   it "runs phases in dependency order" do
@@ -123,8 +121,9 @@ describe Fluxion::Executor::Orchestrator do
 
   it "keeps installing the other packages after one fails" do
     # The isolation is the whole point of a package step: one bad name should
-    # not lose the rest of the list.
-    runner = Fluxion::Executor::FakeShellRunner.new.on("install -y broken", 1)
+    # not lose the rest of the list. The name fails the batch as well as its
+    # own install, as it would for a real package manager.
+    runner = Fluxion::Executor::FakeShellRunner.new.on("broken", 1)
     summary, _, _ = run(profile([phase("base", [packages("tools", "git", "broken", "curl")] of Fluxion::Step)]),
       runner)
 
@@ -134,7 +133,7 @@ describe Fluxion::Executor::Orchestrator do
   end
 
   it "stops a step at the first failure when continueOnError is off" do
-    runner = Fluxion::Executor::FakeShellRunner.new.on("install -y broken", 1)
+    runner = Fluxion::Executor::FakeShellRunner.new.on("broken", 1)
     step = packages("tools", "broken", "curl", continue_on_error: false)
     _, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner)
 
@@ -251,6 +250,104 @@ describe Fluxion::Executor::Orchestrator do
     summary, _, _ = run(profile([phase("base", [guarded] of Fluxion::Step)]), options: options)
 
     summary.succeeded.should eq(1)
+  end
+
+  describe "package batching" do
+    # On Debian and Ubuntu every dpkg run fires the man-db, desktop and icon
+    # triggers and the update-notifier `apt-check` hook, so one process per
+    # package cost 10-180 s each and a 180-package list took an hour. The same
+    # list in one `apt-get install` pays that once.
+    it "installs every package a step needs in one process" do
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl jq])
+      summary, listener, runner = run(profile([phase("base", [step] of Fluxion::Step)]))
+
+      runner.argv.should eq([["sudo", "apt-get", "install", "-y", "git", "curl", "jq"]])
+      summary.succeeded.should eq(3)
+      listener.results.map(&.item).should eq(%w[git curl jq])
+    end
+
+    it "falls back to one process per package when the batch fails" do
+      # One bad name fails the whole transaction, so the batch is only the fast
+      # path: the isolation that keeps a typo from losing the rest of the list
+      # is still there when it is needed.
+      runner = Fluxion::Executor::FakeShellRunner.new.on("broken", 100)
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git broken curl])
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner)
+
+      runner.argv.should eq([
+        ["sudo", "apt-get", "install", "-y", "git", "broken", "curl"],
+        ["sudo", "apt-get", "install", "-y", "git"],
+        ["sudo", "apt-get", "install", "-y", "broken"],
+        ["sudo", "apt-get", "install", "-y", "curl"],
+      ])
+      summary.succeeded.should eq(2)
+      summary.failed.should eq(1)
+    end
+
+    it "leaves out what a probe says is already installed" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("\\n git", 0, "install ok installed|1:2.43.0-1ubuntu7\n")
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl jq])
+      options = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::LiveReprobe)
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner, options: options)
+
+      runner.argv.reject(&.first.==("dpkg-query"))
+        .should eq([["sudo", "apt-get", "install", "-y", "curl", "jq"]])
+      summary.skipped.should eq(1)
+      summary.succeeded.should eq(2)
+      # Each item is probed once, not again after the batch installed it.
+      runner.argv.count(&.first.==("dpkg-query")).should eq(3)
+    end
+
+    it "runs the pre-install actions first, each on its own" do
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl],
+        actions: [Fluxion::PackageAction.new("update")])
+      summary, _, runner = run(profile([phase("base", [step] of Fluxion::Step)]))
+
+      runner.argv.should eq([
+        ["sudo", "apt-get", "update"],
+        ["sudo", "apt-get", "install", "-y", "git", "curl"],
+      ])
+      summary.succeeded.should eq(3)
+    end
+
+    it "records every package the batch installed" do
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl])
+        run(profile([phase("base", [step] of Fluxion::Step)]), store: store)
+
+        document = store.load("default")
+        document.find("tools", "git", "package").should_not be_nil
+        document.find("tools", "curl", "package").should_not be_nil
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "previews the batch it would run" do
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl])
+      options = Fluxion::Executor::RunOptions.new(dry_run: true)
+      summary, listener, runner = run(profile([phase("base", [step] of Fluxion::Step)]), options: options)
+
+      runner.commands.should be_empty
+      summary.dry_run.should eq(2)
+      previews = listener.results.compact_map(&.as?(Fluxion::StepResult::DryRun))
+      previews.first.would_execute.should eq(["sudo", "apt-get", "install", "-y", "git", "curl"])
+      previews.last.would_execute.should be_empty
+    end
+
+    it "keeps cargo to one crate per process" do
+      # Each crate is its own build, so there is no shared cost to save, and
+      # `cargo install a b` stops at the first crate that fails to compile.
+      step = Fluxion::PackagesStep.new("crates", Fluxion::PackageManager::Cargo, %w[ripgrep fd-find])
+      _, _, runner = run(profile([phase("base", [step] of Fluxion::Step)]))
+
+      runner.argv.should eq([["cargo", "install", "ripgrep"], ["cargo", "install", "fd-find"]])
+    end
   end
 
   describe "cancellation" do
@@ -707,8 +804,10 @@ describe "dry-run and interrupts" do
     directory = File.tempname("fluxion-flush")
     begin
       store = Fluxion::State::Store.new(directory)
+      # Two steps rather than one list, because a list is installed as one
+      # batch and would explode before anything succeeded.
       subject = profile([
-        phase("base", [packages("tools", "git", "boom")] of Fluxion::Step),
+        phase("base", [packages("tools", "git"), packages("more", "boom")] of Fluxion::Step),
       ])
 
       expect_raises(Exception, "unexpected") do

@@ -394,10 +394,13 @@ list, so a typo names its own fix.
 
 ## Package kinds
 
-Every package kind installs each item in a **separate process**, so one bad name
-never costs the rest of the list. A single transaction of twenty packages fails
-entirely on the first typo and leaves you with nothing, including the nineteen
-that were fine.
+The system package kinds install every package that needs installing in **one
+transaction**, and when that fails, each item in a **separate process**, so one
+bad name never costs the rest of the list. A single transaction of twenty
+packages fails entirely on the first typo and leaves you with nothing, including
+the nineteen that were fine; the fallback is what gets you those nineteen.
+`cargo-packages`, `flatpak` and `tool-packages` always install one item per
+process.
 
 ```yaml
 - name: core-cli-tools
@@ -451,6 +454,13 @@ The system package managers. Each takes `packages`, an optional
 | `zypper-packages` | `refresh`, `update`, `dup`, `dup-from` |
 
 An action may be a bare string or an object with `action` and `args`.
+
+Actions run first, one process each. The packages that still need installing —
+everything, or with `--skip-already-installed`/`--re-probe` only what the probes
+report missing — then go into one `install` transaction. If that fails, each is
+installed in its own process, so a bad name fails only its own item. Each
+package is reported and recorded as its own item either way; the batch's output
+and time are shown against the first package in it.
 
 ### `aur-packages`
 

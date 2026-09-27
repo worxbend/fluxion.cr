@@ -51,6 +51,23 @@ module Fluxion::Executor
       StepResult::Success.new(item.key, Time.instant - started)
     end
 
+    # Whether this item may be installed together with other items of the same
+    # step through `#batch_command`. No kind batches unless it says so.
+    def batches?(step : Step, item : StepItem) : Bool
+      false
+    end
+
+    # One command that does the work of every item in `items`, all of which
+    # `#batches?` accepted, or nil when there is no such command.
+    #
+    # The orchestrator decides which items go in — only the ones that would
+    # otherwise run — and falls back to `#execute` per item when the command
+    # fails, so a kind that batches keeps the per-item isolation for the case
+    # that needs it.
+    def batch_command(step : Step, items : Array(StepItem)) : Command?
+      nil
+    end
+
     # What a dry run would do.
     def preview(step : Step, item : StepItem) : StepResult::DryRun
       StepResult::DryRun.new(item.key, commands(step, item).flat_map(&.preview))

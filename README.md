@@ -97,8 +97,8 @@ spec:
             config: ./binstaller.yaml
 ```
 
-Packages install one process each, so one bad name never loses the rest of the
-list. Phases run in dependency order, and a phase whose dependency failed is
+A package list installs in one transaction, and one package per process when
+that fails, so one bad name never loses the rest of the list. Phases run in dependency order, and a phase whose dependency failed is
 reported as blocked rather than silently skipped.
 
 Steps carry `when` rules, so one profile can do the right thing on Fedora and on

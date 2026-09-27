@@ -20,6 +20,24 @@ does not repay optimisation.
 | TUI redraw | once per frame | cell allocation |
 | State bookkeeping | once per item | file reads and JSON parsing |
 
+A fifth dwarfs all of them when it goes wrong, and it is not Fluxion's own
+time: the package manager's cost per transaction. See the next section.
+
+## A package list is one transaction
+
+`packages` steps used to run one package manager process per package. On
+Ubuntu 24.04 that cost 10-180 s a package — dpkg itself took about 6 s, the rest
+was the man-db, desktop and icon triggers and update-notifier's `apt-check`
+hook, all of which run after every dpkg invocation — and a 180-package base
+profile took **57 minutes**. One `apt-get install` of the same list pays those
+costs once.
+
+The orchestrator now asks the executor for a batch command at the first package
+that needs installing, covering every later package of the step that would also
+run (the skip decisions it makes to find them are remembered, so nothing is
+probed twice). On failure it falls back to one process per package, which keeps
+the isolation a bad package name needs. Cargo and flatpak do not batch.
+
 ## Probes are subprocesses, so they run concurrently
 
 A probe asks a package manager whether one item is installed. It spends nearly

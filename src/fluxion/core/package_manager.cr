@@ -93,23 +93,43 @@ module Fluxion
       paru? || yay?
     end
 
-    # Argv that installs one package. Fluxion installs a package per process so
-    # a single bad name cannot take the rest of the list down with it.
+    # Argv that installs one package.
     #
     # A leading "sudo" is a marker, not the final command: the shell runner
     # rewrites it into a non-interactive invocation with a trust-resolved
     # target before anything is spawned.
     def install_argv(package : String) : Array(String)
-      case self
-      in .apt?     then ["sudo", "apt-get", "install", "-y", package]
-      in .dnf?     then ["sudo", "dnf", "install", "-y", package]
-      in .pacman?  then ["sudo", "pacman", "-S", "--noconfirm", package]
-      in .paru?    then ["paru", "-S", "--noconfirm", package]
-      in .yay?     then ["yay", "-S", "--noconfirm", package]
-      in .zypper?  then ["sudo", "zypper", "install", "-y", package]
-      in .cargo?   then ["cargo", "install", package]
-      in .flatpak? then ["flatpak", "install", "-y", package]
-      end
+      install_argv([package])
+    end
+
+    # Argv that installs several packages in one transaction. Only meaningful
+    # for a manager that `#batches?`; the per-package form above is this with
+    # a list of one.
+    def install_argv(packages : Array(String)) : Array(String)
+      prefix = case self
+               in .apt?     then ["sudo", "apt-get", "install", "-y"]
+               in .dnf?     then ["sudo", "dnf", "install", "-y"]
+               in .pacman?  then ["sudo", "pacman", "-S", "--noconfirm"]
+               in .paru?    then ["paru", "-S", "--noconfirm"]
+               in .yay?     then ["yay", "-S", "--noconfirm"]
+               in .zypper?  then ["sudo", "zypper", "install", "-y"]
+               in .cargo?   then ["cargo", "install"]
+               in .flatpak? then ["flatpak", "install", "-y"]
+               end
+      prefix + packages
+    end
+
+    # Whether a package list is worth installing in one process.
+    #
+    # The system managers pay a large fixed cost per transaction — dnf and
+    # zypper load repository metadata, and every dpkg run on Debian and Ubuntu
+    # fires the man-db, desktop and icon triggers and update-notifier's
+    # `apt-check` — so a list installed one package at a time costs that once
+    # per package. Cargo builds each crate on its own anyway and stops at the
+    # first that fails to compile, and flatpak apps are independent downloads,
+    # so neither has anything to gain.
+    def batches? : Bool
+      !(cargo? || flatpak?)
     end
 
     # The pre-install actions this manager has, keyed by verb.

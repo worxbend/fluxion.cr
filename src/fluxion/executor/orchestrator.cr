@@ -79,6 +79,7 @@ module Fluxion::Executor
         @recorder : Recorder,
       )
         @summary = RunSummary.new
+        @batch = StepBatch.new
       end
 
       def walk(profile : Profile, phases : Array(Phase)) : RunSummary
@@ -261,12 +262,14 @@ module Fluxion::Executor
 
         @listener.on_event(ExecutionEvent.step_started(step.name))
         any_failed = false
+        items = executor.items(step)
+        @batch = StepBatch.new
 
         begin
-          executor.items(step).each do |item|
+          items.each_with_index do |item, index|
             break if @cancellation.cancelled?
 
-            result = run_item(step, item, executor)
+            result = run_item(step, item, executor, items[(index + 1)..])
             @summary.record(result)
             @recorder.item_succeeded(item, result) if result.is_a?(StepResult::Success)
             next unless result.is_a?(StepResult::Failure)
@@ -281,20 +284,36 @@ module Fluxion::Executor
         any_failed
       end
 
-      private def run_item(step : Step, item : StepItem, executor : StepExecutor) : StepResult
+      # `later` is the rest of the step's items, which a batch may take on.
+      private def run_item(step : Step, item : StepItem, executor : StepExecutor,
+                           later : Array(StepItem)) : StepResult
         @listener.on_event(ExecutionEvent.item_started(step.name, item.key))
+
+        # Done by a batch an earlier item ran, or described by its preview.
+        if @batch.covers?(item)
+          result = @options.read_only? ? StepResult::DryRun.new(item.key, [] of String) : StepResult::Success.new(item.key, Time::Span.zero)
+          return completed(step.name, item.key, result)
+        end
 
         if decision = skip_decision(item)
           return completed(step.name, item.key, StepResult::Skipped.new(item.key, decision.to_s))
         end
 
+        batch = plan_batch(step, item, executor, later)
+
         if @options.read_only?
-          return completed(step.name, item.key, executor.preview(step, item))
+          preview = batch ? StepResult::DryRun.new(item.key, batch[0].preview) : executor.preview(step, item)
+          @batch.cover(batch[1]) if batch
+          return completed(step.name, item.key, preview)
         end
 
         if step.requires_approval?(item.key) && !@options.approved?
           return completed(step.name, item.key, StepResult::Failure.new(item.key,
             "explicit confirmation required; re-run with --yes", 2))
+        end
+
+        if batch && (installed = run_batch(step, item, *batch))
+          return completed(step.name, item.key, installed)
         end
 
         # The one place a `Fluxion::Error` from an executor becomes a failed
@@ -327,15 +346,73 @@ module Fluxion::Executor
       end
 
       # Whether this item can be skipped, and on what evidence.
+      #
+      # Remembered for the length of the step, because planning a batch asks
+      # it of every later item before those items are reached, and a batch
+      # that has just installed them must not be answered by a fresh probe
+      # that would call them skipped.
       private def skip_decision(item : StepItem) : InstallationStatus?
         return unless @options.mode.probes?
 
+        @batch.decisions.fetch(item.key) do
+          @batch.decisions[item.key] = decide_skip(item)
+        end
+      end
+
+      private def decide_skip(item : StepItem) : InstallationStatus?
         if recorded = @recorder.recorded(item)
           return recorded
         end
 
         status = @probes.probe(item, @runner)
         status.installed? ? status : nil
+      end
+
+      # The command that installs this item together with every later item of
+      # the step that would also run, and those items, or nil when this item
+      # runs on its own.
+      #
+      # Asked once per step, at the first item that can batch: whatever that
+      # batch leaves out, or everything after a batch that failed, runs one
+      # process per item as before. A batch of one is no batch.
+      private def plan_batch(step : Step, item : StepItem, executor : StepExecutor,
+                             later : Array(StepItem)) : {Command, Array(StepItem)}?
+        return if @batch.planned? || !executor.batches?(step, item)
+        @batch.planned = true
+
+        members = [item] + later.select { |other| executor.batches?(step, other) && would_run?(step, other) }
+        return if members.size < 2
+
+        executor.batch_command(step, members).try { |command| {command, members} }
+      end
+
+      private def would_run?(step : Step, item : StepItem) : Bool
+        return false if step.requires_approval?(item.key) && !@options.approved?
+        skip_decision(item).nil?
+      end
+
+      # Runs a batch on behalf of `item`, which reports its output and its time.
+      # Returns nil when the batch failed, and the item then runs on its own
+      # like every other member will.
+      private def run_batch(step : Step, item : StepItem, command : Command,
+                            members : Array(StepItem)) : StepResult?
+        started = Time.instant
+        result = @runner.run(command) do |line|
+          @listener.on_event(ExecutionEvent.item_output(step.name, item.key, line))
+        end
+
+        unless command.success?(result.exit_code)
+          @listener.on_event(ExecutionEvent.item_output(step.name, item.key,
+            "installing #{members.size} together exited #{result.exit_code}; installing one at a time"))
+          return
+        end
+
+        @batch.cover(members)
+        StepResult::Success.new(item.key, Time.instant - started)
+      rescue Error
+        # Whatever went wrong, the per-item path is still there to try, and it
+        # reports its own failure properly.
+        nil
       end
 
       # `confirm` items need explicit approval. Fluxion does not prompt for them
@@ -402,6 +479,25 @@ module Fluxion::Executor
         @listener.on_event(ExecutionEvent.item_started(name, name))
         @listener.on_event(ExecutionEvent.item_completed(name, name, result))
         @summary.record(result)
+      end
+
+      # What the step being run has decided about batching.
+      private class StepBatch
+        # Skip decisions already made, by item key; nil means "run it".
+        getter decisions = {} of String => InstallationStatus?
+
+        property? planned = false
+
+        @covered = Set(String).new
+
+        # Items a batch installed, or a previewed batch would install.
+        def cover(items : Array(StepItem)) : Nil
+          items.each { |member| @covered << member.key }
+        end
+
+        def covers?(item : StepItem) : Bool
+          @covered.includes?(item.key)
+        end
       end
 
       private enum PhaseOutcome

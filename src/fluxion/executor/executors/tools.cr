@@ -64,8 +64,8 @@ module Fluxion::Executor
       asset_template: "binstaller-${version}-${os}-${arch}.tar.gz",
       executable: "binstaller",
       digests: {
-        "binstaller-v0.2.0-linux-amd64.tar.gz" => "802bf5da1f6af5f0f00984751f45cb5c0448ee24283729ff21e5ea7f0718f951",
-        "binstaller-v0.2.0-linux-arm64.tar.gz" => "48135498e3973347b6c0f0b843942def56f5dbba22c95d8f75d5272186a74d52",
+        "binstaller-v0.5.0-linux-amd64.tar.gz" => "3c7e544f6b95b16438f18745c8bb9550ebc84e18f6ca66175df8f12ddf7ad40b",
+        "binstaller-v0.5.0-linux-arm64.tar.gz" => "5ad4874c8eba1ade1591ab2b2e84955f8c8c16c888f011330872d176ece2f631",
       },
     )
 

@@ -750,7 +750,7 @@ already maintain and maps its own verbs onto binstaller's.
     skip: [zig]                 # optional
     locked: true                # optional; requires lockFile
     lockFile: ~/binstaller.lock.json
-    installerVersion: v0.2.0    # assertion, not a choice — see below
+    installerVersion: v0.5.0    # assertion, not a choice — see below
     continueOnError: false
 ```
 

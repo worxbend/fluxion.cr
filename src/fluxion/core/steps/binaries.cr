@@ -54,7 +54,7 @@ module Fluxion
 
   class BinstallerProfileStep < Step
     include DelegatedConfig
-    DEFAULT_INSTALLER_VERSION = "v0.2.0"
+    DEFAULT_INSTALLER_VERSION = "v0.5.0"
 
     getter config : String
     getter only : Array(String)

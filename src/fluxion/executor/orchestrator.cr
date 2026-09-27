@@ -436,6 +436,12 @@ module Fluxion::Executor
       # Runs a batch on behalf of `item`, which reports its output and its time.
       # Returns nil when the batch failed, and the item then runs on its own
       # like every other member will.
+      #
+      # A batch that failed because the user interrupted it is not retried one
+      # by one: Ctrl-C kills the one-transaction install, and falling back
+      # started a fresh `apt-get install` for the first package after the user
+      # had asked to stop. The item fails as cancelled instead, and the step's
+      # own cancellation check stops the rest.
       private def run_batch(step : Step, item : StepItem, command : Command,
                             members : Array(StepItem)) : StepResult?
         started = Time.instant
@@ -444,6 +450,7 @@ module Fluxion::Executor
         end
 
         unless command.success?(result.exit_code)
+          return cancelled_batch(item) if @cancellation.cancelled?
           @listener.on_event(ExecutionEvent.item_output(step.name, item.key,
             "installing #{members.size} together exited #{result.exit_code}; installing one at a time"))
           return
@@ -453,8 +460,12 @@ module Fluxion::Executor
         StepResult::Success.new(item.key, Time.instant - started)
       rescue Error
         # Whatever went wrong, the per-item path is still there to try, and it
-        # reports its own failure properly.
-        nil
+        # reports its own failure properly — unless the user asked to stop.
+        @cancellation.cancelled? ? cancelled_batch(item) : nil
+      end
+
+      private def cancelled_batch(item : StepItem) : StepResult
+        StepResult::Failure.new(item.key, "cancelled", 130)
       end
 
       # `confirm` items need explicit approval. Fluxion does not prompt for them

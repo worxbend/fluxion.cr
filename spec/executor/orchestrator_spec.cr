@@ -418,6 +418,19 @@ describe Fluxion::Executor::Orchestrator do
       summary.failed.should eq(1)
     end
 
+    it "does not fall back to installing one at a time after the user cancelled the batch" do
+      cancellation = Fluxion::CancellationSignal.new
+      runner = CancellingRunner.new("install -y git curl jq", cancellation)
+      runner.on("install -y git curl jq", 130)
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl jq])
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner,
+        cancellation: cancellation)
+
+      runner.argv.should eq([["sudo", "apt-get", "install", "-y", "git", "curl", "jq"]])
+      summary.succeeded.should eq(0)
+      summary.next_phase.should eq("base")
+    end
+
     it "leaves out what a probe says is already installed" do
       runner = Fluxion::Executor::FakeShellRunner.new
         .available("dpkg-query")

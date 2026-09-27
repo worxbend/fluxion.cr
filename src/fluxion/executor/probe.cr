@@ -30,6 +30,7 @@ module Fluxion::Executor
         FlatpakProbe.new,
         FlatpakRemoteProbe.new,
         RepositoryFileProbe.new,
+        GpgKeyringProbe.new,
         PathProbe.new,
         DefaultShellProbe.new,
         GitRepoProbe.new,
@@ -279,6 +280,47 @@ module Fluxion::Executor
       end
 
       InstallationStatus::InstalledByProbe.new(item.key)
+    end
+  end
+
+  # `gpg-key` entries that install a keyring, checked for the declared key.
+  #
+  # Registered ahead of `PathProbe`, which used to answer for these by the path
+  # alone: a keyring left at the same path by a vendor package or an older
+  # setup, holding another key, counted as installed, so the declared key was
+  # never written. The rule is the executor's own — exactly one primary key,
+  # the declared one — read unprivileged from the installed file.
+  #
+  # An RPM-imported key has no path to read and no step here to compare with,
+  # and neither does an item from a state file alone, so those are left to the
+  # probes after this one.
+  class GpgKeyringProbe < Probe
+    def supports?(item : StepItem) : Bool
+      item.item_type.gpg_key? && item.key.starts_with?('/') && !entry(item).nil?
+    end
+
+    def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
+      expected = entry(item).not_nil!.fingerprint
+
+      info = File.info?(item.key)
+      return InstallationStatus::NotInstalled.new(item.key) unless info && info.file? && info.size > 0
+      return InstallationStatus::Unknown.new(item.key, "gpg is not on PATH") unless runner.command_exists?("gpg")
+
+      result = runner.run(Command.new(GpgKeyListing.argv(item.key), timeout: PROBE_TIMEOUT))
+      unless result.success?
+        return InstallationStatus::Unknown.new(item.key,
+          "gpg could not read the keyring (exit #{result.exit_code})")
+      end
+
+      if GpgKeyListing.primary_fingerprints(result.stdout) == [expected.value]
+        InstallationStatus::InstalledByProbe.new(item.key)
+      else
+        InstallationStatus::NotInstalled.new(item.key)
+      end
+    end
+
+    private def entry(item : StepItem) : GpgKeyEntry?
+      item.step.as?(GpgKeyStep).try(&.keys.find { |key| key.keyring == item.key })
     end
   end
 

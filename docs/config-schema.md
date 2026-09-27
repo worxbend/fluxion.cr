@@ -953,7 +953,12 @@ only when that copy still matches. A mismatch or unsafe file fails without
 replacing anything or importing the download.
 
 An RPM-imported key is tracked by its fingerprint and a keyring-backed key by
-its absolute keyring path. Query parameters and fragments remain available to the
+its absolute keyring path. A keyring-backed key is probed by reading the
+installed keyring with `gpg --show-keys`, unprivileged: it counts as installed
+only when the keyring holds exactly one primary key, the declared
+`fingerprint`. A keyring at that path holding another key is reported as
+missing, and an empty or absent one likewise; when gpg cannot read it, the
+answer is unknown. Query parameters and fragments remain available to the
 request but are excluded from plans, events, errors, and state.
 `continueOnError: true` attempts the remaining keys, but a trust failure still
 fails the step; the phase's `execution.continueOnError` then decides whether

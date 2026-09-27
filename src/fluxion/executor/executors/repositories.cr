@@ -281,6 +281,38 @@ module Fluxion::Executor
     end
   end
 
+  # Reading which keys a file holds, without importing any of them.
+  #
+  # Shared by the `gpg-key` executor, which checks a download before
+  # installing it, and its probe, which checks an installed keyring, so both
+  # hold a key file to the same rule.
+  module GpgKeyListing
+    def self.argv(path : String) : Array(String)
+      ["gpg", "--batch", "--no-options", "--show-keys", "--with-colons", path]
+    end
+
+    # In gpg's colon output an `fpr` record directly after a `pub` gives that
+    # primary key's fingerprint; subkeys follow their own `sub` records.
+    def self.primary_fingerprints(output : String) : Array(String)
+      found = [] of String
+      awaiting = false
+
+      output.each_line do |line|
+        fields = line.split(':')
+        case fields.first?
+        when "pub"
+          awaiting = true
+        when "fpr"
+          next unless awaiting
+          awaiting = false
+          fields[9]?.try { |value| found << value.gsub(/\s/, "").upcase }
+        end
+      end
+
+      found
+    end
+  end
+
   # `gpg-key` — import repository signing keys.
   #
   # The fingerprint is checked against what gpg reads out of the downloaded
@@ -369,36 +401,13 @@ module Fluxion::Executor
         return "gpg is not on PATH, so the key fingerprint cannot be verified"
       end
 
-      result = runner.run(Command.new(
-        ["gpg", "--batch", "--no-options", "--show-keys", "--with-colons", path],
-        timeout: KEY_TIMEOUT))
+      result = runner.run(Command.new(GpgKeyListing.argv(path), timeout: KEY_TIMEOUT))
       return "could not read the key: #{result.detail}" unless result.success?
 
-      fingerprints = primary_fingerprints(result.stdout)
+      fingerprints = GpgKeyListing.primary_fingerprints(result.stdout)
       return if fingerprints == [expected.value]
 
       "key fingerprint mismatch: expected #{expected} but found #{fingerprints.join(", ").presence || "none"}"
-    end
-
-    # In gpg's colon output an `fpr` record directly after a `pub` gives that
-    # primary key's fingerprint; subkeys follow their own `sub` records.
-    private def primary_fingerprints(output : String) : Array(String)
-      found = [] of String
-      awaiting = false
-
-      output.each_line do |line|
-        fields = line.split(':')
-        case fields.first?
-        when "pub"
-          awaiting = true
-        when "fpr"
-          next unless awaiting
-          awaiting = false
-          fields[9]?.try { |value| found << value.gsub(/\s/, "").upcase }
-        end
-      end
-
-      found
     end
 
     private def find(step : Step, item : StepItem) : GpgKeyEntry?

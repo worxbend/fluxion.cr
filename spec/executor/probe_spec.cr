@@ -509,3 +509,90 @@ describe Fluxion::Executor::RepositoryFileProbe do
     end
   end
 end
+
+private GPG_FINGERPRINT = "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+
+# What `gpg --show-keys --with-colons` prints for one primary key with a
+# subkey: the `fpr` after `pub` is the primary's, the one after `sub` is not.
+private def gpg_listing(primary : String) : String
+  <<-COLONS
+    pub:-:4096:1:8D81803C0EBFCD88:1487788586:::-:::scESA::::::23::0:
+    fpr:::::::::#{primary}:
+    uid:-::::1487792064::B5FA5F0F1BB1A4C4E3AD7F71A0C4CC39DB76E3EC::Docker Release (CE deb) <docker@docker.com>::::::::::0:
+    sub:-:4096:1:7EA0A9C3F273FCD8:1487788586::::::s::::::23:
+    fpr:::::::::D3306A018370199E527AE7317EA0A9C3F273FCD8:
+
+    COLONS
+end
+
+private def gpg_keyring_item(keyring : String) : Fluxion::StepItem
+  entry = Fluxion::GpgKeyEntry.new("https://download.example.test/gpg",
+    Fluxion::Fingerprint.new(GPG_FINGERPRINT), keyring)
+  step = Fluxion::GpgKeyStep.new("repository-keys", [entry])
+  Fluxion::StepItem.new("repository-keys", entry.item_key, Fluxion::ItemType::GpgKey, step: step)
+end
+
+describe "gpg-key keyring probe" do
+  registry = Fluxion::Executor::ProbeRegistry.default
+
+  it "reports a keyring holding the declared key as installed" do
+    with_probe_dir do |directory|
+      keyring = File.join(directory, "vendor.gpg")
+      File.write(keyring, "keyring bytes")
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("gpg")
+        .on("--show-keys", 0, gpg_listing(GPG_FINGERPRINT))
+
+      registry.probe(gpg_keyring_item(keyring), runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.ran?("gpg --batch --no-options --show-keys --with-colons #{keyring}").should be_true
+    end
+  end
+
+  it "reports a keyring holding some other key as absent" do
+    # The same path with a different key in it — a vendor's older key, or one
+    # a package's postinst wrote — used to count as installed because only
+    # the path was checked, so the declared key was never installed.
+    with_probe_dir do |directory|
+      keyring = File.join(directory, "vendor.gpg")
+      File.write(keyring, "keyring bytes")
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("gpg")
+        .on("--show-keys", 0, gpg_listing("0123456789ABCDEF0123456789ABCDEF01234567"))
+
+      registry.probe(gpg_keyring_item(keyring), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "reports an empty or missing keyring as absent without asking gpg" do
+    with_probe_dir do |directory|
+      keyring = File.join(directory, "vendor.gpg")
+      runner = Fluxion::Executor::FakeShellRunner.new.available("gpg")
+
+      registry.probe(gpg_keyring_item(keyring), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+      File.write(keyring, "")
+      registry.probe(gpg_keyring_item(keyring), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+      runner.ran?("gpg").should be_false
+    end
+  end
+
+  it "reports Unknown when the keyring cannot be read" do
+    with_probe_dir do |directory|
+      keyring = File.join(directory, "vendor.gpg")
+      File.write(keyring, "keyring bytes")
+
+      no_gpg = Fluxion::Executor::FakeShellRunner.new
+      registry.probe(gpg_keyring_item(keyring), no_gpg)
+        .should be_a(Fluxion::InstallationStatus::Unknown)
+
+      failing = Fluxion::Executor::FakeShellRunner.new
+        .available("gpg")
+        .on("--show-keys", 2, "gpg: no valid OpenPGP data found.\n")
+      registry.probe(gpg_keyring_item(keyring), failing)
+        .should be_a(Fluxion::InstallationStatus::Unknown)
+    end
+  end
+end

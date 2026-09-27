@@ -80,6 +80,7 @@ module Fluxion::Executor
       )
         @summary = RunSummary.new
         @batch = StepBatch.new
+        @phase_changed_host = false
       end
 
       def walk(profile : Profile, phases : Array(Phase)) : RunSummary
@@ -203,6 +204,7 @@ module Fluxion::Executor
       private def run_phase(phase : Phase) : PhaseOutcome
         @listener.on_event(ExecutionEvent.phase_started(phase.name))
         failed = false
+        @phase_changed_host = false
 
         phase.steps.each do |step|
           return PhaseOutcome::Cancelled if @cancellation.cancelled?
@@ -245,8 +247,13 @@ module Fluxion::Executor
 
         @listener.on_event(ExecutionEvent.phase_completed(phase.name))
 
+        # A phase that ran nothing has nothing for the user to log out of: every
+        # item skipped on a probe or on state, or only asserts re-checked. It
+        # used to ask anyway, so `--re-probe` (which never skips a phase whole)
+        # and any phase holding an assert (never skipped whole either) stopped
+        # at the checkpoint with exit 75 on every run of a converged host.
         policy = phase.restart_policy
-        if policy.is_a?(RestartPolicy::PromptLogout)
+        if policy.is_a?(RestartPolicy::PromptLogout) && @phase_changed_host
           @listener.on_event(ExecutionEvent.restart_required(phase.name, policy.message))
           return PhaseOutcome::LogoutRequired
         end
@@ -286,6 +293,7 @@ module Fluxion::Executor
             result = run_item(step, item, executor, items[(index + 1)..])
             @summary.record(result)
             @recorder.item_succeeded(item, result) if result.is_a?(StepResult::Success)
+            @phase_changed_host ||= changes_host?(step, result)
             next unless result.is_a?(StepResult::Failure)
 
             any_failed = true
@@ -296,6 +304,14 @@ module Fluxion::Executor
         end
 
         any_failed
+      end
+
+      # Whether this result did (or, in a preview, would do) work a logout
+      # could be needed for. A check changes nothing, so an assert does not
+      # count however it ends.
+      private def changes_host?(step : Step, result : StepResult) : Bool
+        return false if step.rechecked_every_run?
+        result.is_a?(StepResult::Success) || result.is_a?(StepResult::DryRun)
       end
 
       # `later` is the rest of the step's items, which a batch may take on.

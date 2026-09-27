@@ -198,8 +198,12 @@ run skips it and does not ask again.
 `requires-new-shell` runs later effects through a fresh login shell wrapper, so
 tools installed into shell startup paths are visible to what follows.
 
-A skipped phase never carries a restart policy: a phase that ran nothing has
-nothing for the user to log out of. A malformed policy is still reported.
+A phase that ran nothing never carries its restart policy: it has nothing for
+the user to log out of. That covers a phase skipped whole, and also one that
+was entered but whose every item was skipped (by a probe under `--re-probe`,
+or from state when the phase holds an assert and so is never skipped whole) or
+that only re-checked asserts. Such a phase is recorded as completed and the run
+carries on to the next one. A malformed policy is still reported.
 
 ---
 

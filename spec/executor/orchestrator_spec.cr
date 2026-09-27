@@ -262,6 +262,77 @@ describe Fluxion::Executor::Orchestrator do
     end
   end
 
+  describe "a logout phase that ran nothing" do
+    # A phase that ran nothing has nothing for the user to log out of, so it
+    # neither asks nor stops the run; it is still recorded as completed.
+    it "does not ask when a re-probe finds every item installed" do
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        runner = Fluxion::Executor::FakeShellRunner.new
+          .available("dpkg-query")
+          .on("\\n zsh", 0, "install ok installed|5.9-6\n")
+        shell = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[zsh])
+        subject = profile([
+          phase("shell", [shell] of Fluxion::Step,
+            restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+          phase("later", [packages("more", "curl")] of Fluxion::Step),
+        ])
+        reprobing = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::LiveReprobe)
+        summary, listener, _ = run(subject, runner, options: reprobing, store: store)
+
+        listener.events.any?(&.kind.restart_required?).should be_false
+        summary.logout_required?.should be_false
+        summary.skipped.should eq(1)
+        runner.ran?("install -y zsh").should be_false
+        runner.ran?("install -y curl").should be_true
+        store.load("default")
+          .phase_completed?("shell", Fluxion::State::Fingerprint.of(subject.phases.first)).should be_true
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "does not ask again when the phase holds an assert, which is never skipped whole" do
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        guard = Fluxion::AssertStep.new("zsh-guard", "command -v zsh", "zsh must be installed")
+        subject = profile([
+          phase("shell", [packages("tools", "zsh"), guard] of Fluxion::Step,
+            restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+          phase("later", [packages("more", "curl")] of Fluxion::Step),
+        ])
+        first, _, _ = run(subject, store: store)
+        first.logout_required?.should be_true
+
+        skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+        summary, listener, second = run(subject, options: skipping, store: store)
+
+        second.ran?("command -v zsh").should be_true
+        second.ran?("install -y zsh").should be_false
+        listener.events.any?(&.kind.restart_required?).should be_false
+        summary.logout_required?.should be_false
+        second.ran?("install -y curl").should be_true
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "still asks in a preview when an item would run" do
+      subject = profile([
+        phase("shell", [packages("tools", "zsh")] of Fluxion::Step,
+          restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+      ])
+      previewing = Fluxion::Executor::RunOptions.new(dry_run: true)
+      _, listener, _ = run(subject, options: previewing)
+
+      listener.events.any?(&.kind.restart_required?).should be_true
+    end
+  end
+
   it "refuses to run an unknown phase rather than doing nothing quietly" do
     options = Fluxion::Executor::RunOptions.new(only_phases: ["nope"])
     expect_raises(Fluxion::ExecutionError, /Unknown phase: nope/) do

@@ -134,12 +134,25 @@ module Fluxion::Executor
     # the format `PackageManager#query_argv` asks dpkg-query for. Any one of
     # them fully installed is enough; a package removed with its configuration
     # left behind reads "deinstall ok config-files" and counts as absent.
+    #
+    # `${Status}` is three words — want, error flag, state — and a package
+    # pinned with `apt-mark hold` wants "hold", not "install". Matching the
+    # whole string against "install ok installed" called every held package
+    # absent, so `--re-probe` ran `apt-get install` for it on every run.
     private def interpret_dpkg_query(key : String, stdout : String) : InstallationStatus
       stdout.each_line do |line|
         status, _, version = line.strip.partition('|')
-        return InstallationStatus::InstalledByProbe.new(key, version.presence) if status == "install ok installed"
+        return InstallationStatus::InstalledByProbe.new(key, version.presence) if dpkg_installed?(status)
       end
       InstallationStatus::NotInstalled.new(key)
+    end
+
+    private def dpkg_installed?(status : String) : Bool
+      words = status.split(' ')
+      return false unless words.size == 3
+
+      want, error, state = words
+      state == "installed" && error == "ok" && want.in?("install", "hold")
     end
 
     # rpm and pacman both use exit 1 for "not installed" and anything else for

@@ -208,6 +208,27 @@ describe Fluxion::Executor::PackageProbe do
       status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("2.39-0ubuntu8")
     end
 
+    it "reads a package held with apt-mark hold as installed" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, "hold ok installed|1.0-1\n")
+
+      status = Fluxion::Executor::PackageProbe.new.probe(
+        package_item("pinned", Fluxion::PackageManager::Apt), runner)
+
+      status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("1.0-1")
+    end
+
+    it "reports a package dpkg left half-configured as absent" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, "install ok half-configured|1.0-1\n")
+
+      Fluxion::Executor::PackageProbe.new.probe(
+        package_item("broken", Fluxion::PackageManager::Apt), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+
     it "reports a package that was removed but left its configuration as absent" do
       runner = Fluxion::Executor::FakeShellRunner.new
         .available("dpkg-query")

@@ -205,6 +205,24 @@ describe Fluxion::Executor::PackageProbe do
       probe.probe(package_item("org.inkscape.Inkscape", Fluxion::PackageManager::Flatpak), runner)
         .should be_a(Fluxion::InstallationStatus::NotInstalled)
     end
+
+    # An OBS plugin is a runtime ref; `flatpak list --app` never shows it, so a
+    # probe that asked for apps only reinstalled it on every run.
+    it "lists every installed ref, so an extension installed by the step is found" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("flatpak")
+        .on("flatpak list", 0, "com.obsproject.Studio\ncom.obsproject.Studio.Plugin.DroidCam\n")
+      item = Fluxion::StepItem.new("obs", "com.obsproject.Studio.Plugin.DroidCam", Fluxion::ItemType::Flatpak)
+
+      Fluxion::Executor::FlatpakProbe.new.probe(item, runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.argv.should eq([["flatpak", "list", "--columns=application"]])
+
+      Fluxion::Executor::PackageProbe.new.probe(
+        package_item("com.obsproject.Studio.Plugin.DroidCam", Fluxion::PackageManager::Flatpak), runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.argv.last.should_not contain("--app")
+    end
   end
 end
 

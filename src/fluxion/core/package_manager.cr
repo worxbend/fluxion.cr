@@ -181,7 +181,7 @@ module Fluxion
       in .dnf?, .zypper?         then ["rpm", "-q", package]
       in .pacman?, .paru?, .yay? then ["pacman", "-Q", package]
       in .apt?                   then ["dpkg-query", "-W", "-f=${Status}|${Version}\\n", package]
-      in .flatpak?               then ["flatpak", "list", "--app", "--columns=application"]
+      in .flatpak?               then ["flatpak", "list", "--columns=application"]
       in .cargo?                 then ["cargo", "install", "--list"]
       end
     end

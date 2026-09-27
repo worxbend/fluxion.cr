@@ -39,6 +39,32 @@ private def cargo_runner(exit_code : Int32 = 0,
     .on("cargo install --list", exit_code, stdout)
 end
 
+# A runner on which `cargo` is not on PATH but would still list crates if it
+# were run from wherever the probe found it.
+private def cargo_off_path_runner : Fluxion::Executor::FakeShellRunner
+  Fluxion::Executor::FakeShellRunner.new.on("cargo install --list", 0, CARGO_LISTING)
+end
+
+# Points `CARGO_HOME` at a scratch directory, optionally holding the
+# `bin/cargo` rustup leaves there, so no probe reaches the real `~/.cargo`.
+private def with_cargo_home(with_cargo : Bool = true, & : String -> T) : T forall T
+  with_probe_dir do |directory|
+    if with_cargo
+      Dir.mkdir_p(File.join(directory, "bin"))
+      File.write(File.join(directory, "bin", "cargo"), "#!/bin/sh\n")
+      File.chmod(File.join(directory, "bin", "cargo"), 0o755)
+    end
+
+    previous = ENV["CARGO_HOME"]?
+    ENV["CARGO_HOME"] = directory
+    begin
+      yield directory
+    ensure
+      previous ? (ENV["CARGO_HOME"] = previous) : ENV.delete("CARGO_HOME")
+    end
+  end
+end
+
 describe Fluxion::Executor::PackageProbe do
   describe "cargo" do
     # `cargo install --list` ignores the name it was asked about and always
@@ -82,6 +108,19 @@ describe Fluxion::Executor::PackageProbe do
 
       status.should be_a(Fluxion::InstallationStatus::Unknown)
       status.as(Fluxion::InstallationStatus::Unknown).reason.should contain("exited 101")
+    end
+
+    # rustup installs cargo into `$CARGO_HOME/bin` and, run with
+    # `--no-modify-path` or before a new login, leaves it off PATH.
+    it "asks the cargo in CARGO_HOME when cargo is not on PATH" do
+      with_cargo_home do |home|
+        runner = cargo_off_path_runner
+        status = Fluxion::Executor::PackageProbe.new.probe(
+          package_item("ripgrep", Fluxion::PackageManager::Cargo), runner)
+
+        status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+        runner.ran?("#{home}/bin/cargo install --list").should be_true
+      end
     end
   end
 
@@ -664,10 +703,56 @@ describe "tool-packages probe" do
   end
 
   it "reports Unknown when cargo is not there to ask" do
-    status = registry.probe(tool_package_item("fd-find"), Fluxion::Executor::FakeShellRunner.new)
+    with_cargo_home(with_cargo: false) do
+      status = registry.probe(tool_package_item("fd-find"), Fluxion::Executor::FakeShellRunner.new)
 
-    status.should be_a(Fluxion::InstallationStatus::Unknown)
-    status.as(Fluxion::InstallationStatus::Unknown).reason.should contain("cargo")
+      status.should be_a(Fluxion::InstallationStatus::Unknown)
+      status.as(Fluxion::InstallationStatus::Unknown).reason.should contain("cargo")
+    end
+  end
+
+  # Every crate of a profile read "unknown: cargo is not on PATH" from a shell
+  # that had not sourced ~/.cargo/env, although the cargo rustup installed was
+  # right there, and `diff` listed each one under "Needs review".
+  it "asks the cargo in CARGO_HOME when cargo is not on PATH" do
+    with_cargo_home do |home|
+      runner = cargo_off_path_runner
+      status = registry.probe(tool_package_item("fd-find"), runner)
+
+      status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.ran?("#{home}/bin/cargo install --list").should be_true
+    end
+  end
+
+  it "looks in ~/.cargo when CARGO_HOME is not set, as rustup does" do
+    with_probe_dir do |home|
+      cargo = File.join(home, ".cargo", "bin", "cargo")
+      Dir.mkdir_p(File.dirname(cargo))
+      File.write(cargo, "#!/bin/sh\n")
+      File.chmod(cargo, 0o755)
+
+      previous_home, previous_cargo = ENV["HOME"]?, ENV["CARGO_HOME"]?
+      ENV["HOME"] = home
+      ENV.delete("CARGO_HOME")
+      begin
+        runner = cargo_off_path_runner
+        registry.probe(tool_package_item("fd-find"), runner)
+          .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+        runner.ran?("#{cargo} install --list").should be_true
+      ensure
+        previous_home ? (ENV["HOME"] = previous_home) : ENV.delete("HOME")
+        ENV["CARGO_HOME"] = previous_cargo if previous_cargo
+      end
+    end
+  end
+
+  it "prefers the cargo on PATH" do
+    with_cargo_home do |home|
+      runner = cargo_runner
+      registry.probe(tool_package_item("fd-find"), runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.ran?("#{home}/bin/cargo").should be_false
+    end
   end
 
   it "leaves the other backends to a configured probeCommand" do

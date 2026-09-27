@@ -499,6 +499,9 @@ wraps them in `sudo`.
     packages: [cargo-edit]
 ```
 
+Each crate is probed in `cargo install --list`, asking the same `cargo` the
+`tool-packages` probe below does: the one on `PATH`, else `$CARGO_HOME/bin/cargo`.
+
 Prefer `tool-packages` with the `cargo-binstall` backend where a prebuilt binary
 exists: it downloads instead of compiling.
 
@@ -1026,8 +1029,10 @@ probe: cargo-binstall records what it installs in cargo's own install list, so
 both are looked up in `cargo install --list`. A listed crate is installed, with
 the version the listing shows; a pinned crate at another version counts as
 missing (a plain or partial pin such as `0.10.2` or `0.10` is compared, a
-requirement with an operator such as `^0.10` is not). Without `cargo` on `PATH`
-the answer is unknown. The other backends have no built-in probe: their items
+requirement with an operator such as `^0.10` is not). The `cargo` asked is the
+one on `PATH`, else the one rustup installs into `$CARGO_HOME/bin`
+(`~/.cargo/bin` when unset), so a shell that has not sourced `~/.cargo/env` still
+gets an answer; with neither, the answer is unknown. The other backends have no built-in probe: their items
 are unknown to `status` and rerun under `--re-probe` unless the step has a
 `probeCommand`, which then answers for every package in the step.
 

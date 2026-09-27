@@ -99,13 +99,17 @@ module Fluxion::Executor
 
     def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       manager = item.package_manager.not_nil!
+      argv = manager.query_argv(item.key)
 
-      unless runner.command_exists?(query_command(manager))
-        return InstallationStatus::Unknown.new(item.key,
-          "#{query_command(manager)} is not on PATH")
+      if manager.cargo?
+        cargo = CargoInstallList.executable(runner)
+        return CargoInstallList.not_found(item.key) unless cargo
+        argv = [cargo] + argv[1..]
+      elsif !runner.command_exists?(argv.first)
+        return InstallationStatus::Unknown.new(item.key, "#{argv.first} is not on PATH")
       end
 
-      result = runner.run(Command.new(manager.query_argv(item.key), timeout: PROBE_TIMEOUT))
+      result = runner.run(Command.new(argv, timeout: PROBE_TIMEOUT))
 
       # Exhaustive on purpose. Cargo used to fall into a default written for
       # rpm and pacman, which reported every crate installed because
@@ -166,10 +170,6 @@ module Fluxion::Executor
         (line.lchop?("#{key}-") || line.partition('-')[2]).presence
       end
     end
-
-    private def query_command(manager : PackageManager) : String
-      manager.query_argv("x").first
-    end
   end
 
   # What `cargo install --list` says about one crate.
@@ -183,8 +183,38 @@ module Fluxion::Executor
   # binaries it provides indented underneath. Matching on the name followed
   # by a space is therefore enough to tell a crate named `rg` from a binary
   # named `rg` listed under some other crate.
+  #
+  # The cargo asked is the one on PATH or, failing that, the one rustup
+  # installs into `$CARGO_HOME/bin` (`~/.cargo/bin` when unset). rustup adds
+  # that directory to PATH only through `~/.cargo/env`, which a shell sources
+  # at login — and not at all under `--no-modify-path` — so a report run from
+  # any other shell used to call every crate unknown although cargo was right
+  # there to ask.
   module CargoInstallList
     LIST_ARGV = PackageManager::Cargo.query_argv("")
+
+    # The listing for the cargo `executable` found, or nil without one.
+    def self.list(runner : ShellRunner) : ProcessResult?
+      cargo = executable(runner)
+      return unless cargo
+      runner.run(Command.new([cargo] + LIST_ARGV[1..], timeout: PROBE_TIMEOUT))
+    end
+
+    def self.executable(runner : ShellRunner) : String?
+      command = LIST_ARGV.first
+      return command if runner.command_exists?(command)
+
+      fallback = File.join(home, "bin", command)
+      fallback if File.file?(fallback) && File::Info.executable?(fallback)
+    end
+
+    def self.home : String
+      ENV["CARGO_HOME"]?.presence || File.join(Host.home, ".cargo")
+    end
+
+    def self.not_found(key : String) : InstallationStatus
+      InstallationStatus::Unknown.new(key, "cargo is not on PATH or in #{File.join(home, "bin")}")
+    end
 
     def self.status(key : String, result : ProcessResult) : InstallationStatus
       unless result.success?
@@ -219,9 +249,10 @@ module Fluxion::Executor
 
     def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
       package = package(item).not_nil!
-      return InstallationStatus::Unknown.new(item.key, "cargo is not on PATH") unless runner.command_exists?("cargo")
+      listing = CargoInstallList.list(runner)
+      return CargoInstallList.not_found(item.key) unless listing
 
-      status = CargoInstallList.status(item.key, runner.run(Command.new(CargoInstallList::LIST_ARGV, timeout: PROBE_TIMEOUT)))
+      status = CargoInstallList.status(item.key, listing)
       pin = package.version
       return status unless pin && status.is_a?(InstallationStatus::InstalledByProbe)
 

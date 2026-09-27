@@ -1297,6 +1297,10 @@ skipped as already complete — the other steps in that phase are still skipped
 item by item from state or their probes. A guard that stops holding fails the
 next run rather than passing on the strength of the last one.
 
+`status`, `diff` and `explain` run the check too — an assert promises not to
+change the host — and report a failing one as missing with its `message`.
+Write the command as a read-only check for that reason.
+
 ### `manual`
 
 ```yaml

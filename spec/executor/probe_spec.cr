@@ -760,3 +760,25 @@ describe "sdkman-packages probe" do
     end
   end
 end
+
+describe Fluxion::Executor::AssertProbe do
+  guard = Fluxion::AssertStep.new("docker-group", "id -nG | grep -qw docker", "join the docker group")
+  item = Fluxion::StepItem.new("docker-group", "docker-group", Fluxion::ItemType::Assert, step: guard)
+
+  it "answers for a report by running the check" do
+    runner = Fluxion::Executor::FakeShellRunner.new.on("grep -qw docker", 1)
+
+    Fluxion::Executor::ProbeRegistry.for_reports.probe(item, runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    runner.ran?("/bin/bash -lc id -nG | grep -qw docker").should be_true
+  end
+
+  it "is not asked by apply, which runs the same check as the step" do
+    # Asked before the step, a failing check would run twice on the one run.
+    runner = Fluxion::Executor::FakeShellRunner.new
+
+    Fluxion::Executor::ProbeRegistry.default.probe(item, runner)
+      .should be_a(Fluxion::InstallationStatus::Unknown)
+    runner.commands.should be_empty
+  end
+end

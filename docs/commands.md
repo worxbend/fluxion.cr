@@ -390,7 +390,12 @@ fluxion state path
 fluxion state reset --force
 fluxion state forget --item git --step core-tools --type package
 fluxion state forget --phase base
+fluxion state forget workstation --item git   # a profile other than "default"
 ```
+
+Every `state` subcommand takes the profile name as its first argument and falls
+back to `default`; `forget` also accepts it as `--profile=NAME`, and refuses two
+different names or any further argument rather than acting on the wrong profile.
 
 `forget` refuses an ambiguous key rather than deleting several entries; qualify
 it with `--step` and `--type`.

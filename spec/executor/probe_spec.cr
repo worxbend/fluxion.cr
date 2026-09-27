@@ -327,3 +327,107 @@ describe Fluxion::Executor::SystemdUnitProbe do
       .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
   end
 end
+
+private def setting_item(key : String, step : Fluxion::SystemSettingStep) : Fluxion::StepItem
+  Fluxion::StepItem.new(step.name, key, Fluxion::ItemType::SystemSetting, step: step)
+end
+
+# What `localectl status` prints: the locale variables, one per line under the
+# "System Locale:" heading, then the keymap and layout lines.
+private LOCALECTL_STATUS = <<-STATUS
+  System Locale: LANG=en_US.UTF-8
+                 LC_TIME=en_GB.UTF-8
+      VC Keymap: (unset)
+     X11 Layout: us
+
+  STATUS
+
+private def timedatectl_runner(ntp : String = "yes", local_rtc : String = "no",
+                               timezone : String = "Europe/Warsaw") : Fluxion::Executor::FakeShellRunner
+  Fluxion::Executor::FakeShellRunner.new
+    .available("timedatectl", "hostnamectl", "localectl")
+    .on("-p NTP", 0, "#{ntp}\n")
+    .on("-p LocalRTC", 0, "#{local_rtc}\n")
+    .on("-p Timezone", 0, "#{timezone}\n")
+    .on("hostnamectl", 0, "workstation\n")
+    .on("localectl status", 0, LOCALECTL_STATUS)
+end
+
+describe Fluxion::Executor::SystemSettingProbe do
+  # There was no probe for this kind at all, so `status` called every setting
+  # unknown and `--re-probe` ran timedatectl again on every run, although the
+  # schema has always promised that only what differs is applied.
+  it "is what the default registry answers system settings with" do
+    step = Fluxion::SystemSettingStep.new("clock", ntp: true)
+
+    Fluxion::Executor::ProbeRegistry.default.probe(setting_item("ntp", step), timedatectl_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+  end
+
+  it "reports clock settings the host already has as installed" do
+    step = Fluxion::SystemSettingStep.new("clock", ntp: true, local_rtc: false, timezone: "Europe/Warsaw")
+    probe = Fluxion::Executor::SystemSettingProbe.new
+    runner = timedatectl_runner
+
+    %w[ntp localRtc timezone].each do |key|
+      probe.probe(setting_item(key, step), runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    end
+  end
+
+  it "reports a clock setting that differs as absent" do
+    step = Fluxion::SystemSettingStep.new("clock", ntp: true, local_rtc: false, timezone: "UTC")
+    probe = Fluxion::Executor::SystemSettingProbe.new
+    runner = timedatectl_runner(ntp: "no", local_rtc: "yes")
+
+    %w[ntp localRtc timezone].each do |key|
+      probe.probe(setting_item(key, step), runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "compares the static hostname" do
+    probe = Fluxion::Executor::SystemSettingProbe.new
+    matching = Fluxion::SystemSettingStep.new("host", hostname: "workstation")
+    different = Fluxion::SystemSettingStep.new("host", hostname: "laptop")
+
+    probe.probe(setting_item("hostname", matching), timedatectl_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    probe.probe(setting_item("hostname", different), timedatectl_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+  end
+
+  it "reads each locale variable from localectl, not only the first line" do
+    step = Fluxion::SystemSettingStep.new("locale",
+      locale: {"LANG" => "en_US.UTF-8", "LC_TIME" => "pl_PL.UTF-8", "LC_PAPER" => "en_GB.UTF-8"})
+    probe = Fluxion::Executor::SystemSettingProbe.new
+    runner = timedatectl_runner
+
+    probe.probe(setting_item("locale:LANG", step), runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    probe.probe(setting_item("locale:LC_TIME", step), runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    probe.probe(setting_item("locale:LC_PAPER", step), runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+  end
+
+  it "reports Unknown when the tool is not there" do
+    step = Fluxion::SystemSettingStep.new("clock", ntp: true)
+    runner = Fluxion::Executor::FakeShellRunner.new
+
+    Fluxion::Executor::SystemSettingProbe.new.probe(setting_item("ntp", step), runner)
+      .should be_a(Fluxion::InstallationStatus::Unknown)
+  end
+
+  it "reports Unknown when timedatectl cannot answer" do
+    # Inside a container the runner hands back systemd's complaint, merged into
+    # stdout, where a yes or no belongs. That is no answer, not a "no".
+    step = Fluxion::SystemSettingStep.new("clock", ntp: false)
+    runner = Fluxion::Executor::FakeShellRunner.new
+      .available("timedatectl")
+      .on("timedatectl", 1, "System has not been booted with systemd as init system (PID 1). Can't operate.\n")
+
+    status = Fluxion::Executor::SystemSettingProbe.new.probe(setting_item("ntp", step), runner)
+
+    status.should be_a(Fluxion::InstallationStatus::Unknown)
+    status.as(Fluxion::InstallationStatus::Unknown).reason.should contain("Can't operate")
+  end
+end

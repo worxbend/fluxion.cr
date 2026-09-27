@@ -893,9 +893,14 @@ skipped rather than failed, so the same profile stays usable in CI.
 ```
 
 At least one setting must be present; a step that declares none is a
-configuration mistake, not a no-op. Every setting is probed with the matching
-`show --property` first, so only what actually differs is applied and a rerun is
-free.
+configuration mistake, not a no-op. Every setting has a built-in probe that
+reads the current value back — `timedatectl show -p NTP|LocalRTC|Timezone`,
+`hostnamectl --static`, and `localectl status` for each locale variable — so
+under `--skip-already-installed` or `--re-probe` only what actually differs is
+applied, and `status` shows each setting as installed or missing rather than
+unknown. No `probeCommand` is needed; a typed probe takes precedence over one.
+Where the tools cannot answer (a container without systemd), the setting is
+reported unknown and applied.
 
 ### `system-update`
 

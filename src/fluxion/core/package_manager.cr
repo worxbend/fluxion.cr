@@ -148,11 +148,19 @@ module Fluxion
 
     # Argv that reports whether a package is already installed, without
     # touching the network.
+    #
+    # The dpkg-query format separates its fields with `|` rather than a tab.
+    # The runner turns every control character in captured output into a
+    # space, so a tab reached the probe as a space and no package ever read as
+    # installed. `|` cannot occur in either field — a Debian version is limited
+    # to alphanumerics and `.+-~:` — and survives sanitizing untouched. The
+    # trailing newline (an escape dpkg-query expands itself) keeps a multi-arch
+    # package, reported once per architecture, from running into one line.
     def query_argv(package : String) : Array(String)
       case self
       in .dnf?, .zypper?         then ["rpm", "-q", package]
       in .pacman?, .paru?, .yay? then ["pacman", "-Q", package]
-      in .apt?                   then ["dpkg-query", "-W", "-f=${Status}\t${Version}", package]
+      in .apt?                   then ["dpkg-query", "-W", "-f=${Status}|${Version}\\n", package]
       in .flatpak?               then ["flatpak", "list", "--app", "--columns=application"]
       in .cargo?                 then ["cargo", "install", "--list"]
       end

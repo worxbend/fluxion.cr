@@ -130,6 +130,66 @@ describe Fluxion::Executor::PackageProbe do
     end
   end
 
+  describe "apt" do
+    # What dpkg-query prints for the probe's own format string, once it has
+    # been through the same sanitizing the real runner applies to everything it
+    # captures. Built from `query_argv` rather than written out so the spec
+    # follows the format wherever it goes.
+    it "recognises an installed package in output the runner has sanitized" do
+      format = Fluxion::PackageManager::Apt.query_argv("coreutils")
+        .find!(&.starts_with?("-f="))
+        .lchop("-f=")
+      printed = format
+        .gsub("${Status}", "install ok installed")
+        .gsub("${Version}", "9.4-3ubuntu6.1")
+        .gsub("\\n", "\n")
+
+      # The runner replaces every control character but a newline with a
+      # space, so a tab separator reached the probe as a space and the status
+      # never matched: every apt package read as absent.
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, Fluxion::Executor::Redaction.strip_controls(printed, preserve_newlines: true))
+
+      status = Fluxion::Executor::PackageProbe.new.probe(
+        package_item("coreutils", Fluxion::PackageManager::Apt), runner)
+
+      status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("9.4-3ubuntu6.1")
+    end
+
+    it "reads a multi-arch package, which dpkg-query answers once per architecture" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, "install ok installed|2.39-0ubuntu8\ninstall ok installed|2.39-0ubuntu8\n")
+
+      status = Fluxion::Executor::PackageProbe.new.probe(
+        package_item("libc6", Fluxion::PackageManager::Apt), runner)
+
+      status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("2.39-0ubuntu8")
+    end
+
+    it "reports a package that was removed but left its configuration as absent" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, "deinstall ok config-files|1.0-1\n")
+
+      Fluxion::Executor::PackageProbe.new.probe(
+        package_item("oldpkg", Fluxion::PackageManager::Apt), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+
+    it "reports a package dpkg has never heard of as absent" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 1, "dpkg-query: no packages found matching nosuch\n")
+
+      Fluxion::Executor::PackageProbe.new.probe(
+        package_item("nosuch", Fluxion::PackageManager::Apt), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
   describe "flatpak" do
     # Pinned alongside cargo because the two are the scanning probes: both are
     # handed a listing that never mentions the item, so both have to read the

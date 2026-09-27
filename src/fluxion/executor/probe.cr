@@ -87,9 +87,7 @@ module Fluxion::Executor
       case manager
       in .apt?
         return InstallationStatus::NotInstalled.new(item.key) unless result.success?
-        status, _, version = result.stdout.strip.partition('\t')
-        return InstallationStatus::NotInstalled.new(item.key) unless status == "install ok installed"
-        InstallationStatus::InstalledByProbe.new(item.key, version.presence)
+        interpret_dpkg_query(item.key, result.stdout)
       in .flatpak?
         installed = result.stdout.lines.any? { |line| line.strip == item.key }
         installed ? InstallationStatus::InstalledByProbe.new(item.key) : InstallationStatus::NotInstalled.new(item.key)
@@ -98,6 +96,18 @@ module Fluxion::Executor
       in .dnf?, .zypper?, .pacman?, .paru?, .yay?
         interpret_query(item.key, result, manager)
       end
+    end
+
+    # One "status|version" line per installed architecture of the package, in
+    # the format `PackageManager#query_argv` asks dpkg-query for. Any one of
+    # them fully installed is enough; a package removed with its configuration
+    # left behind reads "deinstall ok config-files" and counts as absent.
+    private def interpret_dpkg_query(key : String, stdout : String) : InstallationStatus
+      stdout.each_line do |line|
+        status, _, version = line.strip.partition('|')
+        return InstallationStatus::InstalledByProbe.new(key, version.presence) if status == "install ok installed"
+      end
+      InstallationStatus::NotInstalled.new(key)
     end
 
     # rpm and pacman both use exit 1 for "not installed" and anything else for

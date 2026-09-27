@@ -235,6 +235,16 @@ two different things would make each of those ambiguous.
 It answers "is this already here" without changing anything, which is what makes
 `--skip-already-installed` and `status` meaningful.
 
+A `probeCommand` describes the whole step, not any one item of it. During an
+apply it is asked once, before the first item of the step that it answers for
+runs, and that answer stands for the rest of the step: when it succeeds every
+item it answers for is skipped, and when it fails every one of them runs, in
+order — even if an earlier item's work would make it succeed by the time a
+later one is reached. A step whose later items must be judged on what its
+earlier items left behind is two steps, each with its own `probeCommand`. A
+typed probe (packages, repositories, git config and the like) still answers
+for its own item, and takes precedence over a `probeCommand`.
+
 Control kinds may carry nothing but a name: they describe an interaction rather
 than an installation, so `spec` is optional for them and required for everything
 else.

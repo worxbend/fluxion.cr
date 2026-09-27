@@ -364,8 +364,20 @@ module Fluxion::Executor
           return recorded
         end
 
-        status = @probes.probe(item, @runner)
+        status = probe(item)
         status.installed? ? status : nil
+      end
+
+      # A step's own `probeCommand` answers for the whole step, so it is asked
+      # once, at the first item that needs it — before any item of the step
+      # has run, since every item is decided before it runs — and that answer
+      # stands for the rest of the step. Asked again per item, a probe that the
+      # first script made true reported the scripts after it as already
+      # installed, and they never ran.
+      private def probe(item : StepItem) : InstallationStatus
+        return @probes.probe(item, @runner) unless @probes.answers_for_step?(item)
+
+        @batch.step_probe ||= @probes.probe(item, @runner)
       end
 
       # The command that installs this item together with every later item of
@@ -487,6 +499,9 @@ module Fluxion::Executor
         getter decisions = {} of String => InstallationStatus?
 
         property? planned = false
+
+        # The step's own `probeCommand` answer, once asked.
+        property step_probe : InstallationStatus? = nil
 
         @covered = Set(String).new
 

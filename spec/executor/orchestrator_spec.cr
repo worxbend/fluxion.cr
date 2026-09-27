@@ -76,6 +76,29 @@ private class UnknownStep < Fluxion::Step
   end
 end
 
+# Answers a step's `probeCommand` the way a real host would after the step's
+# first item has done its work: false until any other command has run, true
+# from then on — a first script that creates what the probe tests for.
+private class FirstItemSatisfiesProbe < Fluxion::Executor::FakeShellRunner
+  PROBE = "test -f /tmp/fluxion-spec-marker"
+
+  def initialize(@satisfied : Bool = false)
+    super()
+  end
+
+  def run(command : Fluxion::Executor::Command, &sink : String ->) : Fluxion::ProcessResult
+    result = super(command, &sink)
+    return Fluxion::ProcessResult.new(@satisfied ? 0 : 1) if command.argv.join(' ').includes?(PROBE)
+
+    @satisfied = true
+    result
+  end
+
+  def probes : Int32
+    argv.count(&.join(' ').includes?(PROBE))
+  end
+end
+
 describe Fluxion::Executor::Orchestrator do
   it "fails a step whose kind nothing can carry out" do
     summary, listener, _ = run(profile([phase("base", [UnknownStep.new("mystery")] of Fluxion::Step)]))
@@ -347,6 +370,70 @@ describe Fluxion::Executor::Orchestrator do
       _, _, runner = run(profile([phase("base", [step] of Fluxion::Step)]))
 
       runner.argv.should eq([["cargo", "install", "ripgrep"], ["cargo", "install", "fd-find"]])
+    end
+  end
+
+  describe "a step's probeCommand" do
+    skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+
+    it "runs every script of a step it said was not done when the step began" do
+      # The probe describes the step, not the item. Asked again before each
+      # script, it flipped to true as soon as the first script had done its
+      # part, and the scripts after it were reported as already installed
+      # without ever running.
+      step = Fluxion::ShellScriptStep.new("app", [
+        Fluxion::ShellScriptItem.new("first", content: "touch /tmp/fluxion-spec-marker"),
+        Fluxion::ShellScriptItem.new("second", content: "echo second"),
+        Fluxion::ShellScriptItem.new("third", content: "echo third"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      runner = FirstItemSatisfiesProbe.new
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner, options: skipping)
+
+      summary.skipped.should eq(0)
+      summary.succeeded.should eq(3)
+      runner.probes.should eq(1)
+    end
+
+    it "runs every command of a step it said was not done when the step began" do
+      step = Fluxion::ShellCommandStep.new("app", [
+        Fluxion::ShellCommandItem.new("first", shell_command: "touch /tmp/fluxion-spec-marker"),
+        Fluxion::ShellCommandItem.new("second", shell_command: "echo second"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      runner = FirstItemSatisfiesProbe.new
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner, options: skipping)
+
+      summary.skipped.should eq(0)
+      summary.succeeded.should eq(2)
+      runner.ran?("echo second").should be_true
+    end
+
+    it "skips every item of a step it says is done, asking once" do
+      step = Fluxion::ShellCommandStep.new("app", [
+        Fluxion::ShellCommandItem.new("first", shell_command: "touch /tmp/fluxion-spec-marker"),
+        Fluxion::ShellCommandItem.new("second", shell_command: "echo second"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      runner = FirstItemSatisfiesProbe.new(satisfied: true)
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner, options: skipping)
+
+      summary.skipped.should eq(2)
+      runner.argv.size.should eq(1)
+    end
+
+    it "is asked again for the next step that declares one" do
+      # Settled once per step, not once per run: the second step's probe is
+      # its own question, asked after the first step has done its work.
+      first = Fluxion::ShellCommandStep.new("install", [
+        Fluxion::ShellCommandItem.new("fetch", shell_command: "touch /tmp/fluxion-spec-marker"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      second = Fluxion::ShellCommandStep.new("configure", [
+        Fluxion::ShellCommandItem.new("write", shell_command: "echo configure"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      runner = FirstItemSatisfiesProbe.new
+      summary, _, _ = run(profile([phase("base", [first, second] of Fluxion::Step)]), runner, options: skipping)
+
+      summary.succeeded.should eq(1)
+      summary.skipped.should eq(1)
+      runner.probes.should eq(2)
     end
   end
 

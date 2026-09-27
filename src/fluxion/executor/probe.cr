@@ -12,6 +12,14 @@ module Fluxion::Executor
   abstract class Probe
     abstract def supports?(item : StepItem) : Bool
     abstract def probe(item : StepItem, runner : ShellRunner) : InstallationStatus
+
+    # True when the answer describes the item's whole step rather than the
+    # item itself, so every item of the step shares it. Such an answer is
+    # settled once, when the step begins: asked again before each item, it
+    # would see what the step's own earlier items just did.
+    def answers_for_step? : Bool
+      false
+    end
   end
 
   # Picks the first probe that handles an item.
@@ -59,6 +67,11 @@ module Fluxion::Executor
       probe.probe(item, runner)
     rescue error : ExecutionError
       InstallationStatus::Unknown.new(item.key, "probe could not be executed: #{error.message}")
+    end
+
+    # Whether the probe that answers for this item answers for its whole step.
+    def answers_for_step?(item : StepItem) : Bool
+      @probes.find(&.supports?(item)).try(&.answers_for_step?) || false
     end
   end
 
@@ -752,9 +765,16 @@ module Fluxion::Executor
   # Registered last so a typed probe always wins, but it is what makes kinds
   # with no observable footprint — shell commands, scripts, manual checkpoints
   # — skippable at all.
+  #
+  # The command belongs to the step, so its answer is the step's: every item
+  # of the step is done, or none is.
   class ConfiguredProbeCommand < Probe
     def supports?(item : StepItem) : Bool
       !item.step.try(&.probe_command).nil?
+    end
+
+    def answers_for_step? : Bool
+      true
     end
 
     def probe(item : StepItem, runner : ShellRunner) : InstallationStatus

@@ -152,6 +152,18 @@ module Fluxion
       true
     end
 
+    # True when the step checks the host as it is now, so it runs on every
+    # apply whatever state says.
+    #
+    # State records work that stays done: a package installed on Monday is
+    # still installed on Tuesday. A check has no such footprint. Its passing
+    # last time says nothing about this time, so recording it — or skipping the
+    # phase that holds it as complete — turns a guard into a one-off that
+    # passes silently forever after the thing it guarded has gone.
+    def rechecked_every_run? : Bool
+      false
+    end
+
     # SHA-256 over whatever decides this step's work but is not in its item keys.
     #
     # Read `State::Fingerprint.of` before deciding a new kind does not need

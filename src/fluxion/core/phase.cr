@@ -32,6 +32,13 @@ module Fluxion
       @restart_policy.halts? || @steps.any?(&.halts?)
     end
 
+    # True when a step here checks the host afresh on every apply, which means
+    # the phase is never done on the strength of an earlier run alone. Its
+    # other steps are still skipped item by item from state or a probe.
+    def rechecked_every_run? : Bool
+      @steps.any?(&.rechecked_every_run?)
+    end
+
     def to_s(io : IO) : Nil
       io << @name
     end

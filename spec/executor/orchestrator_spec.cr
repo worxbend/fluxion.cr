@@ -560,6 +560,91 @@ describe Fluxion::Executor::Orchestrator do
       end
     end
 
+    describe "an assert" do
+      # An assert is a guard on the host as it is now. A pass on an earlier run
+      # says nothing about this one, so neither the step nor the phase that
+      # holds it may be skipped on the strength of what state remembers.
+      it "checks its condition again on a run that skips what is already done" do
+        directory = File.tempname("fluxion-state")
+        store = Fluxion::State::Store.new(directory)
+
+        begin
+          guard = Fluxion::AssertStep.new("marker-guard", "test -e /srv/marker", "marker must exist")
+          subject = profile([phase("guard", [guard] of Fluxion::Step)])
+          skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+          run(subject, options: skipping, store: store)
+
+          gone = Fluxion::Executor::FakeShellRunner.new.on("test -e /srv/marker", 1)
+          summary, _, second = run(subject, runner: gone, options: skipping, store: store)
+
+          second.ran?("test -e /srv/marker").should be_true
+          summary.failed_phases.should eq(["guard"])
+        ensure
+          FileUtils.rm_rf(directory)
+        end
+      end
+
+      it "is not answered by a pass a state file already recorded" do
+        # State files written before this fix hold the assert as a completed
+        # item; the next run must not take that as the guard having passed.
+        directory = File.tempname("fluxion-state")
+        store = Fluxion::State::Store.new(directory)
+
+        begin
+          guard = Fluxion::AssertStep.new("marker-guard", "test -e /srv/marker", "marker must exist")
+          subject = profile([phase("guard", [guard] of Fluxion::Step)])
+          store.update("default") do |document|
+            document.record(Fluxion::State::ItemRecord.new(
+              profile: "default", step: "marker-guard", item_key: "marker-guard",
+              item_type: "assert", completed_at: Time.utc))
+          end
+
+          skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+          _, _, second = run(subject, options: skipping, store: store)
+
+          second.ran?("test -e /srv/marker").should be_true
+        ensure
+          FileUtils.rm_rf(directory)
+        end
+      end
+
+      it "is not recorded as done when it passes" do
+        directory = File.tempname("fluxion-state")
+        store = Fluxion::State::Store.new(directory)
+
+        begin
+          guard = Fluxion::AssertStep.new("marker-guard", "test -e /srv/marker", "marker must exist")
+          subject = profile([phase("base", [guard, packages("tools", "git")] of Fluxion::Step)])
+          run(subject, store: store)
+
+          document = store.load("default")
+          document.find("marker-guard", "marker-guard", "assert").should be_nil
+          document.find("tools", "git", "package").should_not be_nil
+        ensure
+          FileUtils.rm_rf(directory)
+        end
+      end
+
+      it "still lets the rest of its phase be skipped item by item" do
+        directory = File.tempname("fluxion-state")
+        store = Fluxion::State::Store.new(directory)
+
+        begin
+          guard = Fluxion::AssertStep.new("marker-guard", "test -e /srv/marker", "marker must exist")
+          subject = profile([phase("base", [guard, packages("tools", "git")] of Fluxion::Step)])
+          run(subject, store: store)
+
+          skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+          _, _, second = run(subject, options: skipping, store: store)
+
+          second.ran?("test -e /srv/marker").should be_true
+          second.ran?("install -y git").should be_false
+        ensure
+          FileUtils.rm_rf(directory)
+        end
+      end
+    end
+
     it "records where to resume after an interrupt" do
       directory = File.tempname("fluxion-state")
       store = Fluxion::State::Store.new(directory)

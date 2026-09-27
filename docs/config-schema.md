@@ -1241,6 +1241,12 @@ the step and stops the phase unless the phase allows continuation. A profile
 that supplies its own `message` is telling the user how to fix the machine,
 which is the point.
 
+An assert runs on every apply, including `--skip-already-installed` ones. Its
+pass is never written to state, and a phase that holds an assert is never
+skipped as already complete — the other steps in that phase are still skipped
+item by item from state or their probes. A guard that stops holding fails the
+next run rather than passing on the strength of the last one.
+
 ### `manual`
 
 ```yaml

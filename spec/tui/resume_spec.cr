@@ -74,6 +74,22 @@ describe Fluxion::TUI::Resume do
     end
   end
 
+  it "never offers to skip a phase that holds an assert" do
+    # The same rule the executor uses: an assert checks the host as it is now,
+    # so a phase holding one is never done on the strength of an earlier run.
+    with_store do |store|
+      guard = Fluxion::AssertStep.new("marker-guard", "test -e /srv/marker", "marker must exist")
+      profile = Fluxion::Profile.new(
+        "test",
+        Fluxion::TargetOs.new(Fluxion::Distribution::Fedora),
+        [Fluxion::Phase.new("guard", [guard, step("tools", %w[git])] of Fluxion::Step)],
+      )
+      record_completed(store, profile, "guard")
+
+      Fluxion::TUI::Resume.load(store, profile, "default").completed?("guard").should be_false
+    end
+  end
+
   it "treats an unreadable state file as nothing to resume from" do
     # The offer is a shortcut. If the shortcut is unavailable the run must
     # still be startable.

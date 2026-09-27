@@ -466,6 +466,10 @@ module Fluxion
       false
     end
 
+    def rechecked_every_run? : Bool
+      true
+    end
+
     def argv : Array(String)
       [@shell, "-lc", @command]
     end

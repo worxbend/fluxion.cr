@@ -521,8 +521,11 @@ module Fluxion::Executor
         @dirty = false
       end
 
+      # A phase holding an assert is never skipped whole: the assert has to run
+      # on this apply, and the rest of the phase is still skipped item by item.
       def already_completed?(phase : Phase, fingerprint : String) : Bool
         return false unless @options.mode.trusts_state?
+        return false if phase.rechecked_every_run?
         document.try(&.phase_completed?(phase.name, fingerprint)) || false
       end
 
@@ -538,8 +541,12 @@ module Fluxion::Executor
       # lookup re-reads and re-parses the whole state file on every call, so
       # asking it once per item made a run cost a file read and a JSON parse
       # per package — the same mistake buffering the writes here avoids.
+      #
+      # A check answers for the host as it is now, never from state — including
+      # the passes state files written before that rule already hold.
       def recorded(item : StepItem) : InstallationStatus::InstalledFromState?
         return unless @options.mode.trusts_state?
+        return if rechecked_every_run?(item)
 
         record = document.try(&.find(item.step_name, item.key, item.item_type.json_name))
         return unless record
@@ -560,6 +567,7 @@ module Fluxion::Executor
 
       def item_succeeded(item : StepItem, result : StepResult::Success) : Nil
         return unless recording?
+        return if rechecked_every_run?(item)
         document.try do |state|
           state.record(State::ItemRecord.new(
             profile: @options.profile_name,
@@ -616,6 +624,10 @@ module Fluxion::Executor
 
       private def recording? : Bool
         !@options.read_only? && !@store.nil?
+      end
+
+      private def rechecked_every_run?(item : StepItem) : Bool
+        item.step.try(&.rechecked_every_run?) || false
       end
 
       # The state file, read at most once per run.

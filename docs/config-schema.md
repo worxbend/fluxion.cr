@@ -538,6 +538,12 @@ No `probeCommand` is needed.
       - org.telegram.desktop
 ```
 
+Each id is installed with `flatpak install -y REMOTE ID`, so an id may name an
+extension or runtime as well as an app, for example an OBS Studio plugin
+(`com.obsproject.Studio.Plugin.DroidCam`). The probe lists every installed ref
+(`flatpak list --columns=application`), so such an item reads as installed once
+it is, and no `probeCommand` is needed.
+
 Declare the remote itself with `flatpak-remote`, or under `spec.sources`, rather
 than hiding it in a shell command where nothing verifies it.
 

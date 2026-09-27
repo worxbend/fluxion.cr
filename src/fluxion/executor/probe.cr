@@ -211,10 +211,22 @@ module Fluxion::Executor
 
   # Repository files, keyed by the path the step would write.
   #
-  # Only presence is checked, not content: reading a root-owned repo file to
-  # compare it would need privileges a probe must not take, and the step
-  # itself re-verifies before writing.
+  # An apt source is compared with the line the step writes, and its keyring
+  # has to be there too. Presence alone used to be enough, on the grounds that
+  # the files were unreadable without privileges and that the step re-checks
+  # before writing. Neither holds: sources.list.d is world-readable, and a
+  # step whose probe says "installed" never runs at all. A vendor package or a
+  # hand-written line at the same path, pointing at another keyring, therefore
+  # counted as done on every run, and the declared source and keyring were
+  # never written.
+  #
+  # The rpm-style kinds are still checked for presence only: the file they
+  # write embeds the installed key's path, which only their executor renders.
   class RepositoryFileProbe < Probe
+    # A source list is one line. Anything this large is not the one declared,
+    # and a probe has no business reading an unbounded file to find that out.
+    MAX_SOURCE_LIST_BYTES = 64 * 1024
+
     TYPES = [ItemType::AptRepository, ItemType::RpmRepository,
              ItemType::ZypperRepository, ItemType::PacmanRepository]
 
@@ -237,6 +249,35 @@ module Fluxion::Executor
       info = File.info?(item.key)
       return InstallationStatus::NotInstalled.new(item.key) unless info && info.file?
       return InstallationStatus::NotInstalled.new(item.key) if info.size == 0
+
+      if repository = item.step.as?(AptRepositoryStep)
+        return probe_apt_source(item, repository, info)
+      end
+      InstallationStatus::InstalledByProbe.new(item.key)
+    end
+
+    # The executor writes exactly `source` and a newline; a file without the
+    # final newline still says the same thing to apt, so that much is allowed.
+    private def probe_apt_source(item : StepItem, repository : AptRepositoryStep,
+                                 info : File::Info) : InstallationStatus
+      return InstallationStatus::NotInstalled.new(item.key) if info.size > MAX_SOURCE_LIST_BYTES
+
+      content = begin
+        File.read(item.key)
+      rescue error : IO::Error
+        return InstallationStatus::Unknown.new(item.key, "could not read #{item.key}: #{error.message}")
+      end
+      return InstallationStatus::NotInstalled.new(item.key) unless content.chomp == repository.source
+
+      # Only a keyring this step installs itself is its business: without a
+      # signing key it belongs to another step, and rerunning this one could
+      # not produce it.
+      keyring = repository.keyring
+      if repository.signing_key && keyring
+        present = File.info?(keyring).try { |found| found.file? && found.size > 0 }
+        return InstallationStatus::NotInstalled.new(item.key) unless present
+      end
+
       InstallationStatus::InstalledByProbe.new(item.key)
     end
   end

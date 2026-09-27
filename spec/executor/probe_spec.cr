@@ -431,3 +431,81 @@ describe Fluxion::Executor::SystemSettingProbe do
     status.as(Fluxion::InstallationStatus::Unknown).reason.should contain("Can't operate")
   end
 end
+
+private def with_probe_dir(& : String -> T) : T forall T
+  directory = File.tempname("fluxion-probe")
+  Dir.mkdir_p(directory, 0o700)
+  begin
+    yield directory
+  ensure
+    FileUtils.rm_rf(directory)
+  end
+end
+
+private def apt_source_item(directory : String, signed : Bool = true) : Fluxion::StepItem
+  keyring = File.join(directory, "vendor.gpg")
+  step = Fluxion::AptRepositoryStep.new(
+    "vendor",
+    source: "deb [arch=amd64 signed-by=#{keyring}] https://apt.example.test/stable stable main",
+    source_list: File.join(directory, "vendor.list"),
+    signing_key: signed ? Fluxion::SigningKey.new("https://apt.example.test/key.asc",
+      Fluxion::Checksum.new(Fluxion::ChecksumAlgorithm::Sha256, "0" * 64)) : nil,
+    keyring: keyring,
+  )
+  Fluxion::StepItem.new("vendor", step.source_list, Fluxion::ItemType::AptRepository, step: step)
+end
+
+describe Fluxion::Executor::RepositoryFileProbe do
+  runner = Fluxion::Executor::FakeShellRunner.new
+  probe = Fluxion::Executor::RepositoryFileProbe.new
+
+  it "reports the declared source with its keyring in place as installed" do
+    with_probe_dir do |directory|
+      item = apt_source_item(directory)
+      step = item.step.as(Fluxion::AptRepositoryStep)
+      File.write(step.source_list, step.source + "\n")
+      File.write(step.keyring.not_nil!, "keyring bytes")
+
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    end
+  end
+
+  it "reports a source file with another line in it as absent" do
+    # What a vendor package or a hand-written line leaves behind: the same
+    # path, pointing at a different keyring. Counting it as installed meant
+    # the declared source and keyring were never written, on any later run.
+    with_probe_dir do |directory|
+      item = apt_source_item(directory)
+      step = item.step.as(Fluxion::AptRepositoryStep)
+      File.write(step.source_list, step.source.sub(".gpg]", ".asc]") + "\n")
+      File.write(step.keyring.not_nil!, "keyring bytes")
+
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "reports the declared source as absent while the keyring it installs is missing or empty" do
+    with_probe_dir do |directory|
+      item = apt_source_item(directory)
+      step = item.step.as(Fluxion::AptRepositoryStep)
+      File.write(step.source_list, step.source + "\n")
+
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+
+      File.write(step.keyring.not_nil!, "")
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "does not require a keyring the step does not install itself" do
+    # Without `signingKeyUrl` the keyring is some other step's job, typically
+    # a `gpg-key` entry, and rerunning this one could not create it.
+    with_probe_dir do |directory|
+      item = apt_source_item(directory, signed: false)
+      step = item.step.as(Fluxion::AptRepositoryStep)
+      File.write(step.source_list, step.source)
+
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    end
+  end
+end

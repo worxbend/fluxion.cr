@@ -1079,6 +1079,15 @@ without privileges, then uses structured `sudo install` commands for the keyring
 and source list before running `sudo apt-get update`. Plans, `dry-run`,
 `status`, `diff`, and `explain` use the source-list path as the item key.
 
+The probe reads the source list back: it counts as installed only when the file
+holds exactly the declared `source` line and, when `signingKeyUrl` is set, the
+`keyring` exists and is not empty. A file at the same path with any other
+content — a vendor package's own line, a hand-written one signed by another
+keyring — is reported as missing, so `status` shows the drift and a run that
+probes the item rewrites it with the declared source and keyring. A plain
+`--skip-already-installed` run still trusts a completion recorded in state;
+`--re-probe` does not.
+
 Source options are restricted to `arch` and exactly one `signed-by`, and
 `signed-by` must match the absolute `keyring` path — otherwise the profile
 documents one trust root and installs another. Trust-bypass syntax such as

@@ -286,9 +286,27 @@ module Fluxion::Executor
   # Shared by the `gpg-key` executor, which checks a download before
   # installing it, and its probe, which checks an installed keyring, so both
   # hold a key file to the same rule.
+  #
+  # Listing a key needs no keyring, but gpg still opens its home directory, and
+  # with `--no-options` it will not create one that is missing: on a fresh
+  # account without `~/.gnupg` every read failed with "directory does not
+  # exist!". Each read therefore gets a private throwaway home, which also
+  # keeps the check from depending on, or writing into, the user's keyring.
   module GpgKeyListing
-    def self.argv(path : String) : Array(String)
-      ["gpg", "--batch", "--no-options", "--show-keys", "--with-colons", path]
+    def self.argv(path : String, homedir : String) : Array(String)
+      ["gpg", "--batch", "--no-options", "--homedir", homedir, "--show-keys", "--with-colons", path]
+    end
+
+    def self.run(runner : ShellRunner, path : String, timeout : Time::Span) : ProcessResult
+      homedir = File.tempname("fluxion-gpg")
+      Dir.mkdir(homedir, 0o700)
+      begin
+        # `mkdir` honours the umask; gpg warns about a home others can read.
+        File.chmod(homedir, 0o700)
+        runner.run(Command.new(argv(path, homedir), timeout: timeout))
+      ensure
+        FileUtils.rm_rf(homedir) rescue nil
+      end
     end
 
     # In gpg's colon output an `fpr` record directly after a `pub` gives that
@@ -401,7 +419,7 @@ module Fluxion::Executor
         return "gpg is not on PATH, so the key fingerprint cannot be verified"
       end
 
-      result = runner.run(Command.new(GpgKeyListing.argv(path), timeout: KEY_TIMEOUT))
+      result = GpgKeyListing.run(runner, path, KEY_TIMEOUT)
       return "could not read the key: #{result.detail}" unless result.success?
 
       fingerprints = GpgKeyListing.primary_fingerprints(result.stdout)

@@ -602,7 +602,7 @@ describe "gpg-key keyring probe" do
 
       registry.probe(gpg_keyring_item(keyring), runner)
         .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
-      runner.ran?("gpg --batch --no-options --show-keys --with-colons #{keyring}").should be_true
+      runner.ran?("--show-keys --with-colons #{keyring}").should be_true
     end
   end
 

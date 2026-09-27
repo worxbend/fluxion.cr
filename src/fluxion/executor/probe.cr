@@ -473,7 +473,7 @@ module Fluxion::Executor
       return InstallationStatus::NotInstalled.new(item.key) unless info && info.file? && info.size > 0
       return InstallationStatus::Unknown.new(item.key, "gpg is not on PATH") unless runner.command_exists?("gpg")
 
-      result = runner.run(Command.new(GpgKeyListing.argv(item.key), timeout: PROBE_TIMEOUT))
+      result = GpgKeyListing.run(runner, item.key, PROBE_TIMEOUT)
       unless result.success?
         return InstallationStatus::Unknown.new(item.key,
           "gpg could not read the keyring (exit #{result.exit_code})")

@@ -987,7 +987,10 @@ installed keyring with `gpg --show-keys`, unprivileged: it counts as installed
 only when the keyring holds exactly one primary key, the declared
 `fingerprint`. A keyring at that path holding another key is reported as
 missing, and an empty or absent one likewise; when gpg cannot read it, the
-answer is unknown. Query parameters and fragments remain available to the
+answer is unknown. Both the download check and the probe run gpg with a
+private, throwaway `--homedir`, so they work on an account that has no
+`~/.gnupg` yet and never read or write the user's own keyring. Query
+parameters and fragments remain available to the
 request but are excluded from plans, events, errors, and state.
 `continueOnError: true` attempts the remaining keys, but a trust failure still
 fails the step; the phase's `execution.continueOnError` then decides whether

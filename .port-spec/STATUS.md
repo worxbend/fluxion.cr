@@ -85,6 +85,29 @@ combined checksum file.
   `Installer#privilege_for` from the destination's parent directory rather than
   declared per item, so a profile cannot ask for a privileged write into a
   directory it can already write, nor opt out of `sudo` for `/etc`.
+- **apt probe argv** (`executor.md`, probe table, apt package). The format is
+  `${Status}|${Version}\n`, not tab-separated: the shell runner turns every
+  control character except a newline into a space, so the tab never reached
+  the probe (d26a299). Installed means state `installed`, flag `ok`, and want
+  `install` or `hold`, so a package held with `apt-mark hold` counts as
+  installed (d6f0caf); the Java version only accepted `install ok installed`.
+- **flatpak probe argv** (`executor.md`, probe table, flatpak). It lists every
+  installed ref, `["flatpak","list","--columns=application"]`, without
+  `--app`, so the runtime refs a flatpak step installs (OBS plugins, GL
+  drivers, theme extensions) are found after their install (7430ef4).
+- **gpg key inspect argv** (`executor.md`, GPG keys). It adds
+  `--homedir <throwaway dir>`: with `--no-options` gpg will not create a
+  missing `~/.gnupg`, so every read failed on a fresh account (c34113b).
+- **prompt-logout** (`executor.md`, phase finish; `cli.md`, exit mapping). A
+  completed prompt-logout phase is recorded as completed and `apply` exits 75,
+  the checkpoint code, instead of 0 (4254ceb). The restart event is only
+  emitted when an item of the phase ran; a phase whose items were all skipped
+  or were only asserts completes like any other and the run carries on
+  (d699c4a). The Java version emitted `restartRequired` after every completed
+  prompt-logout phase and stopped with exit 0.
+- **binstaller pin** (`core-domain.md`, tool pins). binstaller is pinned to
+  v0.5.0, not v0.2.0: v0.2.0 aborts on GNU `@LongLink` tar headers, which
+  current zig releases carry (8065313).
 
 ## Conventions
 

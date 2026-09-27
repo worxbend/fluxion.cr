@@ -191,7 +191,10 @@ restartPolicy:
 ```
 
 `prompt-logout` records completed state, emits a restart-required event, and
-stops so the user can log out and resume deterministically.
+stops so the user can log out and resume deterministically. `apply` then exits
+75, the checkpoint code, so a wrapper running several profiles knows to stop.
+Because the phase is recorded as completed, the next `--skip-already-installed`
+run skips it and does not ask again.
 `requires-new-shell` runs later effects through a fresh login shell wrapper, so
 tools installed into shell startup paths are visible to what follows.
 

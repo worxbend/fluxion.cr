@@ -155,6 +155,7 @@ module Fluxion::CLI
       # A preview never pauses. Reporting 75 for one would tell a script the
       # run stopped at a checkpoint when nothing ran at all.
       return paused_code(summary) if summary.paused > 0 && !read_only
+      return ExitCode::Paused if summary.logout_required? && summary.ok? && !read_only
       return ExitCode::ExternalDependencyError unless summary.ok?
       ExitCode::Success
     end

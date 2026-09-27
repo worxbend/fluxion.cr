@@ -222,6 +222,46 @@ describe Fluxion::Executor::Orchestrator do
     runner.ran?("install -y curl").should be_false
   end
 
+  it "reports a logout checkpoint on the summary" do
+    subject = profile([
+      phase("shell", [packages("tools", "zsh")] of Fluxion::Step,
+        restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+      phase("later", [packages("more", "curl")] of Fluxion::Step),
+    ])
+    summary, _, _ = run(subject)
+
+    summary.logout_required?.should be_true
+    summary.next_phase.should eq("later")
+  end
+
+  it "records a phase that asked for a logout as completed, so the next run skips it" do
+    directory = File.tempname("fluxion-state")
+    store = Fluxion::State::Store.new(directory)
+
+    begin
+      subject = profile([
+        phase("shell", [packages("tools", "zsh")] of Fluxion::Step,
+          restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+        phase("later", [packages("more", "curl")] of Fluxion::Step),
+      ])
+      run(subject, store: store)
+
+      document = store.load("default")
+      document.phase_completed?("shell", Fluxion::State::Fingerprint.of(subject.phases.first)).should be_true
+      document.next_phase.should eq("later")
+
+      skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+      summary, listener, second = run(subject, options: skipping, store: store)
+
+      listener.events.any?(&.kind.restart_required?).should be_false
+      summary.logout_required?.should be_false
+      second.ran?("install -y zsh").should be_false
+      second.ran?("install -y curl").should be_true
+    ensure
+      FileUtils.rm_rf(directory)
+    end
+  end
+
   it "refuses to run an unknown phase rather than doing nothing quietly" do
     options = Fluxion::Executor::RunOptions.new(only_phases: ["nope"])
     expect_raises(Fluxion::ExecutionError, /Unknown phase: nope/) do

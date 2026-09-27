@@ -143,17 +143,31 @@ module Fluxion::Executor
             @summary.failed_phases << phase.name
             @listener.on_event(ExecutionEvent.phase_failed(phase.name))
             next
+          in PhaseOutcome::LogoutRequired
+            # The phase ran to the end, so it is recorded as completed like any
+            # other: the documented contract of `prompt-logout`. Without this
+            # the phase was never marked done, so every later run re-ran it and
+            # asked for a logout again, and `--skip-already-installed` could
+            # never skip it.
+            @recorder.phase_completed(phase, fingerprint)
+            @summary.logout_required = true
+            stop_before_next(phases, phase)
+            break
           in PhaseOutcome::Halted
-            # A logout checkpoint or an interrupt: state is written and a resume
-            # point recorded, then the run stops cleanly.
-            @summary.next_phase = phases[(phases.index(phase) || 0) + 1]?.try(&.name)
-            @recorder.resume_at(@summary.next_phase)
+            # An interrupt step: a resume point is recorded, then the run stops
+            # cleanly.
+            stop_before_next(phases, phase)
             break
           in PhaseOutcome::Cancelled
             cancel_at(phase.name)
             break
           end
         end
+      end
+
+      private def stop_before_next(phases : Array(Phase), phase : Phase) : Nil
+        @summary.next_phase = phases[(phases.index(phase) || 0) + 1]?.try(&.name)
+        @recorder.resume_at(@summary.next_phase)
       end
 
       # The single exit for cancellation, so every path that notices the signal
@@ -225,7 +239,7 @@ module Fluxion::Executor
           return PhaseOutcome::Failed if step_failed && !phase.continue_on_step_error?
         end
 
-        # Before the logout branch below for the same reason: the `Halted` arm
+        # Before the logout branch below for the same reason: the `LogoutRequired` arm
         # points the resume at the phase *after* this one.
         return PhaseOutcome::Failed if failed
 
@@ -234,7 +248,7 @@ module Fluxion::Executor
         policy = phase.restart_policy
         if policy.is_a?(RestartPolicy::PromptLogout)
           @listener.on_event(ExecutionEvent.restart_required(phase.name, policy.message))
-          return PhaseOutcome::Halted
+          return PhaseOutcome::LogoutRequired
         end
 
         PhaseOutcome::Completed
@@ -518,6 +532,7 @@ module Fluxion::Executor
       private enum PhaseOutcome
         Completed
         Failed
+        LogoutRequired
         Halted
         Cancelled
       end

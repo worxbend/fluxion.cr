@@ -596,3 +596,69 @@ describe "gpg-key keyring probe" do
     end
   end
 end
+
+private def tool_package_item(entry : String, backend : Fluxion::ToolBackend = Fluxion::ToolBackend::CargoBinstall,
+                              probe_command : String? = nil) : Fluxion::StepItem
+  name, _, version = entry.partition('@')
+  step = Fluxion::ToolPackagesStep.new("rust-crates", backend,
+    [Fluxion::ToolPackage.new(name, version.presence)], probe_command: probe_command)
+  Fluxion::StepItem.new("rust-crates", name, Fluxion::ItemType::ToolPackage, entry, step: step)
+end
+
+# `tool-packages` had no probe at all, so `status` called every crate unknown
+# and `--re-probe` installed every one of them again. cargo-binstall records
+# what it installs in cargo's own install list, which is what `cargo install
+# --list` reads, so both cargo backends are answered from that listing.
+describe "tool-packages probe" do
+  registry = Fluxion::Executor::ProbeRegistry.default
+
+  it "reports a crate cargo-binstall installed as installed, with its version" do
+    runner = cargo_runner
+    status = registry.probe(tool_package_item("fd-find"), runner)
+
+    status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("10.2.0")
+    runner.ran?("cargo install --list").should be_true
+  end
+
+  it "reports a crate the listing does not mention as absent" do
+    registry.probe(tool_package_item("bottom"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    registry.probe(tool_package_item("rg", Fluxion::ToolBackend::Cargo), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+  end
+
+  it "answers for the cargo backend from the same listing" do
+    registry.probe(tool_package_item("ripgrep", Fluxion::ToolBackend::Cargo), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+  end
+
+  it "reports a pinned crate installed at another version as absent" do
+    # Otherwise changing a pin would never be applied under --re-probe.
+    registry.probe(tool_package_item("ripgrep@14.0.3"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    registry.probe(tool_package_item("ripgrep@14.1.0"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    registry.probe(tool_package_item("ripgrep@14.1"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    registry.probe(tool_package_item("ripgrep@14.10"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+  end
+
+  it "reports Unknown when cargo is not there to ask" do
+    status = registry.probe(tool_package_item("fd-find"), Fluxion::Executor::FakeShellRunner.new)
+
+    status.should be_a(Fluxion::InstallationStatus::Unknown)
+    status.as(Fluxion::InstallationStatus::Unknown).reason.should contain("cargo")
+  end
+
+  it "leaves the other backends to a configured probeCommand" do
+    runner = Fluxion::Executor::FakeShellRunner.new.available("pipx")
+    registry.probe(tool_package_item("black", Fluxion::ToolBackend::Pipx), runner)
+      .should be_a(Fluxion::InstallationStatus::Unknown)
+
+    configured = tool_package_item("black", Fluxion::ToolBackend::Pipx, probe_command: "pipx list --short | grep -q '^black '")
+    registry.probe(configured, runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    runner.ran?("pipx list --short").should be_true
+  end
+end

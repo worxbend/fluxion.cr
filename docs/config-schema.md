@@ -995,6 +995,16 @@ message rather than a confusing command-not-found. Package names must be
 registry identifiers valid for the backend — local paths, URLs, direct
 references, and option-shaped names are rejected.
 
+Packages installed by the `cargo-binstall` and `cargo` backends have a built-in
+probe: cargo-binstall records what it installs in cargo's own install list, so
+both are looked up in `cargo install --list`. A listed crate is installed, with
+the version the listing shows; a pinned crate at another version counts as
+missing (a plain or partial pin such as `0.10.2` or `0.10` is compared, a
+requirement with an operator such as `^0.10` is not). Without `cargo` on `PATH`
+the answer is unknown. The other backends have no built-in probe: their items
+are unknown to `status` and rerun under `--re-probe` unless the step has a
+`probeCommand`, which then answers for every package in the step.
+
 ### `toolchain`
 
 ```yaml

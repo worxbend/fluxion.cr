@@ -78,4 +78,20 @@ describe "installerVersion" do
     Fluxion::Executor::KnownTools::DOTBOT.version
       .should eq(Fluxion::DotbotStep::DEFAULT_INSTALLER_VERSION)
   end
+
+  it "pins a binstaller that can extract GNU long-name tar entries" do
+    # binstaller before v0.3.0 aborts on the first `@LongLink` header
+    # ("unsupported tar entry type 'L'"), and current zig archives carry
+    # dozens of them. A profile cannot choose another release, so the pin
+    # itself has to be one that can extract them.
+    version = Fluxion::Executor::KnownTools::BINSTALLER.version
+    SemanticVersion.parse(version.lchop('v')).should be >= SemanticVersion.parse("0.3.0")
+  end
+
+  it "trusts a digest for the pinned binstaller on every supported architecture" do
+    # Moving the pin without its digests would refuse every download.
+    Fluxion::Architecture.values.each do |architecture|
+      Fluxion::Executor::KnownTools::BINSTALLER.digest(architecture).should_not be_nil
+    end
+  end
 end

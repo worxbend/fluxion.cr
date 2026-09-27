@@ -297,16 +297,27 @@ module Fluxion::Executor
       ["gpg", "--batch", "--no-options", "--homedir", homedir, "--show-keys", "--with-colons", path]
     end
 
+    # An unusable temporary directory (missing, read-only, full) is raised as
+    # an `ExecutionError`, the one error the probe registry turns into an
+    # Unknown answer and `run_item` into a failed item. As a bare
+    # `File::Error` it escaped both and aborted the whole apply.
     def self.run(runner : ShellRunner, path : String, timeout : Time::Span) : ProcessResult
-      homedir = File.tempname("fluxion-gpg")
-      Dir.mkdir(homedir, 0o700)
+      homedir = make_homedir
       begin
-        # `mkdir` honours the umask; gpg warns about a home others can read.
-        File.chmod(homedir, 0o700)
         runner.run(Command.new(argv(path, homedir), timeout: timeout))
       ensure
         FileUtils.rm_rf(homedir) rescue nil
       end
+    end
+
+    private def self.make_homedir : String
+      homedir = File.tempname("fluxion-gpg")
+      Dir.mkdir(homedir, 0o700)
+      # `mkdir` honours the umask; gpg warns about a home others can read.
+      File.chmod(homedir, 0o700)
+      homedir
+    rescue error : File::Error
+      raise ExecutionError.new("could not create a temporary gpg home: #{error.message}")
     end
 
     # In gpg's colon output an `fpr` record directly after a `pub` gives that

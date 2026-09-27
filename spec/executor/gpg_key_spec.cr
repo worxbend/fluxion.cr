@@ -115,3 +115,50 @@ describe "gpg-key keyring probe homedir" do
     end
   end
 end
+
+# Creating the throwaway home touches the filesystem outside the runner, so an
+# unusable TMPDIR used to raise a bare `File::Error` that aborted the whole
+# apply instead of answering one probe or failing one item.
+private def with_missing_tmpdir(& : ->) : Nil
+  saved = ENV["TMPDIR"]?
+  ENV["TMPDIR"] = File.join(Dir.tempdir, "fluxion-no-such-tmpdir-#{Random.new.hex(4)}")
+  begin
+    yield
+  ensure
+    saved ? (ENV["TMPDIR"] = saved) : ENV.delete("TMPDIR")
+  end
+end
+
+describe "gpg-key with an unusable TMPDIR" do
+  it "answers the keyring probe as unknown" do
+    with_gpg_dir do |directory|
+      keyring = File.join(directory, "microsoft.gpg")
+      File.write(keyring, "keyring bytes")
+      entry = Fluxion::GpgKeyEntry.new("https://packages.microsoft.com/keys/microsoft.asc",
+        Fluxion::Fingerprint.new(FINGERPRINT), keyring)
+      step = Fluxion::GpgKeyStep.new("repository-keys", [entry])
+      item = Fluxion::StepItem.new("repository-keys", entry.item_key, Fluxion::ItemType::GpgKey, step: step)
+      runner = Fluxion::Executor::FakeShellRunner.new.available("gpg")
+
+      with_missing_tmpdir do
+        Fluxion::Executor::ProbeRegistry.default.probe(item, runner)
+          .should be_a(Fluxion::InstallationStatus::Unknown)
+      end
+      runner.ran?("--show-keys").should be_false
+    end
+  end
+
+  it "raises the one error an executor turns into a failed item" do
+    # The executor's own workspace is made with `mkdir_p`, which would create
+    # the missing TMPDIR first; the listing is asked directly so the spec is
+    # about the listing and leaves nothing behind.
+    runner = Fluxion::Executor::FakeShellRunner.new.available("gpg")
+
+    with_missing_tmpdir do
+      expect_raises(Fluxion::ExecutionError, /temporary gpg home/) do
+        Fluxion::Executor::GpgKeyListing.run(runner, "/nonexistent/key.asc", 5.seconds)
+      end
+    end
+    runner.ran?("--show-keys").should be_false
+  end
+end

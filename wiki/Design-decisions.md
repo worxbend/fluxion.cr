@@ -45,15 +45,22 @@ and installing it is not the safe default, saying so is.
 
 `fluxion status --failed` shows these alongside genuine misses.
 
-## Why one process per package?
+## Why one transaction, then one process per package?
 
-So one bad name loses one package. A single transaction installing twenty
-packages fails entirely on the first typo, and you get nothing — including the
-nineteen that were fine.
+A single transaction installing twenty packages fails entirely on the first
+typo, and you get nothing — including the nineteen that were fine. So when the
+transaction fails, Fluxion installs the list again one package per process, and
+one bad name loses one package.
 
-The cost is some process overhead. The benefit is that a bootstrap makes
-progress even when the profile is imperfect, which it usually is on the first
-run.
+It still tries the single transaction first because the per-transaction cost is
+not small. On Debian and Ubuntu every dpkg run fires the man-db, desktop and
+icon triggers and update-notifier's `apt-check`, which is 10-180 seconds per
+package: a 180-package list took an hour installed one at a time, against a
+few minutes in one `apt-get install`. dnf and zypper reload repository metadata
+per transaction for the same effect on a smaller scale.
+
+Cargo and flatpak lists stay one process per item, since each crate is its own
+build and each app its own download — there is no shared cost to save.
 
 ## Why refuse an ambiguous archive member?
 

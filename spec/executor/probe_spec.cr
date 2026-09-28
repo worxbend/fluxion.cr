@@ -39,6 +39,32 @@ private def cargo_runner(exit_code : Int32 = 0,
     .on("cargo install --list", exit_code, stdout)
 end
 
+# A runner on which `cargo` is not on PATH but would still list crates if it
+# were run from wherever the probe found it.
+private def cargo_off_path_runner : Fluxion::Executor::FakeShellRunner
+  Fluxion::Executor::FakeShellRunner.new.on("cargo install --list", 0, CARGO_LISTING)
+end
+
+# Points `CARGO_HOME` at a scratch directory, optionally holding the
+# `bin/cargo` rustup leaves there, so no probe reaches the real `~/.cargo`.
+private def with_cargo_home(with_cargo : Bool = true, & : String -> T) : T forall T
+  with_probe_dir do |directory|
+    if with_cargo
+      Dir.mkdir_p(File.join(directory, "bin"))
+      File.write(File.join(directory, "bin", "cargo"), "#!/bin/sh\n")
+      File.chmod(File.join(directory, "bin", "cargo"), 0o755)
+    end
+
+    previous = ENV["CARGO_HOME"]?
+    ENV["CARGO_HOME"] = directory
+    begin
+      yield directory
+    ensure
+      previous ? (ENV["CARGO_HOME"] = previous) : ENV.delete("CARGO_HOME")
+    end
+  end
+end
+
 describe Fluxion::Executor::PackageProbe do
   describe "cargo" do
     # `cargo install --list` ignores the name it was asked about and always
@@ -82,6 +108,19 @@ describe Fluxion::Executor::PackageProbe do
 
       status.should be_a(Fluxion::InstallationStatus::Unknown)
       status.as(Fluxion::InstallationStatus::Unknown).reason.should contain("exited 101")
+    end
+
+    # rustup installs cargo into `$CARGO_HOME/bin` and, run with
+    # `--no-modify-path` or before a new login, leaves it off PATH.
+    it "asks the cargo in CARGO_HOME when cargo is not on PATH" do
+      with_cargo_home do |home|
+        runner = cargo_off_path_runner
+        status = Fluxion::Executor::PackageProbe.new.probe(
+          package_item("ripgrep", Fluxion::PackageManager::Cargo), runner)
+
+        status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+        runner.ran?("#{home}/bin/cargo install --list").should be_true
+      end
     end
   end
 
@@ -130,6 +169,87 @@ describe Fluxion::Executor::PackageProbe do
     end
   end
 
+  describe "apt" do
+    # What dpkg-query prints for the probe's own format string, once it has
+    # been through the same sanitizing the real runner applies to everything it
+    # captures. Built from `query_argv` rather than written out so the spec
+    # follows the format wherever it goes.
+    it "recognises an installed package in output the runner has sanitized" do
+      format = Fluxion::PackageManager::Apt.query_argv("coreutils")
+        .find!(&.starts_with?("-f="))
+        .lchop("-f=")
+      printed = format
+        .gsub("${Status}", "install ok installed")
+        .gsub("${Version}", "9.4-3ubuntu6.1")
+        .gsub("\\n", "\n")
+
+      # The runner replaces every control character but a newline with a
+      # space, so a tab separator reached the probe as a space and the status
+      # never matched: every apt package read as absent.
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, Fluxion::Executor::Redaction.strip_controls(printed, preserve_newlines: true))
+
+      status = Fluxion::Executor::PackageProbe.new.probe(
+        package_item("coreutils", Fluxion::PackageManager::Apt), runner)
+
+      status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("9.4-3ubuntu6.1")
+    end
+
+    it "reads a multi-arch package, which dpkg-query answers once per architecture" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, "install ok installed|2.39-0ubuntu8\ninstall ok installed|2.39-0ubuntu8\n")
+
+      status = Fluxion::Executor::PackageProbe.new.probe(
+        package_item("libc6", Fluxion::PackageManager::Apt), runner)
+
+      status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("2.39-0ubuntu8")
+    end
+
+    it "reads a package held with apt-mark hold as installed" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, "hold ok installed|1.0-1\n")
+
+      status = Fluxion::Executor::PackageProbe.new.probe(
+        package_item("pinned", Fluxion::PackageManager::Apt), runner)
+
+      status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("1.0-1")
+    end
+
+    it "reports a package dpkg left half-configured as absent" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, "install ok half-configured|1.0-1\n")
+
+      Fluxion::Executor::PackageProbe.new.probe(
+        package_item("broken", Fluxion::PackageManager::Apt), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+
+    it "reports a package that was removed but left its configuration as absent" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 0, "deinstall ok config-files|1.0-1\n")
+
+      Fluxion::Executor::PackageProbe.new.probe(
+        package_item("oldpkg", Fluxion::PackageManager::Apt), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+
+    it "reports a package dpkg has never heard of as absent" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("dpkg-query", 1, "dpkg-query: no packages found matching nosuch\n")
+
+      Fluxion::Executor::PackageProbe.new.probe(
+        package_item("nosuch", Fluxion::PackageManager::Apt), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
   describe "flatpak" do
     # Pinned alongside cargo because the two are the scanning probes: both are
     # handed a listing that never mentions the item, so both have to read the
@@ -144,6 +264,24 @@ describe Fluxion::Executor::PackageProbe do
         .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
       probe.probe(package_item("org.inkscape.Inkscape", Fluxion::PackageManager::Flatpak), runner)
         .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+
+    # An OBS plugin is a runtime ref; `flatpak list --app` never shows it, so a
+    # probe that asked for apps only reinstalled it on every run.
+    it "lists every installed ref, so an extension installed by the step is found" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("flatpak")
+        .on("flatpak list", 0, "com.obsproject.Studio\ncom.obsproject.Studio.Plugin.DroidCam\n")
+      item = Fluxion::StepItem.new("obs", "com.obsproject.Studio.Plugin.DroidCam", Fluxion::ItemType::Flatpak)
+
+      Fluxion::Executor::FlatpakProbe.new.probe(item, runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.argv.should eq([["flatpak", "list", "--columns=application"]])
+
+      Fluxion::Executor::PackageProbe.new.probe(
+        package_item("com.obsproject.Studio.Plugin.DroidCam", Fluxion::PackageManager::Flatpak), runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.argv.last.should_not contain("--app")
     end
   end
 end
@@ -265,5 +403,488 @@ describe Fluxion::Executor::SystemdUnitProbe do
 
     Fluxion::Executor::SystemdUnitProbe.new.probe(systemd_item(stopped), runner)
       .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+  end
+end
+
+private def setting_item(key : String, step : Fluxion::SystemSettingStep) : Fluxion::StepItem
+  Fluxion::StepItem.new(step.name, key, Fluxion::ItemType::SystemSetting, step: step)
+end
+
+# What `localectl status` prints: the locale variables, one per line under the
+# "System Locale:" heading, then the keymap and layout lines.
+private LOCALECTL_STATUS = <<-STATUS
+  System Locale: LANG=en_US.UTF-8
+                 LC_TIME=en_GB.UTF-8
+      VC Keymap: (unset)
+     X11 Layout: us
+
+  STATUS
+
+private def timedatectl_runner(ntp : String = "yes", local_rtc : String = "no",
+                               timezone : String = "Europe/Warsaw") : Fluxion::Executor::FakeShellRunner
+  Fluxion::Executor::FakeShellRunner.new
+    .available("timedatectl", "hostnamectl", "localectl")
+    .on("-p NTP", 0, "#{ntp}\n")
+    .on("-p LocalRTC", 0, "#{local_rtc}\n")
+    .on("-p Timezone", 0, "#{timezone}\n")
+    .on("hostnamectl", 0, "workstation\n")
+    .on("localectl status", 0, LOCALECTL_STATUS)
+end
+
+describe Fluxion::Executor::SystemSettingProbe do
+  # There was no probe for this kind at all, so `status` called every setting
+  # unknown and `--re-probe` ran timedatectl again on every run, although the
+  # schema has always promised that only what differs is applied.
+  it "is what the default registry answers system settings with" do
+    step = Fluxion::SystemSettingStep.new("clock", ntp: true)
+
+    Fluxion::Executor::ProbeRegistry.default.probe(setting_item("ntp", step), timedatectl_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+  end
+
+  it "reports clock settings the host already has as installed" do
+    step = Fluxion::SystemSettingStep.new("clock", ntp: true, local_rtc: false, timezone: "Europe/Warsaw")
+    probe = Fluxion::Executor::SystemSettingProbe.new
+    runner = timedatectl_runner
+
+    %w[ntp localRtc timezone].each do |key|
+      probe.probe(setting_item(key, step), runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    end
+  end
+
+  it "reports a clock setting that differs as absent" do
+    step = Fluxion::SystemSettingStep.new("clock", ntp: true, local_rtc: false, timezone: "UTC")
+    probe = Fluxion::Executor::SystemSettingProbe.new
+    runner = timedatectl_runner(ntp: "no", local_rtc: "yes")
+
+    %w[ntp localRtc timezone].each do |key|
+      probe.probe(setting_item(key, step), runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "compares the static hostname" do
+    probe = Fluxion::Executor::SystemSettingProbe.new
+    matching = Fluxion::SystemSettingStep.new("host", hostname: "workstation")
+    different = Fluxion::SystemSettingStep.new("host", hostname: "laptop")
+
+    probe.probe(setting_item("hostname", matching), timedatectl_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    probe.probe(setting_item("hostname", different), timedatectl_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+  end
+
+  it "reads each locale variable from localectl, not only the first line" do
+    step = Fluxion::SystemSettingStep.new("locale",
+      locale: {"LANG" => "en_US.UTF-8", "LC_TIME" => "pl_PL.UTF-8", "LC_PAPER" => "en_GB.UTF-8"})
+    probe = Fluxion::Executor::SystemSettingProbe.new
+    runner = timedatectl_runner
+
+    probe.probe(setting_item("locale:LANG", step), runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    probe.probe(setting_item("locale:LC_TIME", step), runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    probe.probe(setting_item("locale:LC_PAPER", step), runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+  end
+
+  it "reports Unknown when the tool is not there" do
+    step = Fluxion::SystemSettingStep.new("clock", ntp: true)
+    runner = Fluxion::Executor::FakeShellRunner.new
+
+    Fluxion::Executor::SystemSettingProbe.new.probe(setting_item("ntp", step), runner)
+      .should be_a(Fluxion::InstallationStatus::Unknown)
+  end
+
+  it "reports Unknown when timedatectl cannot answer" do
+    # Inside a container the runner hands back systemd's complaint, merged into
+    # stdout, where a yes or no belongs. That is no answer, not a "no".
+    step = Fluxion::SystemSettingStep.new("clock", ntp: false)
+    runner = Fluxion::Executor::FakeShellRunner.new
+      .available("timedatectl")
+      .on("timedatectl", 1, "System has not been booted with systemd as init system (PID 1). Can't operate.\n")
+
+    status = Fluxion::Executor::SystemSettingProbe.new.probe(setting_item("ntp", step), runner)
+
+    status.should be_a(Fluxion::InstallationStatus::Unknown)
+    status.as(Fluxion::InstallationStatus::Unknown).reason.should contain("Can't operate")
+  end
+end
+
+private def with_probe_dir(& : String -> T) : T forall T
+  directory = File.tempname("fluxion-probe")
+  Dir.mkdir_p(directory, 0o700)
+  begin
+    yield directory
+  ensure
+    FileUtils.rm_rf(directory)
+  end
+end
+
+private def apt_source_item(directory : String, signed : Bool = true) : Fluxion::StepItem
+  keyring = File.join(directory, "vendor.gpg")
+  step = Fluxion::AptRepositoryStep.new(
+    "vendor",
+    source: "deb [arch=amd64 signed-by=#{keyring}] https://apt.example.test/stable stable main",
+    source_list: File.join(directory, "vendor.list"),
+    signing_key: signed ? Fluxion::SigningKey.new("https://apt.example.test/key.asc",
+      Fluxion::Checksum.new(Fluxion::ChecksumAlgorithm::Sha256, "0" * 64)) : nil,
+    keyring: keyring,
+  )
+  Fluxion::StepItem.new("vendor", step.source_list, Fluxion::ItemType::AptRepository, step: step)
+end
+
+describe Fluxion::Executor::RepositoryFileProbe do
+  runner = Fluxion::Executor::FakeShellRunner.new
+  probe = Fluxion::Executor::RepositoryFileProbe.new
+
+  it "reports the declared source with its keyring in place as installed" do
+    with_probe_dir do |directory|
+      item = apt_source_item(directory)
+      step = item.step.as(Fluxion::AptRepositoryStep)
+      File.write(step.source_list, step.source + "\n")
+      File.write(step.keyring.not_nil!, "keyring bytes")
+
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    end
+  end
+
+  it "reports a source file with another line in it as absent" do
+    # What a vendor package or a hand-written line leaves behind: the same
+    # path, pointing at a different keyring. Counting it as installed meant
+    # the declared source and keyring were never written, on any later run.
+    with_probe_dir do |directory|
+      item = apt_source_item(directory)
+      step = item.step.as(Fluxion::AptRepositoryStep)
+      File.write(step.source_list, step.source.sub(".gpg]", ".asc]") + "\n")
+      File.write(step.keyring.not_nil!, "keyring bytes")
+
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "reports the declared source as absent while the keyring it installs is missing or empty" do
+    with_probe_dir do |directory|
+      item = apt_source_item(directory)
+      step = item.step.as(Fluxion::AptRepositoryStep)
+      File.write(step.source_list, step.source + "\n")
+
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+
+      File.write(step.keyring.not_nil!, "")
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "does not require a keyring the step does not install itself" do
+    # Without `signingKeyUrl` the keyring is some other step's job, typically
+    # a `gpg-key` entry, and rerunning this one could not create it.
+    with_probe_dir do |directory|
+      item = apt_source_item(directory, signed: false)
+      step = item.step.as(Fluxion::AptRepositoryStep)
+      File.write(step.source_list, step.source)
+
+      probe.probe(item, runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    end
+  end
+end
+
+private GPG_FINGERPRINT = "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+
+# What `gpg --show-keys --with-colons` prints for one primary key with a
+# subkey: the `fpr` after `pub` is the primary's, the one after `sub` is not.
+private def gpg_listing(primary : String) : String
+  <<-COLONS
+    pub:-:4096:1:8D81803C0EBFCD88:1487788586:::-:::scESA::::::23::0:
+    fpr:::::::::#{primary}:
+    uid:-::::1487792064::B5FA5F0F1BB1A4C4E3AD7F71A0C4CC39DB76E3EC::Docker Release (CE deb) <docker@docker.com>::::::::::0:
+    sub:-:4096:1:7EA0A9C3F273FCD8:1487788586::::::s::::::23:
+    fpr:::::::::D3306A018370199E527AE7317EA0A9C3F273FCD8:
+
+    COLONS
+end
+
+private def gpg_keyring_item(keyring : String) : Fluxion::StepItem
+  entry = Fluxion::GpgKeyEntry.new("https://download.example.test/gpg",
+    Fluxion::Fingerprint.new(GPG_FINGERPRINT), keyring)
+  step = Fluxion::GpgKeyStep.new("repository-keys", [entry])
+  Fluxion::StepItem.new("repository-keys", entry.item_key, Fluxion::ItemType::GpgKey, step: step)
+end
+
+describe "gpg-key keyring probe" do
+  registry = Fluxion::Executor::ProbeRegistry.default
+
+  it "reports a keyring holding the declared key as installed" do
+    with_probe_dir do |directory|
+      keyring = File.join(directory, "vendor.gpg")
+      File.write(keyring, "keyring bytes")
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("gpg")
+        .on("--show-keys", 0, gpg_listing(GPG_FINGERPRINT))
+
+      registry.probe(gpg_keyring_item(keyring), runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.ran?("--show-keys --with-colons #{keyring}").should be_true
+    end
+  end
+
+  it "reports a keyring holding some other key as absent" do
+    # The same path with a different key in it — a vendor's older key, or one
+    # a package's postinst wrote — used to count as installed because only
+    # the path was checked, so the declared key was never installed.
+    with_probe_dir do |directory|
+      keyring = File.join(directory, "vendor.gpg")
+      File.write(keyring, "keyring bytes")
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("gpg")
+        .on("--show-keys", 0, gpg_listing("0123456789ABCDEF0123456789ABCDEF01234567"))
+
+      registry.probe(gpg_keyring_item(keyring), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "reports an empty or missing keyring as absent without asking gpg" do
+    with_probe_dir do |directory|
+      keyring = File.join(directory, "vendor.gpg")
+      runner = Fluxion::Executor::FakeShellRunner.new.available("gpg")
+
+      registry.probe(gpg_keyring_item(keyring), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+      File.write(keyring, "")
+      registry.probe(gpg_keyring_item(keyring), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+      runner.ran?("gpg").should be_false
+    end
+  end
+
+  it "reports Unknown when the keyring cannot be read" do
+    with_probe_dir do |directory|
+      keyring = File.join(directory, "vendor.gpg")
+      File.write(keyring, "keyring bytes")
+
+      no_gpg = Fluxion::Executor::FakeShellRunner.new
+      registry.probe(gpg_keyring_item(keyring), no_gpg)
+        .should be_a(Fluxion::InstallationStatus::Unknown)
+
+      failing = Fluxion::Executor::FakeShellRunner.new
+        .available("gpg")
+        .on("--show-keys", 2, "gpg: no valid OpenPGP data found.\n")
+      registry.probe(gpg_keyring_item(keyring), failing)
+        .should be_a(Fluxion::InstallationStatus::Unknown)
+    end
+  end
+end
+
+private def tool_package_item(entry : String, backend : Fluxion::ToolBackend = Fluxion::ToolBackend::CargoBinstall,
+                              probe_command : String? = nil) : Fluxion::StepItem
+  name, _, version = entry.partition('@')
+  step = Fluxion::ToolPackagesStep.new("rust-crates", backend,
+    [Fluxion::ToolPackage.new(name, version.presence)], probe_command: probe_command)
+  Fluxion::StepItem.new("rust-crates", name, Fluxion::ItemType::ToolPackage, entry, step: step)
+end
+
+# `tool-packages` had no probe at all, so `status` called every crate unknown
+# and `--re-probe` installed every one of them again. cargo-binstall records
+# what it installs in cargo's own install list, which is what `cargo install
+# --list` reads, so both cargo backends are answered from that listing.
+describe "tool-packages probe" do
+  registry = Fluxion::Executor::ProbeRegistry.default
+
+  it "reports a crate cargo-binstall installed as installed, with its version" do
+    runner = cargo_runner
+    status = registry.probe(tool_package_item("fd-find"), runner)
+
+    status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("10.2.0")
+    runner.ran?("cargo install --list").should be_true
+  end
+
+  it "reports a crate the listing does not mention as absent" do
+    registry.probe(tool_package_item("bottom"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    registry.probe(tool_package_item("rg", Fluxion::ToolBackend::Cargo), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+  end
+
+  it "answers for the cargo backend from the same listing" do
+    registry.probe(tool_package_item("ripgrep", Fluxion::ToolBackend::Cargo), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+  end
+
+  it "reports a pinned crate installed at another version as absent" do
+    # Otherwise changing a pin would never be applied under --re-probe.
+    registry.probe(tool_package_item("ripgrep@14.0.3"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    registry.probe(tool_package_item("ripgrep@14.1.0"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    registry.probe(tool_package_item("ripgrep@14.1"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    registry.probe(tool_package_item("ripgrep@14.10"), cargo_runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+  end
+
+  it "reports Unknown when cargo is not there to ask" do
+    with_cargo_home(with_cargo: false) do
+      status = registry.probe(tool_package_item("fd-find"), Fluxion::Executor::FakeShellRunner.new)
+
+      status.should be_a(Fluxion::InstallationStatus::Unknown)
+      status.as(Fluxion::InstallationStatus::Unknown).reason.should contain("cargo")
+    end
+  end
+
+  # Every crate of a profile read "unknown: cargo is not on PATH" from a shell
+  # that had not sourced ~/.cargo/env, although the cargo rustup installed was
+  # right there, and `diff` listed each one under "Needs review".
+  it "asks the cargo in CARGO_HOME when cargo is not on PATH" do
+    with_cargo_home do |home|
+      runner = cargo_off_path_runner
+      status = registry.probe(tool_package_item("fd-find"), runner)
+
+      status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.ran?("#{home}/bin/cargo install --list").should be_true
+    end
+  end
+
+  it "looks in ~/.cargo when CARGO_HOME is not set, as rustup does" do
+    with_probe_dir do |home|
+      cargo = File.join(home, ".cargo", "bin", "cargo")
+      Dir.mkdir_p(File.dirname(cargo))
+      File.write(cargo, "#!/bin/sh\n")
+      File.chmod(cargo, 0o755)
+
+      previous_home, previous_cargo = ENV["HOME"]?, ENV["CARGO_HOME"]?
+      ENV["HOME"] = home
+      ENV.delete("CARGO_HOME")
+      begin
+        runner = cargo_off_path_runner
+        registry.probe(tool_package_item("fd-find"), runner)
+          .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+        runner.ran?("#{cargo} install --list").should be_true
+      ensure
+        previous_home ? (ENV["HOME"] = previous_home) : ENV.delete("HOME")
+        ENV["CARGO_HOME"] = previous_cargo if previous_cargo
+      end
+    end
+  end
+
+  it "prefers the cargo on PATH" do
+    with_cargo_home do |home|
+      runner = cargo_runner
+      registry.probe(tool_package_item("fd-find"), runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      runner.ran?("#{home}/bin/cargo").should be_false
+    end
+  end
+
+  it "leaves the other backends to a configured probeCommand" do
+    runner = Fluxion::Executor::FakeShellRunner.new.available("pipx")
+    registry.probe(tool_package_item("black", Fluxion::ToolBackend::Pipx), runner)
+      .should be_a(Fluxion::InstallationStatus::Unknown)
+
+    configured = tool_package_item("black", Fluxion::ToolBackend::Pipx, probe_command: "pipx list --short | grep -q '^black '")
+    registry.probe(configured, runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    runner.ran?("pipx list --short").should be_true
+  end
+end
+
+private def sdkman_item(candidate : String, version : String? = nil) : Fluxion::StepItem
+  entry = Fluxion::SdkmanCandidate.new(candidate, version)
+  step = Fluxion::SdkmanPackagesStep.new("sdkman-candidates", [entry])
+  Fluxion::StepItem.new("sdkman-candidates", candidate, Fluxion::ItemType::SdkmanPackage, entry.to_s, step: step)
+end
+
+# Lays out `<SDKMAN_DIR>/candidates/<candidate>/<version>` the way `sdk
+# install` leaves it, with `current` linked to the default version.
+private def sdkman_candidate(directory : String, candidate : String, versions : Array(String),
+                             current : String? = nil) : Nil
+  root = File.join(directory, "candidates", candidate)
+  versions.each { |version| Dir.mkdir_p(File.join(root, version, "bin")) }
+  Dir.mkdir_p(root)
+  File.symlink(current, File.join(root, "current")) if current
+end
+
+private def with_sdkman_dir(& : String -> T) : T forall T
+  with_probe_dir do |directory|
+    previous = ENV["SDKMAN_DIR"]?
+    ENV["SDKMAN_DIR"] = directory
+    begin
+      yield directory
+    ensure
+      previous ? (ENV["SDKMAN_DIR"] = previous) : ENV.delete("SDKMAN_DIR")
+    end
+  end
+end
+
+# `sdkman-packages` had no probe, so `status` called every candidate unknown
+# and `--re-probe` ran `sdk install` for each one again.
+describe "sdkman-packages probe" do
+  registry = Fluxion::Executor::ProbeRegistry.default
+  runner = Fluxion::Executor::FakeShellRunner.new
+
+  it "reports a candidate with a current version as installed, with that version" do
+    with_sdkman_dir do |directory|
+      sdkman_candidate(directory, "java", ["25.0.4-tem"], current: "25.0.4-tem")
+
+      status = registry.probe(sdkman_item("java"), runner)
+      status.should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      status.as(Fluxion::InstallationStatus::InstalledByProbe).detected_version.should eq("25.0.4-tem")
+    end
+  end
+
+  it "reports a candidate that is missing, or whose current link dangles, as absent" do
+    with_sdkman_dir do |directory|
+      registry.probe(sdkman_item("maven"), runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+
+      sdkman_candidate(directory, "gradle", [] of String, current: "9.1.0")
+      registry.probe(sdkman_item("gradle"), runner).should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "reports a pinned candidate by its version, whatever current points at" do
+    with_sdkman_dir do |directory|
+      sdkman_candidate(directory, "java", ["21.0.4-tem", "25.0.4-tem"], current: "25.0.4-tem")
+
+      registry.probe(sdkman_item("java", "21.0.4-tem"), runner)
+        .should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      registry.probe(sdkman_item("java", "17.0.12-tem"), runner)
+        .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    end
+  end
+
+  it "looks in ~/.sdkman when SDKMAN_DIR is not set, as sdkman-init.sh does" do
+    with_probe_dir do |home|
+      previous_home, previous_dir = ENV["HOME"]?, ENV["SDKMAN_DIR"]?
+      ENV["HOME"] = home
+      ENV.delete("SDKMAN_DIR")
+      begin
+        sdkman_candidate(File.join(home, ".sdkman"), "sbt", ["1.11.7"], current: "1.11.7")
+        registry.probe(sdkman_item("sbt"), runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+      ensure
+        previous_home ? (ENV["HOME"] = previous_home) : ENV.delete("HOME")
+        ENV["SDKMAN_DIR"] = previous_dir if previous_dir
+      end
+    end
+  end
+end
+
+describe Fluxion::Executor::AssertProbe do
+  guard = Fluxion::AssertStep.new("docker-group", "id -nG | grep -qw docker", "join the docker group")
+  item = Fluxion::StepItem.new("docker-group", "docker-group", Fluxion::ItemType::Assert, step: guard)
+
+  it "answers for a report by running the check" do
+    runner = Fluxion::Executor::FakeShellRunner.new.on("grep -qw docker", 1)
+
+    Fluxion::Executor::ProbeRegistry.for_reports.probe(item, runner)
+      .should be_a(Fluxion::InstallationStatus::NotInstalled)
+    runner.ran?("/bin/bash -lc id -nG | grep -qw docker").should be_true
+  end
+
+  it "is not asked by apply, which runs the same check as the step" do
+    # Asked before the step, a failing check would run twice on the one run.
+    runner = Fluxion::Executor::FakeShellRunner.new
+
+    Fluxion::Executor::ProbeRegistry.default.probe(item, runner)
+      .should be_a(Fluxion::InstallationStatus::Unknown)
+    runner.commands.should be_empty
   end
 end

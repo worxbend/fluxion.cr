@@ -191,12 +191,19 @@ restartPolicy:
 ```
 
 `prompt-logout` records completed state, emits a restart-required event, and
-stops so the user can log out and resume deterministically.
+stops so the user can log out and resume deterministically. `apply` then exits
+75, the checkpoint code, so a wrapper running several profiles knows to stop.
+Because the phase is recorded as completed, the next `--skip-already-installed`
+run skips it and does not ask again.
 `requires-new-shell` runs later effects through a fresh login shell wrapper, so
 tools installed into shell startup paths are visible to what follows.
 
-A skipped phase never carries a restart policy: a phase that ran nothing has
-nothing for the user to log out of. A malformed policy is still reported.
+A phase that ran nothing never carries its restart policy: it has nothing for
+the user to log out of. That covers a phase skipped whole, and also one that
+was entered but whose every item was skipped (by a probe under `--re-probe`,
+or from state when the phase holds an assert and so is never skipped whole) or
+that only re-checked asserts. Such a phase is recorded as completed and the run
+carries on to the next one. A malformed policy is still reported.
 
 ---
 
@@ -234,6 +241,16 @@ two different things would make each of those ambiguous.
 `spec.probeCommand` is accepted by every kind that has an observable footprint.
 It answers "is this already here" without changing anything, which is what makes
 `--skip-already-installed` and `status` meaningful.
+
+A `probeCommand` describes the whole step, not any one item of it. During an
+apply it is asked once, before the first item of the step that it answers for
+runs, and that answer stands for the rest of the step: when it succeeds every
+item it answers for is skipped, and when it fails every one of them runs, in
+order — even if an earlier item's work would make it succeed by the time a
+later one is reached. A step whose later items must be judged on what its
+earlier items left behind is two steps, each with its own `probeCommand`. A
+typed probe (packages, repositories, git config and the like) still answers
+for its own item, and takes precedence over a `probeCommand`.
 
 Control kinds may carry nothing but a name: they describe an interaction rather
 than an installation, so `spec` is optional for them and required for everything
@@ -394,10 +411,13 @@ list, so a typo names its own fix.
 
 ## Package kinds
 
-Every package kind installs each item in a **separate process**, so one bad name
-never costs the rest of the list. A single transaction of twenty packages fails
-entirely on the first typo and leaves you with nothing, including the nineteen
-that were fine.
+The system package kinds install every package that needs installing in **one
+transaction**, and when that fails, each item in a **separate process**, so one
+bad name never costs the rest of the list. A single transaction of twenty
+packages fails entirely on the first typo and leaves you with nothing, including
+the nineteen that were fine; the fallback is what gets you those nineteen.
+`cargo-packages`, `flatpak` and `tool-packages` always install one item per
+process.
 
 ```yaml
 - name: core-cli-tools
@@ -452,6 +472,13 @@ The system package managers. Each takes `packages`, an optional
 
 An action may be a bare string or an object with `action` and `args`.
 
+Actions run first, one process each. The packages that still need installing —
+everything, or with `--skip-already-installed`/`--re-probe` only what the probes
+report missing — then go into one `install` transaction. If that fails, each is
+installed in its own process, so a bad name fails only its own item. Each
+package is reported and recorded as its own item either way; the batch's output
+and time are shown against the first package in it.
+
 ### `aur-packages`
 
 ```yaml
@@ -476,6 +503,9 @@ wraps them in `sudo`.
     packages: [cargo-edit]
 ```
 
+Each crate is probed in `cargo install --list`, asking the same `cargo` the
+`tool-packages` probe below does: the one on `PATH`, else `$CARGO_HOME/bin/cargo`.
+
 Prefer `tool-packages` with the `cargo-binstall` backend where a prebuilt binary
 exists: it downloads instead of compiling.
 
@@ -496,6 +526,13 @@ argv interface — it is a set of shell functions — so its operands are
 interpolated into a shell command and are rejected unless they are inert
 (letters, digits, `.`, `_`, `+`, `-`).
 
+Candidates have a built-in probe that reads SDKMAN's directory (`SDKMAN_DIR`,
+or `~/.sdkman` when it is unset, as `sdkman-init.sh` does): an unpinned
+candidate is installed when `candidates/<candidate>/current` resolves to a
+version, reported as that version, and a pinned one when
+`candidates/<candidate>/<version>` exists, whichever version is the default.
+No `probeCommand` is needed.
+
 ### `flatpak-packages`
 
 ```yaml
@@ -507,6 +544,12 @@ interpolated into a shell command and are rejected unless they are inert
       - com.spotify.Client
       - org.telegram.desktop
 ```
+
+Each id is installed with `flatpak install -y REMOTE ID`, so an id may name an
+extension or runtime as well as an app, for example an OBS Studio plugin
+(`com.obsproject.Studio.Plugin.DroidCam`). The probe lists every installed ref
+(`flatpak list --columns=application`), so such an item reads as installed once
+it is, and no `probeCommand` is needed.
 
 Declare the remote itself with `flatpak-remote`, or under `spec.sources`, rather
 than hiding it in a shell command where nothing verifies it.
@@ -733,7 +776,7 @@ already maintain and maps its own verbs onto binstaller's.
     skip: [zig]                 # optional
     locked: true                # optional; requires lockFile
     lockFile: ~/binstaller.lock.json
-    installerVersion: v0.2.0    # assertion, not a choice — see below
+    installerVersion: v0.5.0    # assertion, not a choice — see below
     continueOnError: false
 ```
 
@@ -883,9 +926,14 @@ skipped rather than failed, so the same profile stays usable in CI.
 ```
 
 At least one setting must be present; a step that declares none is a
-configuration mistake, not a no-op. Every setting is probed with the matching
-`show --property` first, so only what actually differs is applied and a rerun is
-free.
+configuration mistake, not a no-op. Every setting has a built-in probe that
+reads the current value back — `timedatectl show -p NTP|LocalRTC|Timezone`,
+`hostnamectl --static`, and `localectl status` for each locale variable — so
+under `--skip-already-installed` or `--re-probe` only what actually differs is
+applied, and `status` shows each setting as installed or missing rather than
+unknown. No `probeCommand` is needed; a typed probe takes precedence over one.
+Where the tools cannot answer (a container without systemd), the setting is
+reported unknown and applied.
 
 ### `system-update`
 
@@ -938,7 +986,15 @@ only when that copy still matches. A mismatch or unsafe file fails without
 replacing anything or importing the download.
 
 An RPM-imported key is tracked by its fingerprint and a keyring-backed key by
-its absolute keyring path. Query parameters and fragments remain available to the
+its absolute keyring path. A keyring-backed key is probed by reading the
+installed keyring with `gpg --show-keys`, unprivileged: it counts as installed
+only when the keyring holds exactly one primary key, the declared
+`fingerprint`. A keyring at that path holding another key is reported as
+missing, and an empty or absent one likewise; when gpg cannot read it, the
+answer is unknown. Both the download check and the probe run gpg with a
+private, throwaway `--homedir`, so they work on an account that has no
+`~/.gnupg` yet and never read or write the user's own keyring. Query
+parameters and fragments remain available to the
 request but are excluded from plans, events, errors, and state.
 `continueOnError: true` attempts the remaining keys, but a trust failure still
 fails the step; the phase's `execution.continueOnError` then decides whether
@@ -974,6 +1030,18 @@ other nineteen. The backend must be on `PATH`; the step fails with an actionable
 message rather than a confusing command-not-found. Package names must be
 registry identifiers valid for the backend — local paths, URLs, direct
 references, and option-shaped names are rejected.
+
+Packages installed by the `cargo-binstall` and `cargo` backends have a built-in
+probe: cargo-binstall records what it installs in cargo's own install list, so
+both are looked up in `cargo install --list`. A listed crate is installed, with
+the version the listing shows; a pinned crate at another version counts as
+missing (a plain or partial pin such as `0.10.2` or `0.10` is compared, a
+requirement with an operator such as `^0.10` is not). The `cargo` asked is the
+one on `PATH`, else the one rustup installs into `$CARGO_HOME/bin`
+(`~/.cargo/bin` when unset), so a shell that has not sourced `~/.cargo/env` still
+gets an answer; with neither, the answer is unknown. The other backends have no built-in probe: their items
+are unknown to `status` and rerun under `--re-probe` unless the step has a
+`probeCommand`, which then answers for every package in the step.
 
 ### `toolchain`
 
@@ -1063,6 +1131,15 @@ Fluxion downloads and verifies the declared key without privileges, dearmors it
 without privileges, then uses structured `sudo install` commands for the keyring
 and source list before running `sudo apt-get update`. Plans, `dry-run`,
 `status`, `diff`, and `explain` use the source-list path as the item key.
+
+The probe reads the source list back: it counts as installed only when the file
+holds exactly the declared `source` line and, when `signingKeyUrl` is set, the
+`keyring` exists and is not empty. A file at the same path with any other
+content — a vendor package's own line, a hand-written one signed by another
+keyring — is reported as missing, so `status` shows the drift and a run that
+probes the item rewrites it with the declared source and keyring. A plain
+`--skip-already-installed` run still trusts a completion recorded in state;
+`--re-probe` does not.
 
 Source options are restricted to `arch` and exactly one `signed-by`, and
 `signed-by` must match the absolute `keyring` path — otherwise the profile
@@ -1225,6 +1302,16 @@ The command runs with `<shell> -lc`. Exit code `0` passes. Any other exit fails
 the step and stops the phase unless the phase allows continuation. A profile
 that supplies its own `message` is telling the user how to fix the machine,
 which is the point.
+
+An assert runs on every apply, including `--skip-already-installed` ones. Its
+pass is never written to state, and a phase that holds an assert is never
+skipped as already complete — the other steps in that phase are still skipped
+item by item from state or their probes. A guard that stops holding fails the
+next run rather than passing on the strength of the last one.
+
+`status`, `diff` and `explain` run the check too — an assert promises not to
+change the host — and report a failing one as missing with its `message`.
+Write the command as a read-only check for that reason.
 
 ### `manual`
 

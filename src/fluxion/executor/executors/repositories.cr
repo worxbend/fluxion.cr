@@ -281,6 +281,67 @@ module Fluxion::Executor
     end
   end
 
+  # Reading which keys a file holds, without importing any of them.
+  #
+  # Shared by the `gpg-key` executor, which checks a download before
+  # installing it, and its probe, which checks an installed keyring, so both
+  # hold a key file to the same rule.
+  #
+  # Listing a key needs no keyring, but gpg still opens its home directory, and
+  # with `--no-options` it will not create one that is missing: on a fresh
+  # account without `~/.gnupg` every read failed with "directory does not
+  # exist!". Each read therefore gets a private throwaway home, which also
+  # keeps the check from depending on, or writing into, the user's keyring.
+  module GpgKeyListing
+    def self.argv(path : String, homedir : String) : Array(String)
+      ["gpg", "--batch", "--no-options", "--homedir", homedir, "--show-keys", "--with-colons", path]
+    end
+
+    # An unusable temporary directory (missing, read-only, full) is raised as
+    # an `ExecutionError`, the one error the probe registry turns into an
+    # Unknown answer and `run_item` into a failed item. As a bare
+    # `File::Error` it escaped both and aborted the whole apply.
+    def self.run(runner : ShellRunner, path : String, timeout : Time::Span) : ProcessResult
+      homedir = make_homedir
+      begin
+        runner.run(Command.new(argv(path, homedir), timeout: timeout))
+      ensure
+        FileUtils.rm_rf(homedir) rescue nil
+      end
+    end
+
+    private def self.make_homedir : String
+      homedir = File.tempname("fluxion-gpg")
+      Dir.mkdir(homedir, 0o700)
+      # `mkdir` honours the umask; gpg warns about a home others can read.
+      File.chmod(homedir, 0o700)
+      homedir
+    rescue error : File::Error
+      raise ExecutionError.new("could not create a temporary gpg home: #{error.message}")
+    end
+
+    # In gpg's colon output an `fpr` record directly after a `pub` gives that
+    # primary key's fingerprint; subkeys follow their own `sub` records.
+    def self.primary_fingerprints(output : String) : Array(String)
+      found = [] of String
+      awaiting = false
+
+      output.each_line do |line|
+        fields = line.split(':')
+        case fields.first?
+        when "pub"
+          awaiting = true
+        when "fpr"
+          next unless awaiting
+          awaiting = false
+          fields[9]?.try { |value| found << value.gsub(/\s/, "").upcase }
+        end
+      end
+
+      found
+    end
+  end
+
   # `gpg-key` — import repository signing keys.
   #
   # The fingerprint is checked against what gpg reads out of the downloaded
@@ -369,36 +430,13 @@ module Fluxion::Executor
         return "gpg is not on PATH, so the key fingerprint cannot be verified"
       end
 
-      result = runner.run(Command.new(
-        ["gpg", "--batch", "--no-options", "--show-keys", "--with-colons", path],
-        timeout: KEY_TIMEOUT))
+      result = GpgKeyListing.run(runner, path, KEY_TIMEOUT)
       return "could not read the key: #{result.detail}" unless result.success?
 
-      fingerprints = primary_fingerprints(result.stdout)
+      fingerprints = GpgKeyListing.primary_fingerprints(result.stdout)
       return if fingerprints == [expected.value]
 
       "key fingerprint mismatch: expected #{expected} but found #{fingerprints.join(", ").presence || "none"}"
-    end
-
-    # In gpg's colon output an `fpr` record directly after a `pub` gives that
-    # primary key's fingerprint; subkeys follow their own `sub` records.
-    private def primary_fingerprints(output : String) : Array(String)
-      found = [] of String
-      awaiting = false
-
-      output.each_line do |line|
-        fields = line.split(':')
-        case fields.first?
-        when "pub"
-          awaiting = true
-        when "fpr"
-          next unless awaiting
-          awaiting = false
-          fields[9]?.try { |value| found << value.gsub(/\s/, "").upcase }
-        end
-      end
-
-      found
     end
 
     private def find(step : Step, item : StepItem) : GpgKeyEntry?

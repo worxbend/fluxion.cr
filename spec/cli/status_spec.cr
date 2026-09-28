@@ -78,6 +78,42 @@ private def record_flathub(store : Fluxion::State::Store) : Nil
   store.save(document)
 end
 
+# Two guards, the second depending on the first, as a post-install check
+# profile writes them. An assert has no footprint a typed probe could find: the
+# check itself is the only way to know whether it holds.
+private ASSERT_PROFILE = <<-YAML
+  apiVersion: initkit.io/v1alpha1
+  kind: WorkstationProfile
+  metadata:
+    name: guards
+  spec:
+    target:
+      os:
+        distribution: ubuntu
+    phases:
+      - name: host-check
+        steps:
+          - name: host-ok
+            kind: assert
+            spec:
+              command: "test -e /srv/ok"
+              message: "This profile targets a host with /srv/ok"
+      - name: verify-docker-group
+        dependsOn: [host-check]
+        steps:
+          - name: in-docker-group
+            kind: assert
+            spec:
+              command: "id -nG | grep -qw docker"
+              message: "Log out and back in to join the docker group"
+              workingDir: /tmp
+  YAML
+
+# A host on which the first guard holds and the second does not.
+private def guard_runner : Fluxion::Executor::FakeShellRunner
+  Fluxion::Executor::FakeShellRunner.new.on("grep -qw docker", 1)
+end
+
 describe Fluxion::CLI::StatusCommand do
   it "reports a source setup the profile still declares" do
     with_state do |store|
@@ -139,6 +175,74 @@ describe Fluxion::CLI::StatusCommand do
         # An empty `items` beside a summary counting two of them is a document
         # that contradicts itself.
         json.as_h.has_key?("items").should be_false
+      end
+    end
+  end
+
+  describe "an assert" do
+    it "lists only the assert whose check fails under --failed" do
+      with_state do |store|
+        deps = Fluxion::CLI::Deps.new(runner: guard_runner, store: store)
+
+        ProfileHelpers.with_profile(ASSERT_PROFILE) do |path|
+          items = invoke(["status", "--failed", "--format", "json", "-c", path], deps).json["items"].as_a
+
+          # The guard that holds is not a failure, and listing it beside the
+          # one that is would leave the reader unable to tell which to fix.
+          items.map(&.["key"].as_s).should eq(["in-docker-group"])
+          items.first["status"].as_s.should eq("missing")
+          # The profile's message says how to fix the machine; it is the one
+          # thing worth printing next to a failed guard.
+          items.first["detail"].as_s.should contain("Log out and back in to join the docker group")
+        end
+      end
+    end
+
+    it "reports an assert that holds as installed, not as unknown" do
+      with_state do |store|
+        deps = Fluxion::CLI::Deps.new(runner: guard_runner, store: store)
+
+        ProfileHelpers.with_profile(ASSERT_PROFILE) do |path|
+          json = invoke(["status", "--format", "json", "-c", path], deps).json
+
+          held = json["items"].as_a.find! { |item| item["key"].as_s == "host-ok" }
+          held["status"].as_s.should eq("installed")
+          json["summary"]["unknown"].as_i.should eq(0)
+          json["summary"]["missing"].as_i.should eq(1)
+        end
+      end
+    end
+
+    it "runs the check with the shell and working directory apply uses" do
+      with_state do |store|
+        runner = guard_runner
+        deps = Fluxion::CLI::Deps.new(runner: runner, store: store)
+
+        ProfileHelpers.with_profile(ASSERT_PROFILE) do |path|
+          invoke(["status", "-c", path], deps)
+
+          runner.ran?("/bin/bash -lc test -e /srv/ok").should be_true
+          command = runner.commands.find! { |candidate| candidate.argv.join(' ').includes?("grep -qw docker") }
+          command.working_dir.should eq("/tmp")
+        end
+      end
+    end
+
+    it "reports an assert whose check does not finish as unknown" do
+      with_state do |store|
+        # A check that ran out of time has not said the guard fails, and
+        # reporting it as failing would send the user to fix the wrong thing.
+        runner = Fluxion::Executor::FakeShellRunner.new
+          .on("grep -qw docker", Fluxion::ProcessResult.new(
+            Fluxion::Executor::SystemShellRunner::TIMEOUT_EXIT_CODE, "", "Process timed out after 00:01:00"))
+        deps = Fluxion::CLI::Deps.new(runner: runner, store: store)
+
+        ProfileHelpers.with_profile(ASSERT_PROFILE) do |path|
+          items = invoke(["status", "--format", "json", "-c", path], deps).json["items"].as_a
+
+          timed_out = items.find! { |item| item["key"].as_s == "in-docker-group" }
+          timed_out["status"].as_s.should eq("unknown")
+        end
       end
     end
   end

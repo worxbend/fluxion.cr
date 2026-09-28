@@ -76,6 +76,29 @@ private class UnknownStep < Fluxion::Step
   end
 end
 
+# Answers a step's `probeCommand` the way a real host would after the step's
+# first item has done its work: false until any other command has run, true
+# from then on — a first script that creates what the probe tests for.
+private class FirstItemSatisfiesProbe < Fluxion::Executor::FakeShellRunner
+  PROBE = "test -f /tmp/fluxion-spec-marker"
+
+  def initialize(@satisfied : Bool = false)
+    super()
+  end
+
+  def run(command : Fluxion::Executor::Command, &sink : String ->) : Fluxion::ProcessResult
+    result = super(command, &sink)
+    return Fluxion::ProcessResult.new(@satisfied ? 0 : 1) if command.argv.join(' ').includes?(PROBE)
+
+    @satisfied = true
+    result
+  end
+
+  def probes : Int32
+    argv.count(&.join(' ').includes?(PROBE))
+  end
+end
+
 describe Fluxion::Executor::Orchestrator do
   it "fails a step whose kind nothing can carry out" do
     summary, listener, _ = run(profile([phase("base", [UnknownStep.new("mystery")] of Fluxion::Step)]))
@@ -104,10 +127,8 @@ describe Fluxion::Executor::Orchestrator do
 
     summary.succeeded.should eq(2)
     summary.ok?.should be_true
-    runner.argv.should eq([
-      ["sudo", "dnf", "install", "-y", "git"],
-      ["sudo", "dnf", "install", "-y", "curl"],
-    ])
+    # One transaction for the list; see "package batching" below.
+    runner.argv.should eq([["sudo", "dnf", "install", "-y", "git", "curl"]])
   end
 
   it "runs phases in dependency order" do
@@ -123,8 +144,9 @@ describe Fluxion::Executor::Orchestrator do
 
   it "keeps installing the other packages after one fails" do
     # The isolation is the whole point of a package step: one bad name should
-    # not lose the rest of the list.
-    runner = Fluxion::Executor::FakeShellRunner.new.on("install -y broken", 1)
+    # not lose the rest of the list. The name fails the batch as well as its
+    # own install, as it would for a real package manager.
+    runner = Fluxion::Executor::FakeShellRunner.new.on("broken", 1)
     summary, _, _ = run(profile([phase("base", [packages("tools", "git", "broken", "curl")] of Fluxion::Step)]),
       runner)
 
@@ -134,7 +156,7 @@ describe Fluxion::Executor::Orchestrator do
   end
 
   it "stops a step at the first failure when continueOnError is off" do
-    runner = Fluxion::Executor::FakeShellRunner.new.on("install -y broken", 1)
+    runner = Fluxion::Executor::FakeShellRunner.new.on("broken", 1)
     step = packages("tools", "broken", "curl", continue_on_error: false)
     _, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner)
 
@@ -200,6 +222,117 @@ describe Fluxion::Executor::Orchestrator do
     runner.ran?("install -y curl").should be_false
   end
 
+  it "reports a logout checkpoint on the summary" do
+    subject = profile([
+      phase("shell", [packages("tools", "zsh")] of Fluxion::Step,
+        restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+      phase("later", [packages("more", "curl")] of Fluxion::Step),
+    ])
+    summary, _, _ = run(subject)
+
+    summary.logout_required?.should be_true
+    summary.next_phase.should eq("later")
+  end
+
+  it "records a phase that asked for a logout as completed, so the next run skips it" do
+    directory = File.tempname("fluxion-state")
+    store = Fluxion::State::Store.new(directory)
+
+    begin
+      subject = profile([
+        phase("shell", [packages("tools", "zsh")] of Fluxion::Step,
+          restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+        phase("later", [packages("more", "curl")] of Fluxion::Step),
+      ])
+      run(subject, store: store)
+
+      document = store.load("default")
+      document.phase_completed?("shell", Fluxion::State::Fingerprint.of(subject.phases.first)).should be_true
+      document.next_phase.should eq("later")
+
+      skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+      summary, listener, second = run(subject, options: skipping, store: store)
+
+      listener.events.any?(&.kind.restart_required?).should be_false
+      summary.logout_required?.should be_false
+      second.ran?("install -y zsh").should be_false
+      second.ran?("install -y curl").should be_true
+    ensure
+      FileUtils.rm_rf(directory)
+    end
+  end
+
+  describe "a logout phase that ran nothing" do
+    # A phase that ran nothing has nothing for the user to log out of, so it
+    # neither asks nor stops the run; it is still recorded as completed.
+    it "does not ask when a re-probe finds every item installed" do
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        runner = Fluxion::Executor::FakeShellRunner.new
+          .available("dpkg-query")
+          .on("\\n zsh", 0, "install ok installed|5.9-6\n")
+        shell = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[zsh])
+        subject = profile([
+          phase("shell", [shell] of Fluxion::Step,
+            restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+          phase("later", [packages("more", "curl")] of Fluxion::Step),
+        ])
+        reprobing = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::LiveReprobe)
+        summary, listener, _ = run(subject, runner, options: reprobing, store: store)
+
+        listener.events.any?(&.kind.restart_required?).should be_false
+        summary.logout_required?.should be_false
+        summary.skipped.should eq(1)
+        runner.ran?("install -y zsh").should be_false
+        runner.ran?("install -y curl").should be_true
+        store.load("default")
+          .phase_completed?("shell", Fluxion::State::Fingerprint.of(subject.phases.first)).should be_true
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "does not ask again when the phase holds an assert, which is never skipped whole" do
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        guard = Fluxion::AssertStep.new("zsh-guard", "command -v zsh", "zsh must be installed")
+        subject = profile([
+          phase("shell", [packages("tools", "zsh"), guard] of Fluxion::Step,
+            restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+          phase("later", [packages("more", "curl")] of Fluxion::Step),
+        ])
+        first, _, _ = run(subject, store: store)
+        first.logout_required?.should be_true
+
+        skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+        summary, listener, second = run(subject, options: skipping, store: store)
+
+        second.ran?("command -v zsh").should be_true
+        second.ran?("install -y zsh").should be_false
+        listener.events.any?(&.kind.restart_required?).should be_false
+        summary.logout_required?.should be_false
+        second.ran?("install -y curl").should be_true
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "still asks in a preview when an item would run" do
+      subject = profile([
+        phase("shell", [packages("tools", "zsh")] of Fluxion::Step,
+          restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")),
+      ])
+      previewing = Fluxion::Executor::RunOptions.new(dry_run: true)
+      _, listener, _ = run(subject, options: previewing)
+
+      listener.events.any?(&.kind.restart_required?).should be_true
+    end
+  end
+
   it "refuses to run an unknown phase rather than doing nothing quietly" do
     options = Fluxion::Executor::RunOptions.new(only_phases: ["nope"])
     expect_raises(Fluxion::ExecutionError, /Unknown phase: nope/) do
@@ -251,6 +384,181 @@ describe Fluxion::Executor::Orchestrator do
     summary, _, _ = run(profile([phase("base", [guarded] of Fluxion::Step)]), options: options)
 
     summary.succeeded.should eq(1)
+  end
+
+  describe "package batching" do
+    # On Debian and Ubuntu every dpkg run fires the man-db, desktop and icon
+    # triggers and the update-notifier `apt-check` hook, so one process per
+    # package cost 10-180 s each and a 180-package list took an hour. The same
+    # list in one `apt-get install` pays that once.
+    it "installs every package a step needs in one process" do
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl jq])
+      summary, listener, runner = run(profile([phase("base", [step] of Fluxion::Step)]))
+
+      runner.argv.should eq([["sudo", "apt-get", "install", "-y", "git", "curl", "jq"]])
+      summary.succeeded.should eq(3)
+      listener.results.map(&.item).should eq(%w[git curl jq])
+    end
+
+    it "falls back to one process per package when the batch fails" do
+      # One bad name fails the whole transaction, so the batch is only the fast
+      # path: the isolation that keeps a typo from losing the rest of the list
+      # is still there when it is needed.
+      runner = Fluxion::Executor::FakeShellRunner.new.on("broken", 100)
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git broken curl])
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner)
+
+      runner.argv.should eq([
+        ["sudo", "apt-get", "install", "-y", "git", "broken", "curl"],
+        ["sudo", "apt-get", "install", "-y", "git"],
+        ["sudo", "apt-get", "install", "-y", "broken"],
+        ["sudo", "apt-get", "install", "-y", "curl"],
+      ])
+      summary.succeeded.should eq(2)
+      summary.failed.should eq(1)
+    end
+
+    it "does not fall back to installing one at a time after the user cancelled the batch" do
+      cancellation = Fluxion::CancellationSignal.new
+      runner = CancellingRunner.new("install -y git curl jq", cancellation)
+      runner.on("install -y git curl jq", 130)
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl jq])
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner,
+        cancellation: cancellation)
+
+      runner.argv.should eq([["sudo", "apt-get", "install", "-y", "git", "curl", "jq"]])
+      summary.succeeded.should eq(0)
+      summary.next_phase.should eq("base")
+    end
+
+    it "leaves out what a probe says is already installed" do
+      runner = Fluxion::Executor::FakeShellRunner.new
+        .available("dpkg-query")
+        .on("\\n git", 0, "install ok installed|1:2.43.0-1ubuntu7\n")
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl jq])
+      options = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::LiveReprobe)
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner, options: options)
+
+      runner.argv.reject(&.first.==("dpkg-query"))
+        .should eq([["sudo", "apt-get", "install", "-y", "curl", "jq"]])
+      summary.skipped.should eq(1)
+      summary.succeeded.should eq(2)
+      # Each item is probed once, not again after the batch installed it.
+      runner.argv.count(&.first.==("dpkg-query")).should eq(3)
+    end
+
+    it "runs the pre-install actions first, each on its own" do
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl],
+        actions: [Fluxion::PackageAction.new("update")])
+      summary, _, runner = run(profile([phase("base", [step] of Fluxion::Step)]))
+
+      runner.argv.should eq([
+        ["sudo", "apt-get", "update"],
+        ["sudo", "apt-get", "install", "-y", "git", "curl"],
+      ])
+      summary.succeeded.should eq(3)
+    end
+
+    it "records every package the batch installed" do
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl])
+        run(profile([phase("base", [step] of Fluxion::Step)]), store: store)
+
+        document = store.load("default")
+        document.find("tools", "git", "package").should_not be_nil
+        document.find("tools", "curl", "package").should_not be_nil
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "previews the batch it would run" do
+      step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl])
+      options = Fluxion::Executor::RunOptions.new(dry_run: true)
+      summary, listener, runner = run(profile([phase("base", [step] of Fluxion::Step)]), options: options)
+
+      runner.commands.should be_empty
+      summary.dry_run.should eq(2)
+      previews = listener.results.compact_map(&.as?(Fluxion::StepResult::DryRun))
+      previews.first.would_execute.should eq(["sudo", "apt-get", "install", "-y", "git", "curl"])
+      previews.last.would_execute.should be_empty
+    end
+
+    it "keeps cargo to one crate per process" do
+      # Each crate is its own build, so there is no shared cost to save, and
+      # `cargo install a b` stops at the first crate that fails to compile.
+      step = Fluxion::PackagesStep.new("crates", Fluxion::PackageManager::Cargo, %w[ripgrep fd-find])
+      _, _, runner = run(profile([phase("base", [step] of Fluxion::Step)]))
+
+      runner.argv.should eq([["cargo", "install", "ripgrep"], ["cargo", "install", "fd-find"]])
+    end
+  end
+
+  describe "a step's probeCommand" do
+    skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+
+    it "runs every script of a step it said was not done when the step began" do
+      # The probe describes the step, not the item. Asked again before each
+      # script, it flipped to true as soon as the first script had done its
+      # part, and the scripts after it were reported as already installed
+      # without ever running.
+      step = Fluxion::ShellScriptStep.new("app", [
+        Fluxion::ShellScriptItem.new("first", content: "touch /tmp/fluxion-spec-marker"),
+        Fluxion::ShellScriptItem.new("second", content: "echo second"),
+        Fluxion::ShellScriptItem.new("third", content: "echo third"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      runner = FirstItemSatisfiesProbe.new
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner, options: skipping)
+
+      summary.skipped.should eq(0)
+      summary.succeeded.should eq(3)
+      runner.probes.should eq(1)
+    end
+
+    it "runs every command of a step it said was not done when the step began" do
+      step = Fluxion::ShellCommandStep.new("app", [
+        Fluxion::ShellCommandItem.new("first", shell_command: "touch /tmp/fluxion-spec-marker"),
+        Fluxion::ShellCommandItem.new("second", shell_command: "echo second"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      runner = FirstItemSatisfiesProbe.new
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner, options: skipping)
+
+      summary.skipped.should eq(0)
+      summary.succeeded.should eq(2)
+      runner.ran?("echo second").should be_true
+    end
+
+    it "skips every item of a step it says is done, asking once" do
+      step = Fluxion::ShellCommandStep.new("app", [
+        Fluxion::ShellCommandItem.new("first", shell_command: "touch /tmp/fluxion-spec-marker"),
+        Fluxion::ShellCommandItem.new("second", shell_command: "echo second"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      runner = FirstItemSatisfiesProbe.new(satisfied: true)
+      summary, _, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner, options: skipping)
+
+      summary.skipped.should eq(2)
+      runner.argv.size.should eq(1)
+    end
+
+    it "is asked again for the next step that declares one" do
+      # Settled once per step, not once per run: the second step's probe is
+      # its own question, asked after the first step has done its work.
+      first = Fluxion::ShellCommandStep.new("install", [
+        Fluxion::ShellCommandItem.new("fetch", shell_command: "touch /tmp/fluxion-spec-marker"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      second = Fluxion::ShellCommandStep.new("configure", [
+        Fluxion::ShellCommandItem.new("write", shell_command: "echo configure"),
+      ], probe_command: FirstItemSatisfiesProbe::PROBE)
+      runner = FirstItemSatisfiesProbe.new
+      summary, _, _ = run(profile([phase("base", [first, second] of Fluxion::Step)]), runner, options: skipping)
+
+      summary.succeeded.should eq(1)
+      summary.skipped.should eq(1)
+      runner.probes.should eq(2)
+    end
   end
 
   describe "cancellation" do
@@ -460,6 +768,91 @@ describe Fluxion::Executor::Orchestrator do
         second.ran?("install -y git").should be_true
       ensure
         FileUtils.rm_rf(directory)
+      end
+    end
+
+    describe "an assert" do
+      # An assert is a guard on the host as it is now. A pass on an earlier run
+      # says nothing about this one, so neither the step nor the phase that
+      # holds it may be skipped on the strength of what state remembers.
+      it "checks its condition again on a run that skips what is already done" do
+        directory = File.tempname("fluxion-state")
+        store = Fluxion::State::Store.new(directory)
+
+        begin
+          guard = Fluxion::AssertStep.new("marker-guard", "test -e /srv/marker", "marker must exist")
+          subject = profile([phase("guard", [guard] of Fluxion::Step)])
+          skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+          run(subject, options: skipping, store: store)
+
+          gone = Fluxion::Executor::FakeShellRunner.new.on("test -e /srv/marker", 1)
+          summary, _, second = run(subject, runner: gone, options: skipping, store: store)
+
+          second.ran?("test -e /srv/marker").should be_true
+          summary.failed_phases.should eq(["guard"])
+        ensure
+          FileUtils.rm_rf(directory)
+        end
+      end
+
+      it "is not answered by a pass a state file already recorded" do
+        # State files written before this fix hold the assert as a completed
+        # item; the next run must not take that as the guard having passed.
+        directory = File.tempname("fluxion-state")
+        store = Fluxion::State::Store.new(directory)
+
+        begin
+          guard = Fluxion::AssertStep.new("marker-guard", "test -e /srv/marker", "marker must exist")
+          subject = profile([phase("guard", [guard] of Fluxion::Step)])
+          store.update("default") do |document|
+            document.record(Fluxion::State::ItemRecord.new(
+              profile: "default", step: "marker-guard", item_key: "marker-guard",
+              item_type: "assert", completed_at: Time.utc))
+          end
+
+          skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+          _, _, second = run(subject, options: skipping, store: store)
+
+          second.ran?("test -e /srv/marker").should be_true
+        ensure
+          FileUtils.rm_rf(directory)
+        end
+      end
+
+      it "is not recorded as done when it passes" do
+        directory = File.tempname("fluxion-state")
+        store = Fluxion::State::Store.new(directory)
+
+        begin
+          guard = Fluxion::AssertStep.new("marker-guard", "test -e /srv/marker", "marker must exist")
+          subject = profile([phase("base", [guard, packages("tools", "git")] of Fluxion::Step)])
+          run(subject, store: store)
+
+          document = store.load("default")
+          document.find("marker-guard", "marker-guard", "assert").should be_nil
+          document.find("tools", "git", "package").should_not be_nil
+        ensure
+          FileUtils.rm_rf(directory)
+        end
+      end
+
+      it "still lets the rest of its phase be skipped item by item" do
+        directory = File.tempname("fluxion-state")
+        store = Fluxion::State::Store.new(directory)
+
+        begin
+          guard = Fluxion::AssertStep.new("marker-guard", "test -e /srv/marker", "marker must exist")
+          subject = profile([phase("base", [guard, packages("tools", "git")] of Fluxion::Step)])
+          run(subject, store: store)
+
+          skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+          _, _, second = run(subject, options: skipping, store: store)
+
+          second.ran?("test -e /srv/marker").should be_true
+          second.ran?("install -y git").should be_false
+        ensure
+          FileUtils.rm_rf(directory)
+        end
       end
     end
 
@@ -707,8 +1100,10 @@ describe "dry-run and interrupts" do
     directory = File.tempname("fluxion-flush")
     begin
       store = Fluxion::State::Store.new(directory)
+      # Two steps rather than one list, because a list is installed as one
+      # batch and would explode before anything succeeded.
       subject = profile([
-        phase("base", [packages("tools", "git", "boom")] of Fluxion::Step),
+        phase("base", [packages("tools", "git"), packages("more", "boom")] of Fluxion::Step),
       ])
 
       expect_raises(Exception, "unexpected") do

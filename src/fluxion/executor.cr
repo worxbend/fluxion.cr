@@ -9,6 +9,7 @@ require "./executor/archive"
 require "./executor/installer"
 require "./executor/shell_runner"
 require "./executor/probe"
+require "./executor/probes/*"
 require "./executor/probe_sweep"
 require "./executor/step_executor"
 # downloads.cr first: it defines `DownloadSupport`, which the shell and
@@ -21,6 +22,8 @@ require "./executor/executors/repositories"
 require "./executor/executors/tools"
 require "./executor/run_options"
 require "./executor/orchestrator"
+require "./executor/step_batch"
+require "./executor/orchestrator_recorder"
 
 # Runs the work a profile describes.
 #

@@ -1,9 +1,12 @@
 module Fluxion::Executor
-  # `packages` — one process per package.
+  # `packages` — every package that needs installing in one process, and one
+  # process per package when that fails.
   #
-  # The isolation is the point: if `git` installs and `some-typo` does not, the
-  # user gets git and one clear error rather than a transaction that rolled
-  # everything back.
+  # The batch is the fast path: a manager's fixed cost per transaction is paid
+  # once instead of once per package, which on Ubuntu is the difference between
+  # minutes and an hour. The per-package fallback is the safe one: if `git`
+  # installs and `some-typo` does not, the user still gets git and one clear
+  # error rather than a transaction that rolled everything back.
   class PackagesExecutor < StepExecutor
     INSTALL_TIMEOUT = 10.minutes
 
@@ -37,6 +40,22 @@ module Fluxion::Executor
       end
 
       [Command.new(manager.install_argv(item.key), timeout: INSTALL_TIMEOUT)]
+    end
+
+    # Packages batch; pre-install actions never do, since they have to finish
+    # before any package is installed and each is its own tracked item.
+    def batches?(step : Step, item : StepItem) : Bool
+      item.item_type.package? && step.as(PackagesStep).package_manager.batches?
+    end
+
+    # The timeout grows with the list: the batch is doing the work the
+    # per-package commands would have done, and each of those had
+    # `INSTALL_TIMEOUT` to itself.
+    def batch_command(step : Step, items : Array(StepItem)) : Command?
+      manager = step.as(PackagesStep).package_manager
+      return unless manager.batches?
+
+      Command.new(manager.install_argv(items.map(&.key)), timeout: INSTALL_TIMEOUT * items.size)
     end
   end
 

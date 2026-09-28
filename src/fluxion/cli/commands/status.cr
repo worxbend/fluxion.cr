@@ -145,6 +145,14 @@ module Fluxion::CLI
                                        {Classification::Missing, "not installed", nil}
                                      end
 
+      # An assert is a check, not something installed, so its detail says
+      # which way the check went — and, when it fails, what the profile says
+      # to do about it, which is the one thing worth reading next to it.
+      if assert = item.step.as?(AssertStep)
+        detail = "check passes" if classification.installed?
+        detail = "check fails: #{assert.message}" if classification.missing?
+      end
+
       # A recorded version that no longer matches the live one is drift: the
       # thing is installed, but not the thing state believes.
       if classification.installed? && recorded && live && recorded.version && recorded.version != live
@@ -189,7 +197,7 @@ module Fluxion::CLI
     protected def build_report : StatusReport
       profile = load_profile
       StatusReport.build(profile, deps.runner,
-        Executor::ProbeRegistry.default, deps.store, @profile_name)
+        Executor::ProbeRegistry.for_reports, deps.store, @profile_name)
     end
 
     protected def colour_for(classification : StatusReport::Classification, text : String) : String

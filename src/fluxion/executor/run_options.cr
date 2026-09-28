@@ -89,6 +89,12 @@ module Fluxion::Executor
     # that ended the run.
     property paused_exit_code : Int32?
 
+    # A `prompt-logout` phase completed and stopped the run. It is a
+    # checkpoint like an interrupt step, so the CLI reports it with the same
+    # exit code (75): a wrapper that runs several profiles in turn has to know
+    # to stop there rather than carry on as if the run had simply finished.
+    property? logout_required = false
+
     def initialize
     end
 

@@ -42,6 +42,9 @@ module Fluxion::TUI
       document = store.load(profile_name)
       completed = Set(String).new
       profile.phases.each do |phase|
+        # An assert checks the host afresh on every run, so a phase holding
+        # one is never offered as finished — the executor would run it anyway.
+        next if phase.rechecked_every_run?
         next unless document.phase_completed?(phase.name, State::Fingerprint.of(phase))
         completed << phase.name
       end

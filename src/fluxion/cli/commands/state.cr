@@ -175,16 +175,17 @@ module Fluxion::CLI
     end
 
     def usage : String
-      "fluxion state forget --profile NAME (--phase NAME | --item KEY [--step NAME] [--type TYPE])"
+      "fluxion state forget [PROFILE] (--phase NAME | --item KEY [--step NAME] [--type TYPE])"
     end
 
+    @profile_option : String?
     @phase : String?
     @item : String?
     @step : String?
     @type : String?
 
     def register(parser : OptionParser) : Nil
-      parser.on("--profile=NAME", "Profile name [default: default]") { |value| @profile_name = value }
+      parser.on("--profile=NAME", "Profile name, instead of PROFILE [default: default]") { |value| @profile_option = value }
       parser.on("--phase=NAME", "Phase to forget") { |value| @phase = value }
       parser.on("--item=KEY", "Item key to forget") { |value| @item = value }
       parser.on("--step=NAME", "Step qualifying --item") { |value| @step = value }
@@ -195,7 +196,7 @@ module Fluxion::CLI
     # forgetting an item share only their argument validation — so `run` does
     # the validation and hands off.
     def run(arguments : Array(String)) : ExitCode
-      parse(arguments)
+      profile = forget_profile(parse(arguments))
 
       phase = @phase.presence
       item = @item.presence
@@ -204,13 +205,31 @@ module Fluxion::CLI
         raise Failure.invalid_input("--step and --type only qualify --item")
       end
 
-      unless store.exists?(@profile_name)
-        puts Style.dim("No state recorded for profile: #{@profile_name}")
+      unless store.exists?(profile)
+        puts Style.dim("No state recorded for profile: #{profile}")
         return ExitCode::Success
       end
 
-      document = store.load(@profile_name)
+      document = store.load(profile)
       phase ? forget_phase(document, phase) : forget_item(document, item.not_nil!)
+    end
+
+    # The profile is positional here as in `show`, `path` and `reset`;
+    # `--profile` stays for the Java spelling. Before, only the flag was read,
+    # so `forget NAME --item KEY` ignored NAME, looked in "default", found no
+    # state there and exited 0 — which reads exactly like success. Anything
+    # that could be a second profile is therefore refused, not dropped.
+    private def forget_profile(positional : Array(String)) : String
+      if positional.size > 1
+        raise Failure.invalid_input("Unexpected argument: '#{positional[1]}'\n\nUsage: #{usage}")
+      end
+
+      named, option = positional.first?, @profile_option
+      if named && option && named != option
+        raise Failure.invalid_input("Two profiles given: '#{named}' and --profile=#{option}")
+      end
+
+      named || option || @profile_name
     end
 
     private def forget_phase(document : State::Document, phase : String) : ExitCode

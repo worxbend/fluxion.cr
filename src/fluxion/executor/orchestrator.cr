@@ -11,6 +11,9 @@ module Fluxion::Executor
   # listener, the summary being filled in, the cancellation signal, the state
   # recorder — lives on `Traversal`, which is created per run and thrown away
   # after it.
+  #
+  # Package batching lives in step_batch.cr and the state `Recorder` in
+  # orchestrator_recorder.cr; both reopen this class.
   class Orchestrator
     getter runner : ShellRunner
     getter executors : ExecutorRegistry
@@ -79,6 +82,8 @@ module Fluxion::Executor
         @recorder : Recorder,
       )
         @summary = RunSummary.new
+        @batch = StepBatch.new
+        @phase_changed_host = false
       end
 
       def walk(profile : Profile, phases : Array(Phase)) : RunSummary
@@ -142,17 +147,31 @@ module Fluxion::Executor
             @summary.failed_phases << phase.name
             @listener.on_event(ExecutionEvent.phase_failed(phase.name))
             next
+          in PhaseOutcome::LogoutRequired
+            # The phase ran to the end, so it is recorded as completed like any
+            # other: the documented contract of `prompt-logout`. Without this
+            # the phase was never marked done, so every later run re-ran it and
+            # asked for a logout again, and `--skip-already-installed` could
+            # never skip it.
+            @recorder.phase_completed(phase, fingerprint)
+            @summary.logout_required = true
+            stop_before_next(phases, phase)
+            break
           in PhaseOutcome::Halted
-            # A logout checkpoint or an interrupt: state is written and a resume
-            # point recorded, then the run stops cleanly.
-            @summary.next_phase = phases[(phases.index(phase) || 0) + 1]?.try(&.name)
-            @recorder.resume_at(@summary.next_phase)
+            # An interrupt step: a resume point is recorded, then the run stops
+            # cleanly.
+            stop_before_next(phases, phase)
             break
           in PhaseOutcome::Cancelled
             cancel_at(phase.name)
             break
           end
         end
+      end
+
+      private def stop_before_next(phases : Array(Phase), phase : Phase) : Nil
+        @summary.next_phase = phases[(phases.index(phase) || 0) + 1]?.try(&.name)
+        @recorder.resume_at(@summary.next_phase)
       end
 
       # The single exit for cancellation, so every path that notices the signal
@@ -188,6 +207,7 @@ module Fluxion::Executor
       private def run_phase(phase : Phase) : PhaseOutcome
         @listener.on_event(ExecutionEvent.phase_started(phase.name))
         failed = false
+        @phase_changed_host = false
 
         phase.steps.each do |step|
           return PhaseOutcome::Cancelled if @cancellation.cancelled?
@@ -224,16 +244,21 @@ module Fluxion::Executor
           return PhaseOutcome::Failed if step_failed && !phase.continue_on_step_error?
         end
 
-        # Before the logout branch below for the same reason: the `Halted` arm
+        # Before the logout branch below for the same reason: the `LogoutRequired` arm
         # points the resume at the phase *after* this one.
         return PhaseOutcome::Failed if failed
 
         @listener.on_event(ExecutionEvent.phase_completed(phase.name))
 
+        # A phase that ran nothing has nothing for the user to log out of: every
+        # item skipped on a probe or on state, or only asserts re-checked. It
+        # used to ask anyway, so `--re-probe` (which never skips a phase whole)
+        # and any phase holding an assert (never skipped whole either) stopped
+        # at the checkpoint with exit 75 on every run of a converged host.
         policy = phase.restart_policy
-        if policy.is_a?(RestartPolicy::PromptLogout)
+        if policy.is_a?(RestartPolicy::PromptLogout) && @phase_changed_host
           @listener.on_event(ExecutionEvent.restart_required(phase.name, policy.message))
-          return PhaseOutcome::Halted
+          return PhaseOutcome::LogoutRequired
         end
 
         PhaseOutcome::Completed
@@ -261,14 +286,17 @@ module Fluxion::Executor
 
         @listener.on_event(ExecutionEvent.step_started(step.name))
         any_failed = false
+        items = executor.items(step)
+        @batch = StepBatch.new
 
         begin
-          executor.items(step).each do |item|
+          items.each_with_index do |item, index|
             break if @cancellation.cancelled?
 
-            result = run_item(step, item, executor)
+            result = run_item(step, item, executor, items[(index + 1)..])
             @summary.record(result)
             @recorder.item_succeeded(item, result) if result.is_a?(StepResult::Success)
+            @phase_changed_host ||= changes_host?(step, result)
             next unless result.is_a?(StepResult::Failure)
 
             any_failed = true
@@ -281,20 +309,44 @@ module Fluxion::Executor
         any_failed
       end
 
-      private def run_item(step : Step, item : StepItem, executor : StepExecutor) : StepResult
+      # Whether this result did (or, in a preview, would do) work a logout
+      # could be needed for. A check changes nothing, so an assert does not
+      # count however it ends.
+      private def changes_host?(step : Step, result : StepResult) : Bool
+        return false if step.rechecked_every_run?
+        result.is_a?(StepResult::Success) || result.is_a?(StepResult::DryRun)
+      end
+
+      # `later` is the rest of the step's items, which a batch may take on.
+      private def run_item(step : Step, item : StepItem, executor : StepExecutor,
+                           later : Array(StepItem)) : StepResult
         @listener.on_event(ExecutionEvent.item_started(step.name, item.key))
+
+        # Done by a batch an earlier item ran, or described by its preview.
+        if @batch.covers?(item)
+          result = @options.read_only? ? StepResult::DryRun.new(item.key, [] of String) : StepResult::Success.new(item.key, Time::Span.zero)
+          return completed(step.name, item.key, result)
+        end
 
         if decision = skip_decision(item)
           return completed(step.name, item.key, StepResult::Skipped.new(item.key, decision.to_s))
         end
 
+        batch = plan_batch(step, item, executor, later)
+
         if @options.read_only?
-          return completed(step.name, item.key, executor.preview(step, item))
+          preview = batch ? StepResult::DryRun.new(item.key, batch[0].preview) : executor.preview(step, item)
+          @batch.cover(batch[1]) if batch
+          return completed(step.name, item.key, preview)
         end
 
         if step.requires_approval?(item.key) && !@options.approved?
           return completed(step.name, item.key, StepResult::Failure.new(item.key,
             "explicit confirmation required; re-run with --yes", 2))
+        end
+
+        if batch && (installed = run_batch(step, item, *batch))
+          return completed(step.name, item.key, installed)
         end
 
         # The one place a `Fluxion::Error` from an executor becomes a failed
@@ -327,15 +379,38 @@ module Fluxion::Executor
       end
 
       # Whether this item can be skipped, and on what evidence.
+      #
+      # Remembered for the length of the step, because planning a batch asks
+      # it of every later item before those items are reached, and a batch
+      # that has just installed them must not be answered by a fresh probe
+      # that would call them skipped.
       private def skip_decision(item : StepItem) : InstallationStatus?
         return unless @options.mode.probes?
 
+        @batch.decisions.fetch(item.key) do
+          @batch.decisions[item.key] = decide_skip(item)
+        end
+      end
+
+      private def decide_skip(item : StepItem) : InstallationStatus?
         if recorded = @recorder.recorded(item)
           return recorded
         end
 
-        status = @probes.probe(item, @runner)
+        status = probe(item)
         status.installed? ? status : nil
+      end
+
+      # A step's own `probeCommand` answers for the whole step, so it is asked
+      # once, at the first item that needs it — before any item of the step
+      # has run, since every item is decided before it runs — and that answer
+      # stands for the rest of the step. Asked again per item, a probe that the
+      # first script made true reported the scripts after it as already
+      # installed, and they never ran.
+      private def probe(item : StepItem) : InstallationStatus
+        return @probes.probe(item, @runner) unless @probes.answers_for_step?(item)
+
+        @batch.step_probe ||= @probes.probe(item, @runner)
       end
 
       # `confirm` items need explicit approval. Fluxion does not prompt for them
@@ -407,137 +482,9 @@ module Fluxion::Executor
       private enum PhaseOutcome
         Completed
         Failed
+        LogoutRequired
         Halted
         Cancelled
-      end
-    end
-
-    # Buffers state changes and writes them once.
-    #
-    # Writing per item would multiply a large profile's run by hundreds of
-    # fsyncs; buffering keeps the file consistent with what actually happened
-    # while touching the disk once. Nothing is recorded for a read-only run —
-    # a dry run that claimed work was done would make the next real run skip it.
-    private class Recorder
-      def initialize(@store : State::Store?, @options : RunOptions)
-        @document = nil.as(State::Document?)
-        @loaded = false
-        @dirty = false
-      end
-
-      def already_completed?(phase : Phase, fingerprint : String) : Bool
-        return false unless @options.mode.trusts_state?
-        document.try(&.phase_completed?(phase.name, fingerprint)) || false
-      end
-
-      # What a prior run recorded about this item, if anything.
-      #
-      # Nothing is answered from state unless the run mode trusts it: a
-      # `--reprobe` run must consult live probes only. The rule lives here, next
-      # to the state document it governs and beside the same check in
-      # `already_completed?`, rather than in the caller — a caller that forgot
-      # it would silently get state-trusting behaviour in every mode.
-      #
-      # Answered from the document the recorder already holds. The store's own
-      # lookup re-reads and re-parses the whole state file on every call, so
-      # asking it once per item made a run cost a file read and a JSON parse
-      # per package — the same mistake buffering the writes here avoids.
-      def recorded(item : StepItem) : InstallationStatus::InstalledFromState?
-        return unless @options.mode.trusts_state?
-
-        record = document.try(&.find(item.step_name, item.key, item.item_type.json_name))
-        return unless record
-
-        # A step whose work is decided by something outside its item keys — a
-        # delegated tool's config file, a shell script's inline body or remote
-        # sha256 pin, a packages step's pre-install actions — records a digest
-        # of that input, and is only still done while the digest still matches.
-        # That digest is the only thing Fluxion writes to `checksum`, so no new
-        # state field is needed; a state file that predates the digest, or one
-        # migrated from the Java implementation, reports something else and
-        # re-runs the item once.
-        expected = item.step.try(&.content_digest)
-        return if expected && record.checksum != expected
-
-        InstallationStatus::InstalledFromState.new(item.key, record.completed_at, record.version)
-      end
-
-      def item_succeeded(item : StepItem, result : StepResult::Success) : Nil
-        return unless recording?
-        document.try do |state|
-          state.record(State::ItemRecord.new(
-            profile: @options.profile_name,
-            step: item.step_name,
-            item_key: item.key,
-            item_type: item.item_type.json_name,
-            completed_at: Time.utc,
-            version: result.detected_version,
-            checksum: item.step.try(&.content_digest),
-          ))
-          @dirty = true
-        end
-      end
-
-      def phase_completed(phase : Phase, fingerprint : String) : Nil
-        record_phase(phase, PhaseStatus::Completed, fingerprint)
-      end
-
-      def phase_failed(phase : Phase, fingerprint : String) : Nil
-        record_phase(phase, PhaseStatus::Failed, fingerprint)
-      end
-
-      def resume_at(phase : String?) : Nil
-        return unless recording?
-        document.try do |state|
-          state.next_phase = phase
-          @dirty = true
-        end
-      end
-
-      def flush : Nil
-        return unless @dirty
-        store = @store
-        state = @document
-        return unless store && state
-        store.save(state)
-      rescue ExecutionError
-        # A run that installed everything correctly should not be reported as
-        # failed because the bookkeeping could not be written; the next run
-        # simply re-probes.
-      end
-
-      # Takes the enum rather than a string so the four recordable outcomes come
-      # from one place. `PhaseRecord` still stores the spelling, because the
-      # state file is a compatibility surface — the Java implementation's files
-      # are read directly — and its shape is not ours to change here.
-      private def record_phase(phase : Phase, status : PhaseStatus, fingerprint : String) : Nil
-        return unless recording?
-        document.try do |state|
-          state.record(State::PhaseRecord.new(phase.name, status.json_name, Time.utc, fingerprint))
-          @dirty = true
-        end
-      end
-
-      private def recording? : Bool
-        !@options.read_only? && !@store.nil?
-      end
-
-      # The state file, read at most once per run.
-      #
-      # The flag remembers that the attempt happened, not just that it
-      # succeeded: a state file that cannot be read leaves `@document` nil, and
-      # guarding on the document alone would send every later caller back to
-      # the store to re-read and re-parse the same unreadable file.
-      private def document : State::Document?
-        return @document if @loaded
-        @loaded = true
-        store = @store
-        return unless store
-        @document = store.load(@options.profile_name)
-      rescue ExecutionError
-        # An unreadable state file is not evidence about the host, so the run
-        # continues with live probes and simply records nothing.
-        nil
       end
     end
   end

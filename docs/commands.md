@@ -246,6 +246,15 @@ An item Fluxion could not check is reported as **unknown**, not missing.
 Absence of evidence is not evidence of absence, and reinstalling on that basis
 would be wrong.
 
+`status` answers from the host as it is now, never from what the last run
+recorded — `fluxion state show` prints that, phase outcomes included. An
+`assert` is answered by running its check, with the step's own shell and
+working directory, for at most 60 seconds: one that holds is **installed**
+(`check passes`), one that fails is **missing** with the profile's `message`
+as its detail, and one that runs out of time is **unknown**. So
+`status --failed` lists the guards that fail today and none of the ones that
+hold. `apply` does not probe an assert first; it runs it once, as the step.
+
 ## `diff`
 
 Only what differs from this host, grouped by what would happen.
@@ -381,7 +390,12 @@ fluxion state path
 fluxion state reset --force
 fluxion state forget --item git --step core-tools --type package
 fluxion state forget --phase base
+fluxion state forget workstation --item git   # a profile other than "default"
 ```
+
+Every `state` subcommand takes the profile name as its first argument and falls
+back to `default`; `forget` also accepts it as `--profile=NAME`, and refuses two
+different names or any further argument rather than acting on the wrong profile.
 
 `forget` refuses an ambiguous key rather than deleting several entries; qualify
 it with `--step` and `--type`.

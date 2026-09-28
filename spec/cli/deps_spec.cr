@@ -115,6 +115,52 @@ describe Fluxion::CLI::Deps do
       end
     end
 
+    it "exits 75 at a logout checkpoint, and 0 once the phase is recorded" do
+      pending! "apply refuses to run as root" if Fluxion::Host.root?
+
+      runner = Fluxion::Executor::FakeShellRunner.new
+      profile = ONE_COMMAND.sub("- name: base\n", "- name: base\n      restartPolicy:\n        type: prompt-logout\n")
+      profile.should contain("prompt-logout")
+
+      with_state do |store|
+        with_profile(profile) do |path|
+          first = invoke(["apply", "--no-tui", "-c", path],
+            Fluxion::CLI::Deps.new(runner: runner, store: store))
+          first.exit_code.should eq(Fluxion::CLI::ExitCode::Paused)
+          first.stdout.should contain("Restart required")
+
+          second = invoke(["apply", "--no-tui", "--skip-already-installed", "-c", path],
+            Fluxion::CLI::Deps.new(runner: runner, store: store))
+          second.exit_code.should eq(Fluxion::CLI::ExitCode::Success)
+          second.stdout.should_not contain("Restart required")
+        end
+      end
+    end
+
+    it "exits 0, not 75, when a logout phase holding an assert has nothing left to run" do
+      pending! "apply refuses to run as root" if Fluxion::Host.root?
+
+      runner = Fluxion::Executor::FakeShellRunner.new
+      profile = ONE_COMMAND
+        .sub("- name: base\n", "- name: base\n      restartPolicy:\n        type: prompt-logout\n")
+        .+("\n        - name: guard\n          kind: assert\n          spec:\n            command: \"test -n ok\"\n")
+      profile.should contain("kind: assert")
+
+      with_state do |store|
+        with_profile(profile) do |path|
+          first = invoke(["apply", "--no-tui", "-c", path],
+            Fluxion::CLI::Deps.new(runner: runner, store: store))
+          first.exit_code.should eq(Fluxion::CLI::ExitCode::Paused)
+
+          second = invoke(["apply", "--no-tui", "--skip-already-installed", "-c", path],
+            Fluxion::CLI::Deps.new(runner: runner, store: store))
+          second.exit_code.should eq(Fluxion::CLI::ExitCode::Success)
+          second.stdout.should_not contain("Restart required")
+          runner.ran?("test -n ok").should be_true
+        end
+      end
+    end
+
     it "records what it ran into the injected store" do
       # `apply` refuses to run as root — a run that mutates the host as root
       # cannot drop back to the user's account for the steps that must not be

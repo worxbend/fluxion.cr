@@ -75,6 +75,11 @@ A completed phase is skipped only while its fingerprint still matches, so
 editing a package list makes the phase run again rather than being silently
 considered done.
 
+An `assert` is never recorded, and a phase that holds one is never skipped
+whole: a check answers for the host as it is now, so a pass on an earlier run
+proves nothing about this one. The rest of that phase is still skipped item by
+item.
+
 ### `registry` — profiles shared through a git repository
 
 Reads a manifest out of a git clone and installs the profiles it names. It sits

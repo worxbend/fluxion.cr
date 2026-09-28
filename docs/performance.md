@@ -38,6 +38,16 @@ run (the skip decisions it makes to find them are remembered, so nothing is
 probed twice). On failure it falls back to one process per package, which keeps
 the isolation a bad package name needs. Cargo and flatpak do not batch.
 
+## A held package lock is waited out
+
+When another process holds the package manager's lock (`unattended-upgrades`
+on a fresh Ubuntu install, a second terminal's `apt-get`), apt, zypper, pacman
+and snap refuse at once rather than wait. Fluxion runs such a command again
+after a pause that grows from 5 s to 30 s, for up to 15 minutes per episode of
+contention across the whole run, and Ctrl-C stops the wait. Only the commands
+Fluxion builds for a package manager are retried, and only on that manager's
+own lock message; a profile's own shell commands are never run twice.
+
 ## Probes are subprocesses, so they run concurrently
 
 A probe asks a package manager whether one item is installed. It spends nearly

@@ -257,11 +257,17 @@ module Fluxion::Executor
 
     # dotbot's own dry run, so the preview is its per-link plan rather than an
     # opaque command string. Same flag spelling as the run: the preview used
-    # `-c` where `execute` uses `--config`, and took its executable from a
+    # `-c` where `execute` used `--config`, and took its executable from a
     # `dotbotBinary` field the run ignored — so the two could name a
     # different program with a different flag.
+    #
+    # The flag is `--config-file`. dotbot-go has no `--config` (it answers
+    # "unknown flag: --config" and exits 1), so every dotbot step failed, in
+    # a preview and a run alike. No `--base-directory` is passed: dotbot-go
+    # resolves link sources from the config file's own directory, as Python
+    # dotbot does.
     protected def argv(step : Step, executable : String, preview : Bool) : Array(String)
-      argv = [executable, "--config", step.as(DotbotStep).config]
+      argv = [executable, "--config-file", step.as(DotbotStep).config]
       argv << "--dry-run" if preview
       argv
     end

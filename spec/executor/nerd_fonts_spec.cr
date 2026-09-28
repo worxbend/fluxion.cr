@@ -62,6 +62,17 @@ describe Fluxion::Executor::DotbotExecutor do
     executor = Fluxion::Executor::DotbotExecutor.new
     argv = executor.commands(step, executor.items(step).first).first.preview
 
-    argv.should eq(["dotbot", "--config", "/tmp/install.conf.yaml", "--dry-run"])
+    argv.should eq(["dotbot", "--config-file", "/tmp/install.conf.yaml", "--dry-run"])
+  end
+
+  it "spells the config flag the way dotbot-go does" do
+    # dotbot-go has `-c, --config-file` and no `--config`: it answered
+    # "unknown flag: --config" and every dotbot step failed.
+    step = Fluxion::DotbotStep.new("dots", "/tmp/install.conf.yaml")
+    executor = Fluxion::Executor::DotbotExecutor.new
+    argv = executor.commands(step, executor.items(step).first).first.preview
+
+    argv.should_not contain("--config")
+    argv[argv.index!("--config-file") + 1].should eq("/tmp/install.conf.yaml")
   end
 end

@@ -24,6 +24,7 @@ module Fluxion::Executor
       @executors : ExecutorRegistry = ExecutorRegistry.default,
       @probes : ProbeRegistry = ProbeRegistry.default,
       @state : State::Store? = nil,
+      @lock_pause : (Time::Span -> Nil)? = nil,
     )
     end
 
@@ -32,7 +33,10 @@ module Fluxion::Executor
       phases = select_phases(profile, options)
       recorder = Recorder.new(@state, options)
 
-      Traversal.new(@runner, @executors, @probes, options, listener, cancellation, recorder)
+      # Every package manager command of the run waits out a lock another
+      # process holds instead of failing on it; see `LockWaitingRunner`.
+      runner = LockWaitingRunner.new(@runner, cancellation, pause: @lock_pause)
+      Traversal.new(runner, @executors, @probes, options, listener, cancellation, recorder)
         .walk(profile, phases)
     end
 

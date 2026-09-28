@@ -11,7 +11,7 @@ module Fluxion::Executor
   # ran `sdk install` for each one again.
   class SdkmanProbe < Probe
     def supports?(item : StepItem) : Bool
-      item.item_type.sdkman_package?
+      item.item_type.sdkman_package? && !configured_check?(item)
     end
 
     def probe(item : StepItem, runner : ShellRunner) : InstallationStatus

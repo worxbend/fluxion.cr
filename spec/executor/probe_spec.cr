@@ -787,6 +787,44 @@ describe "tool-packages probe" do
   end
 end
 
+# The typed probes 0.4.0 added took over kinds a `probeCommand` used to answer
+# alone, and registered ahead of it they overrode it: a crate whose installed
+# name differs from the profile's (`helix` recorded as `helix-term`) read as
+# missing on every run, and the profile's own check could no longer say
+# otherwise.
+describe "a declared probeCommand over the typed probes" do
+  registry = Fluxion::Executor::ProbeRegistry.default
+  check = "command -v hx"
+
+  it "answers for a cargo tool-packages step" do
+    runner = Fluxion::Executor::FakeShellRunner.new.available("cargo")
+    item = tool_package_item("helix", Fluxion::ToolBackend::Cargo, probe_command: check)
+
+    registry.probe(item, runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    runner.ran?(check).should be_true
+    runner.ran?("--list").should be_false
+  end
+
+  it "answers for an sdkman-packages step" do
+    step = Fluxion::SdkmanPackagesStep.new("sdkman-candidates",
+      [Fluxion::SdkmanCandidate.new("java", nil)], probe_command: check)
+    item = Fluxion::StepItem.new("sdkman-candidates", "java", Fluxion::ItemType::SdkmanPackage, "java", step: step)
+    runner = Fluxion::Executor::FakeShellRunner.new
+
+    registry.probe(item, runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    runner.ran?(check).should be_true
+  end
+
+  it "answers for a system-setting step" do
+    step = Fluxion::SystemSettingStep.new("clock", ntp: true, probe_command: check)
+    runner = Fluxion::Executor::FakeShellRunner.new
+
+    registry.probe(setting_item("ntp", step), runner).should be_a(Fluxion::InstallationStatus::InstalledByProbe)
+    runner.ran?(check).should be_true
+    runner.ran?("timedatectl").should be_false
+  end
+end
+
 private def sdkman_item(candidate : String, version : String? = nil) : Fluxion::StepItem
   entry = Fluxion::SdkmanCandidate.new(candidate, version)
   step = Fluxion::SdkmanPackagesStep.new("sdkman-candidates", [entry])

@@ -65,13 +65,14 @@ module Fluxion::Executor
   # `cargo-packages`. Without this every crate was unknown to `status`, and
   # `--re-probe` ran every install again.
   #
-  # The other backends are not claimed, so a step's `probeCommand` still
-  # answers for them.
+  # The other backends are not claimed, and neither is a step that declares a
+  # `probeCommand` (see `Probe#configured_check?`), so the profile's own check
+  # still answers for those.
   class ToolPackageProbe < Probe
     BACKENDS = [ToolBackend::Cargo, ToolBackend::CargoBinstall]
 
     def supports?(item : StepItem) : Bool
-      item.item_type.tool_package? && !package(item).nil?
+      item.item_type.tool_package? && !configured_check?(item) && !package(item).nil?
     end
 
     def probe(item : StepItem, runner : ShellRunner) : InstallationStatus

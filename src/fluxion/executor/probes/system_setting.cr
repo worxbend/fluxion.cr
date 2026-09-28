@@ -7,7 +7,7 @@ module Fluxion::Executor
   # is readable by any user.
   class SystemSettingProbe < Probe
     def supports?(item : StepItem) : Bool
-      item.item_type.system_setting?
+      item.item_type.system_setting? && !configured_check?(item)
     end
 
     def probe(item : StepItem, runner : ShellRunner) : InstallationStatus

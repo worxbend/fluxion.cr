@@ -186,6 +186,43 @@ describe Fluxion::Executor::Sudo do
       Fluxion::Executor::Sudo.resolve("../../tmp/evil")
     end
   end
+
+  it "refuses a path that escapes a system directory lexically" do
+    expect_raises(Fluxion::ExecutionError, /trusted root-owned system executable/) do
+      Fluxion::Executor::Sudo.resolve("/usr/bin/../../tmp/evil")
+    end
+  end
+
+  it "resolves a system executable to its real path" do
+    pending! "no trusted sudo on this host" unless Fluxion::Executor::Sudo.available?
+
+    resolved = Fluxion::Executor::Sudo.resolve("sudo")
+    resolved.should eq(File.realpath(resolved))
+    File.info(resolved).owner_id.should eq("0")
+  end
+
+  it "trusts a root-owned system entry that links into another root-owned tree" do
+    # Ubuntu 26.04 ships coreutils this way: `/usr/bin/install` is a symlink to
+    # `/usr/lib/cargo/bin/coreutils/install`. The entry is in a system
+    # directory; the file it leads to is not.
+    # Same lookup order as `resolve`: the first system directory holding a name wins.
+    entries = {} of String => String
+    Fluxion::Executor::Sudo::SYSTEM_DIRECTORIES.each do |directory|
+      next unless Dir.exists?(directory)
+      Dir.each_child(directory) { |name| entries[name] ||= File.join(directory, name) }
+    end
+    linked = entries.find do |_, path|
+      real = File.realpath(path) rescue next
+      next if Fluxion::Executor::Sudo::SYSTEM_DIRECTORIES.includes?(File.dirname(real))
+      File.info(real).owner_id == "0"
+    end
+    pending! "no system executable links out of the system directories on this host" unless linked
+
+    name, path = linked
+    resolved = Fluxion::Executor::Sudo.resolve(name)
+    resolved.should eq(File.realpath(path))
+    Fluxion::Executor::Sudo::SYSTEM_DIRECTORIES.includes?(File.dirname(resolved)).should be_false
+  end
 end
 
 describe Fluxion::Executor::FakeShellRunner do

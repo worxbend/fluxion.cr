@@ -93,13 +93,18 @@ module Fluxion::Executor
 
     # Resolves an executable to a real path Fluxion is willing to run as root.
     #
-    # Refuses anything outside the system directories, anything not owned by
-    # root, and anything group- or other-writable — including every directory
-    # on the way to it, since a writable parent means the file can be swapped.
+    # The name must be an entry of a system directory. That entry may be a
+    # symlink into another tree (Ubuntu 26.04 ships coreutils as
+    # `/usr/bin/install -> ../lib/cargo/bin/coreutils/install`), so trust is
+    # judged on what it leads to: a regular file owned by root that neither
+    # group nor others can write, under directories that are all the same,
+    # since a writable parent means the file can be swapped. The entry itself
+    # and the directories above it must be root-owned too, or the link could
+    # be re-pointed.
     def resolve(name : String) : String
       if name.starts_with?('/')
-        real = real_path(name)
-        return real if real && trusted?(real)
+        found = trusted_entry(Path[name].normalize.to_s)
+        return found if found
         raise ExecutionError.new("#{name} is not a trusted root-owned system executable")
       end
 
@@ -112,10 +117,25 @@ module Fluxion::Executor
       return if name.empty? || name.includes?('/') || name == "." || name == ".."
 
       SYSTEM_DIRECTORIES.each do |directory|
-        candidate = real_path(File.join(directory, name))
-        return candidate if candidate && trusted?(candidate)
+        candidate = trusted_entry(File.join(directory, name))
+        return candidate if candidate
       end
       nil
+    end
+
+    # The real path behind `path` when `path` is a root-owned entry of a system
+    # directory leading to a trusted file; nil otherwise.
+    private def trusted_entry(path : String) : String?
+      directory = File.dirname(path)
+      return unless SYSTEM_DIRECTORIES.includes?(directory)
+      return unless secure_ancestors?(directory)
+
+      entry = File.info?(path, follow_symlinks: false)
+      # A symlink's own mode bits mean nothing on Linux; its owner does.
+      return unless entry && entry.owner_id == "0"
+
+      real = real_path(path)
+      real if real && trusted?(real)
     end
 
     private def real_path(path : String) : String?
@@ -127,12 +147,13 @@ module Fluxion::Executor
     private def trusted?(path : String) : Bool
       info = File.info?(path)
       return false unless info && info.file?
-      return false unless SYSTEM_DIRECTORIES.includes?(File.dirname(path))
       return false unless secure_entry?(info)
+      secure_ancestors?(File.dirname(path))
+    end
 
-      # Walk back to the root: a writable ancestor is as good as a writable
-      # file, because the whole subtree can be replaced.
-      directory = File.dirname(path)
+    # Walks from `directory` back to the root: a writable ancestor is as good
+    # as a writable file, because the whole subtree can be replaced.
+    private def secure_ancestors?(directory : String) : Bool
       while directory != "/"
         parent = File.info?(directory)
         return false unless parent && parent.directory? && secure_entry?(parent)

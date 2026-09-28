@@ -98,6 +98,13 @@ module Fluxion::State
     @[JSON::Field(key: "nextPhase")]
     property next_phase : String?
 
+    # Prompt-logout phases that changed the host on a run that stopped before
+    # the phase finished, so the logout is still to be asked for. Optional in
+    # the file: older readers ignore it and older files lack it, so it needs no
+    # schema bump.
+    @[JSON::Field(key: "pendingLogout")]
+    property pending_logout : Array(String) = [] of String
+
     def initialize(@profile_name : String,
                    @schema_version : Int32 = SCHEMA_VERSION,
                    @last_run_at : Time = Time.utc,
@@ -144,11 +151,12 @@ module Fluxion::State
     def forget_phase(name : String) : Bool
       before = @phases.size
       @phases.reject! { |phase| phase.phase == name }
-      before != @phases.size
+      owed = !@pending_logout.delete(name).nil?
+      before != @phases.size || owed
     end
 
     def any_recorded? : Bool
-      !@items.empty? || !@phases.empty? || !@next_phase.nil?
+      !@items.empty? || !@phases.empty? || !@next_phase.nil? || !@pending_logout.empty?
     end
   end
 

@@ -262,6 +262,80 @@ describe Fluxion::Executor::Orchestrator do
     end
   end
 
+  describe "a logout a stopped run still owes" do
+    # A phase that added the user to a group and then failed on a later item
+    # asked for nothing. Once that item was fixed by hand, the next run skipped
+    # every item, so it asked for nothing either, though the group change still
+    # needed a logout to take effect.
+    it "is asked for by the run that completes the phase" do
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+      logout = Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run.")
+
+      begin
+        failing = Fluxion::Executor::FakeShellRunner.new.on("broken", 1)
+        first = profile([phase("session",
+          [packages("groups", "zsh"), packages("extras", "broken")] of Fluxion::Step, restart: logout)])
+        summary, listener, _ = run(first, failing, store: store)
+
+        summary.failed_phases.should eq(["session"])
+        listener.events.any?(&.kind.restart_required?).should be_false
+        store.load("default").pending_logout.should eq(["session"])
+
+        # The user fixed the failing item by hand and dropped it.
+        fixed = profile([phase("session", [packages("groups", "zsh")] of Fluxion::Step, restart: logout)])
+        skipping = Fluxion::Executor::RunOptions.new(mode: Fluxion::Executor::RunMode::SkipInstalled)
+        summary, listener, second = run(fixed, options: skipping, store: store)
+
+        second.ran?("install -y zsh").should be_false
+        listener.events.any?(&.kind.restart_required?).should be_true
+        summary.logout_required?.should be_true
+        store.load("default").pending_logout.should be_empty
+
+        # Asked once: the run after the logout finds the phase done.
+        summary, listener, _ = run(fixed, options: skipping, store: store)
+        listener.events.any?(&.kind.restart_required?).should be_false
+        summary.logout_required?.should be_false
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "is owed by a phase the user cancelled after it changed the host" do
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        cancellation = Fluxion::CancellationSignal.new
+        runner = CancellingRunner.new("install -y zsh", cancellation)
+        subject = profile([phase("session",
+          [packages("groups", "zsh"), packages("extras", "curl")] of Fluxion::Step,
+          restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run."))])
+        run(subject, runner, store: store, cancellation: cancellation)
+
+        store.load("default").pending_logout.should eq(["session"])
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+
+    it "is not owed by a phase that failed before changing anything" do
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        failing = Fluxion::Executor::FakeShellRunner.new.on("broken", 1)
+        subject = profile([phase("session", [packages("extras", "broken")] of Fluxion::Step,
+          restart: Fluxion::RestartPolicy::PromptLogout.new("Log out, then re-run."))])
+        run(subject, failing, store: store)
+
+        store.load("default").pending_logout.should be_empty
+      ensure
+        FileUtils.rm_rf(directory)
+      end
+    end
+  end
+
   describe "a logout phase that ran nothing" do
     # A phase that ran nothing has nothing for the user to log out of, so it
     # neither asks nor stops the run; it is still recorded as completed.
@@ -429,6 +503,31 @@ describe Fluxion::Executor::Orchestrator do
       runner.argv.should eq([["sudo", "apt-get", "install", "-y", "git", "curl", "jq"]])
       summary.succeeded.should eq(0)
       summary.next_phase.should eq("base")
+    end
+
+    it "reports and records every package of a batch that finished as the user cancelled" do
+      # Ctrl-C landed while `apt-get install` was finishing and it still exited
+      # 0. The loop stopped at its cancellation check before reaching curl and
+      # jq, so they were installed but never reported, counted or recorded.
+      directory = File.tempname("fluxion-state")
+      store = Fluxion::State::Store.new(directory)
+
+      begin
+        cancellation = Fluxion::CancellationSignal.new
+        runner = CancellingRunner.new("install -y git curl jq", cancellation)
+        step = Fluxion::PackagesStep.new("tools", Fluxion::PackageManager::Apt, %w[git curl jq])
+        summary, listener, _ = run(profile([phase("base", [step] of Fluxion::Step)]), runner,
+          store: store, cancellation: cancellation)
+
+        runner.argv.should eq([["sudo", "apt-get", "install", "-y", "git", "curl", "jq"]])
+        summary.succeeded.should eq(3)
+        listener.results.map(&.item).should eq(%w[git curl jq])
+        document = store.load("default")
+        %w[git curl jq].each { |name| document.find("tools", name, "package").should_not be_nil }
+        summary.next_phase.should eq("base")
+      ensure
+        FileUtils.rm_rf(directory)
+      end
     end
 
     it "leaves out what a probe says is already installed" do

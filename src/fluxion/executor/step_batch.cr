@@ -63,6 +63,23 @@ module Fluxion::Executor
         StepResult::Failure.new(item.key, "cancelled", 130)
       end
 
+      # Reports the items of `rest` that a batch already installed, when the
+      # step stops before reaching them.
+      #
+      # A batch member is only reported, counted and recorded when the item
+      # loop gets to it. A step that stopped first — the user pressed Ctrl-C
+      # while `apt-get install a b c` was finishing and it still exited 0, or
+      # an item between the members failed — left `b` and `c` installed but
+      # absent from the run summary and from state, so the next
+      # `--skip-already-installed` run had to probe them again. Nothing is run
+      # here: a covered item only reports what the batch did.
+      private def settle_covered(step : Step, executor : StepExecutor, rest : Array(StepItem)) : Nil
+        rest.each do |item|
+          next unless @batch.covers?(item)
+          record(step, item, run_item(step, item, executor, [] of StepItem))
+        end
+      end
+
       # What the step being run has decided about batching.
       private class StepBatch
         # Skip decisions already made, by item key; nil means "run it".

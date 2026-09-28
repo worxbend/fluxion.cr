@@ -205,6 +205,12 @@ or from state when the phase holds an assert and so is never skipped whole) or
 that only re-checked asserts. Such a phase is recorded as completed and the run
 carries on to the next one. A malformed policy is still reported.
 
+A `prompt-logout` phase that changed the host and then failed or was stopped
+before its end still owes that logout. The state file remembers it
+(`pendingLogout`), so the run that later completes the phase asks for it even
+when every item is skipped by then, and asks once. `state forget --phase NAME`
+drops the debt along with the phase.
+
 ---
 
 ## Steps
@@ -250,7 +256,12 @@ order — even if an earlier item's work would make it succeed by the time a
 later one is reached. A step whose later items must be judged on what its
 earlier items left behind is two steps, each with its own `probeCommand`. A
 typed probe (packages, repositories, git config and the like) still answers
-for its own item, and takes precedence over a `probeCommand`.
+for its own item, and takes precedence over a `probeCommand`. The exceptions
+are `tool-packages` on the cargo backends, `sdkman-packages` and
+`system-setting`: their typed probes are newer than the `probeCommand` many
+profiles already wrote for them, so a declared `probeCommand` answers for those
+instead, for example when a crate installs under another name than the one the
+profile lists.
 
 Control kinds may carry nothing but a name: they describe an interaction rather
 than an installation, so `spec` is optional for them and required for everything

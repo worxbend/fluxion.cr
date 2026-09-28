@@ -1,6 +1,7 @@
 module Fluxion::Executor
-  # The state bookkeeping an `Orchestrator` run writes through. Kept apart from
-  # orchestrator.cr so the traversal itself reads in one sitting.
+  # The state bookkeeping an `Orchestrator` run writes through, and the
+  # traversal methods that feed it. Kept apart from orchestrator.cr so the
+  # traversal itself reads in one sitting.
   class Orchestrator
     # Buffers state changes and writes them once.
     #
@@ -8,6 +9,40 @@ module Fluxion::Executor
     # fsyncs; buffering keeps the file consistent with what actually happened
     # while touching the disk once. Nothing is recorded for a read-only run —
     # a dry run that claimed work was done would make the next real run skip it.
+    private class Traversal
+      # One item's outcome, into the summary, the state and the logout rule.
+      private def record(step : Step, item : StepItem, result : StepResult) : Nil
+        @summary.record(result)
+        @recorder.item_succeeded(item, result) if result.is_a?(StepResult::Success)
+        @phase_changed_host ||= changes_host?(step, result)
+      end
+
+      # Whether this result did (or, in a preview, would do) work a logout
+      # could be needed for. A check changes nothing, so an assert does not
+      # count however it ends.
+      private def changes_host?(step : Step, result : StepResult) : Bool
+        return false if step.rechecked_every_run?
+        result.is_a?(StepResult::Success) || result.is_a?(StepResult::DryRun)
+      end
+
+      # Carries a prompt-logout phase's owed logout across runs.
+      #
+      # `@phase_changed_host` only sees this run. A phase that added the user
+      # to `docker`, then failed on a later item or was interrupted, asked for
+      # nothing; once the user fixed that item and ran again, every item was
+      # skipped, so no logout was asked for either, though the group change
+      # still needed one. The debt is written to state until a run asks.
+      private def settle_logout(phase : Phase, outcome : PhaseOutcome) : Nil
+        return unless phase.restart_policy.is_a?(RestartPolicy::PromptLogout)
+
+        if outcome.logout_required?
+          @recorder.logout_requested(phase)
+        elsif @phase_changed_host && !outcome.completed?
+          @recorder.owe_logout(phase)
+        end
+      end
+    end
+
     private class Recorder
       def initialize(@store : State::Store?, @options : RunOptions)
         @document = nil.as(State::Document?)
@@ -17,9 +52,11 @@ module Fluxion::Executor
 
       # A phase holding an assert is never skipped whole: the assert has to run
       # on this apply, and the rest of the phase is still skipped item by item.
+      # Nor is one that still owes a logout, or the logout would never be asked.
       def already_completed?(phase : Phase, fingerprint : String) : Bool
         return false unless @options.mode.trusts_state?
         return false if phase.rechecked_every_run?
+        return false if logout_owed?(phase)
         document.try(&.phase_completed?(phase.name, fingerprint)) || false
       end
 
@@ -82,6 +119,29 @@ module Fluxion::Executor
 
       def phase_failed(phase : Phase, fingerprint : String) : Nil
         record_phase(phase, PhaseStatus::Failed, fingerprint)
+      end
+
+      # Whether an earlier run changed the host in this prompt-logout phase and
+      # stopped before the phase finished, so the logout was never asked for.
+      # Read in every mode: it is a fact about a request, not about the host.
+      def logout_owed?(phase : Phase) : Bool
+        document.try(&.pending_logout.includes?(phase.name)) || false
+      end
+
+      def owe_logout(phase : Phase) : Nil
+        return unless recording?
+        document.try do |state|
+          next if state.pending_logout.includes?(phase.name)
+          state.pending_logout << phase.name
+          @dirty = true
+        end
+      end
+
+      def logout_requested(phase : Phase) : Nil
+        return unless recording?
+        document.try do |state|
+          @dirty = true if state.pending_logout.delete(phase.name)
+        end
       end
 
       def resume_at(phase : String?) : Nil

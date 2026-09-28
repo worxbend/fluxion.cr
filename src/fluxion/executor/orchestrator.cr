@@ -138,7 +138,9 @@ module Fluxion::Executor
             next
           end
 
-          case run_phase(phase)
+          outcome = run_phase(phase)
+          settle_logout(phase, outcome)
+          case outcome
           in PhaseOutcome::Completed
             @recorder.phase_completed(phase, fingerprint)
             next
@@ -255,8 +257,10 @@ module Fluxion::Executor
         # used to ask anyway, so `--re-probe` (which never skips a phase whole)
         # and any phase holding an assert (never skipped whole either) stopped
         # at the checkpoint with exit 75 on every run of a converged host.
+        # Unless an earlier run changed the host and stopped before the end of
+        # the phase: that logout is still owed (see `settle_logout`).
         policy = phase.restart_policy
-        if policy.is_a?(RestartPolicy::PromptLogout) && @phase_changed_host
+        if policy.is_a?(RestartPolicy::PromptLogout) && (@phase_changed_host || @recorder.logout_owed?(phase))
           @listener.on_event(ExecutionEvent.restart_required(phase.name, policy.message))
           return PhaseOutcome::LogoutRequired
         end
@@ -291,30 +295,25 @@ module Fluxion::Executor
 
         begin
           items.each_with_index do |item, index|
-            break if @cancellation.cancelled?
+            if @cancellation.cancelled?
+              settle_covered(step, executor, items[index..])
+              break
+            end
 
             result = run_item(step, item, executor, items[(index + 1)..])
-            @summary.record(result)
-            @recorder.item_succeeded(item, result) if result.is_a?(StepResult::Success)
-            @phase_changed_host ||= changes_host?(step, result)
+            record(step, item, result)
             next unless result.is_a?(StepResult::Failure)
 
             any_failed = true
-            break unless step.continue_on_error?
+            next if step.continue_on_error?
+            settle_covered(step, executor, items[(index + 1)..])
+            break
           end
         ensure
           @listener.on_event(ExecutionEvent.step_completed(step.name))
         end
 
         any_failed
-      end
-
-      # Whether this result did (or, in a preview, would do) work a logout
-      # could be needed for. A check changes nothing, so an assert does not
-      # count however it ends.
-      private def changes_host?(step : Step, result : StepResult) : Bool
-        return false if step.rechecked_every_run?
-        result.is_a?(StepResult::Success) || result.is_a?(StepResult::DryRun)
       end
 
       # `later` is the rest of the step's items, which a batch may take on.

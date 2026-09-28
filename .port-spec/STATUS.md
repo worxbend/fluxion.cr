@@ -105,6 +105,16 @@ combined checksum file.
   or were only asserts completes like any other and the run carries on
   (d699c4a). The Java version emitted `restartRequired` after every completed
   prompt-logout phase and stopped with exit 0.
+- **owed logout** (`executor.md`, phase finish; state schema). A prompt-logout
+  phase that changed the host and then failed or was cancelled is listed under
+  `pendingLogout` in the state file, still schema 8 because the field is
+  optional. The run that completes the phase asks for the logout even when
+  every item is skipped by then, and clears the entry; a phase that owes one
+  is never skipped whole. The Java version had no such record.
+- **probeCommand over new typed probes** (`executor.md`, probe table). The
+  cargo `tool-packages`, `sdkman-packages` and `system-setting` probes step
+  aside for a step that declares `probeCommand`, which answered for those
+  kinds alone before they existed.
 - **binstaller pin** (`core-domain.md`, tool pins). binstaller is pinned to
   v0.5.0, not v0.2.0: v0.2.0 aborts on GNU `@LongLink` tar headers, which
   current zig releases carry (8065313).

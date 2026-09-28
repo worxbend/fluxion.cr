@@ -23,6 +23,21 @@ module Fluxion::Executor
     def answers_for_step? : Bool
       false
     end
+
+    # Whether the item's step declares its own `probeCommand`.
+    #
+    # The typed probes for `tool-packages`, `sdkman-packages` and
+    # `system-setting` arrived in 0.4.0. Until then a `probeCommand` was the
+    # only answer those kinds had, and it is the escape hatch for the cases a typed
+    # probe reads wrongly: a crate whose installed name differs from the
+    # profile's (`helix` recorded as `helix-term`), a candidate under a custom
+    # SDKMAN layout. Registered ahead of `ConfiguredProbeCommand` and claiming
+    # every item, they silently overrode it — the same shadowing that got
+    # NerdFontProbe removed — so a probe reported missing on every run could no
+    # longer be corrected from the profile. Those probes step aside for it.
+    private def configured_check?(item : StepItem) : Bool
+      !item.step.try(&.probe_command).nil?
+    end
   end
 
   # Picks the first probe that handles an item.

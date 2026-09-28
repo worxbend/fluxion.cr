@@ -149,6 +149,38 @@ describe Fluxion::State::Store do
         document.forget_phase("base").should be_false
       end
     end
+
+    it "removes the logout a phase still owes" do
+      with_store do |store|
+        document = store.load("default")
+        document.pending_logout << "session"
+
+        document.forget_phase("session").should be_true
+        document.pending_logout.should be_empty
+      end
+    end
+  end
+
+  describe "a logout still owed" do
+    it "round-trips" do
+      with_store do |store|
+        document = store.load("default")
+        document.pending_logout << "session"
+        store.save(document)
+
+        loaded = store.load("default")
+        loaded.pending_logout.should eq(["session"])
+        loaded.any_recorded?.should be_true
+      end
+    end
+
+    it "reads as none from a file written before it existed" do
+      with_store do |store|
+        body = %({"schemaVersion":8,"profileName":"default","lastRunAt":"2026-09-01T00:00:00Z",) +
+               %("fluxionVersion":"0.4.0","items":[],"phases":[]})
+        store.parse(body, "default").pending_logout.should be_empty
+      end
+    end
   end
 
   describe "migration from the Java implementation" do
